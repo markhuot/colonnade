@@ -1,3 +1,4 @@
+import AppKit
 import OSLog
 import SwiftUI
 
@@ -399,9 +400,20 @@ private struct SessionHeaderView: View {
 private struct SessionTimelineView: View {
     @EnvironmentObject private var appState: OpenCodeAppState
 
+    @State private var scrollMetrics = TimelineScrollMetrics.zero
+    @State private var isPinnedToBottom = true
+    @State private var autoScrollTask: Task<Void, Never>?
+    @State private var programmaticScroll: ProgrammaticTimelineScroll?
+
     let sessionID: String
     let messages: [MessageEnvelope]
     let questions: [QuestionRequest]
+
+    private let autoFollowThreshold: CGFloat = 36
+
+    private var contentSignature: TimelineContentSignature {
+        TimelineContentSignature(messages: messages, questions: questions)
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -425,26 +437,35 @@ private struct SessionTimelineView: View {
                         .id(bottomAnchorID)
                 }
                 .padding(18)
+                .background(
+                    TimelineScrollObserver { metrics in
+                        handleScrollMetricsChange(metrics)
+                    }
+                )
             }
             .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))
-            .onChange(of: messages.count) { _, _ in
-                if let last = messages.last {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
-                }
+            .onAppear {
+                requestScroll(to: .bottom, with: proxy, animated: false)
+            }
+            .onChange(of: contentSignature) { oldValue, newValue in
+                guard shouldAutoFollow(for: oldValue, newValue) else { return }
+                let animated = oldValue.messageCount < newValue.messageCount
+                    || oldValue.questionCount < newValue.questionCount
+                scheduleAutoFollow(with: proxy, animated: animated)
             }
             .onChange(of: appState.focusedSessionScrollRequest) { _, request in
                 guard let request, request.sessionID == sessionID else { return }
 
-                withAnimation(.easeOut(duration: 0.2)) {
-                    switch request.direction {
-                    case .top:
-                        proxy.scrollTo(topAnchorID, anchor: .top)
-                    case .bottom:
-                        proxy.scrollTo(bottomAnchorID, anchor: .bottom)
-                    }
+                switch request.direction {
+                case .top:
+                    requestScroll(to: .top, with: proxy, animated: true)
+                case .bottom:
+                    requestScroll(to: .bottom, with: proxy, animated: true)
                 }
+            }
+            .onDisappear {
+                autoScrollTask?.cancel()
+                autoScrollTask = nil
             }
         }
     }
@@ -457,9 +478,254 @@ private struct SessionTimelineView: View {
         "session-timeline-bottom-\(sessionID)"
     }
 
+    private func shouldAutoFollow(for oldValue: TimelineContentSignature?, _ newValue: TimelineContentSignature) -> Bool {
+        guard oldValue != nil else { return false }
+        return isPinnedToBottom
+    }
+
+    private func scheduleAutoFollow(with proxy: ScrollViewProxy, animated: Bool) {
+        autoScrollTask?.cancel()
+        autoScrollTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(animated ? 30 : 80))
+            requestScroll(to: .bottom, with: proxy, animated: animated)
+        }
+    }
+
+    private func requestScroll(to target: TimelineScrollTarget, with proxy: ScrollViewProxy, animated: Bool) {
+        let request = ProgrammaticTimelineScroll(target: target)
+        programmaticScroll = request
+
+        let action = {
+            switch target {
+            case .top:
+                proxy.scrollTo(topAnchorID, anchor: .top)
+            case .bottom:
+                proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+            }
+        }
+
+        if animated {
+            withAnimation(.easeOut(duration: 0.2)) {
+                action()
+            }
+        } else {
+            action()
+        }
+
+        if target == .bottom {
+            isPinnedToBottom = true
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            if programmaticScroll == request {
+                programmaticScroll = nil
+                isPinnedToBottom = scrollMetrics.distanceToBottom <= autoFollowThreshold
+            }
+        }
+    }
+
+    private func handleScrollMetricsChange(_ metrics: TimelineScrollMetrics) {
+        let previous = scrollMetrics
+        scrollMetrics = metrics
+
+        let nearBottom = metrics.distanceToBottom <= autoFollowThreshold
+        let contentHeightChanged = abs(metrics.contentHeight - previous.contentHeight) > 1
+        let viewportHeightChanged = abs(metrics.viewportHeight - previous.viewportHeight) > 1
+        let userDrivenOffsetChange = abs(metrics.verticalOffset - previous.verticalOffset) > 1 && !contentHeightChanged
+
+        if let request = programmaticScroll {
+            if request.target == .bottom, nearBottom {
+                isPinnedToBottom = true
+                programmaticScroll = nil
+            }
+            return
+        }
+
+        if userDrivenOffsetChange || viewportHeightChanged {
+            isPinnedToBottom = nearBottom
+            return
+        }
+
+        if contentHeightChanged, isPinnedToBottom {
+            return
+        }
+
+        isPinnedToBottom = nearBottom
+    }
+
     private func shouldShowTimestamp(for index: Int) -> Bool {
         guard index > 0 else { return true }
         return messages[index].createdAt.timeIntervalSince(messages[index - 1].createdAt) > 300
+    }
+}
+
+private enum TimelineScrollTarget: Equatable {
+    case top
+    case bottom
+}
+
+private struct ProgrammaticTimelineScroll: Equatable {
+    let id = UUID()
+    let target: TimelineScrollTarget
+}
+
+private struct TimelineContentSignature: Equatable {
+    let messageCount: Int
+    let lastMessageID: String?
+    let lastVisibleTextLength: Int
+    let lastReasoningTextLength: Int
+    let lastPartCount: Int
+    let questionCount: Int
+
+    init(messages: [MessageEnvelope], questions: [QuestionRequest]) {
+        let lastMessage = messages.last
+        messageCount = messages.count
+        lastMessageID = lastMessage?.id
+        lastVisibleTextLength = lastMessage?.visibleText.count ?? 0
+        lastReasoningTextLength = lastMessage?.reasoningText.count ?? 0
+        lastPartCount = lastMessage?.parts.count ?? 0
+        questionCount = questions.count
+    }
+}
+
+private struct TimelineScrollMetrics: Equatable {
+    let verticalOffset: CGFloat
+    let viewportHeight: CGFloat
+    let contentHeight: CGFloat
+    let distanceToBottom: CGFloat
+
+    static let zero = TimelineScrollMetrics(verticalOffset: 0, viewportHeight: 0, contentHeight: 0, distanceToBottom: 0)
+}
+
+private struct TimelineScrollObserver: NSViewRepresentable {
+    let onChange: @MainActor (TimelineScrollMetrics) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onChange: onChange)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.attach(to: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        Task { @MainActor in
+            context.coordinator.onChange = onChange
+            context.coordinator.attach(to: nsView)
+        }
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        Task { @MainActor in
+            coordinator.detach()
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var onChange: (TimelineScrollMetrics) -> Void
+
+        private weak var observedView: NSView?
+        private weak var scrollView: NSScrollView?
+        private weak var clipView: NSClipView?
+        private weak var documentView: NSView?
+
+        init(onChange: @escaping @MainActor (TimelineScrollMetrics) -> Void) {
+            self.onChange = onChange
+            super.init()
+        }
+
+        func attach(to view: NSView) {
+            observedView = view
+            DispatchQueue.main.async { [weak self, weak view] in
+                guard let self, let view else { return }
+                self.installObservers(from: view)
+            }
+        }
+
+        func detach() {
+            NotificationCenter.default.removeObserver(self)
+            clipView?.postsBoundsChangedNotifications = false
+            documentView?.postsFrameChangedNotifications = false
+            scrollView = nil
+            clipView = nil
+            documentView = nil
+            observedView = nil
+        }
+
+        private func installObservers(from view: NSView) {
+            guard let scrollView = view.enclosingScrollView,
+                  let clipView = scrollView.contentView as NSClipView?,
+                  let documentView = scrollView.documentView
+            else { return }
+
+            if self.scrollView === scrollView, self.documentView === documentView {
+                publishMetrics()
+                return
+            }
+
+            detach()
+
+            observedView = view
+            self.scrollView = scrollView
+            self.clipView = clipView
+            self.documentView = documentView
+
+            clipView.postsBoundsChangedNotifications = true
+            documentView.postsFrameChangedNotifications = true
+
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleBoundsChanged),
+                name: NSView.boundsDidChangeNotification,
+                object: clipView
+            )
+
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleFrameChanged),
+                name: NSView.frameDidChangeNotification,
+                object: documentView
+            )
+
+            publishMetrics()
+        }
+
+        @objc private func handleBoundsChanged() {
+            publishMetrics()
+        }
+
+        @objc private func handleFrameChanged() {
+            publishMetrics()
+        }
+
+        private func publishMetrics() {
+            guard let clipView, let documentView else { return }
+
+            let visibleRect = clipView.documentVisibleRect
+            let contentHeight = documentView.bounds.height
+            let viewportHeight = visibleRect.height
+            let verticalOffset = visibleRect.origin.y
+            let distanceToBottom: CGFloat
+
+            if documentView.isFlipped {
+                distanceToBottom = max(contentHeight - visibleRect.maxY, 0)
+            } else {
+                distanceToBottom = max(visibleRect.minY, 0)
+            }
+
+            onChange(
+                TimelineScrollMetrics(
+                    verticalOffset: verticalOffset,
+                    viewportHeight: viewportHeight,
+                    contentHeight: contentHeight,
+                    distanceToBottom: distanceToBottom
+                )
+            )
+        }
     }
 }
 
