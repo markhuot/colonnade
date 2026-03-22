@@ -30,17 +30,6 @@ final class TodoProgressTests: XCTestCase {
 }
 
 final class MessageInfoTests: XCTestCase {
-    func testMarkdownRendererParsesCompletedLinkAcrossStreamedText() {
-        let partial = MarkdownRenderer.attributedString(from: "See [Open")
-        XCTAssertNotNil(partial)
-        XCTAssertNil(partial?.runs.first?.link)
-
-        let completed = MarkdownRenderer.attributedString(from: "See [OpenCode](https://opencode.ai)")
-
-        XCTAssertEqual(String(completed?.characters ?? AttributedString("" ).characters), "See OpenCode")
-        XCTAssertTrue(completed?.runs.contains(where: { $0.link?.absoluteString == "https://opencode.ai" }) == true)
-    }
-
     func testModelContextKeyFallsBackToNestedModelReference() {
         let info = MessageInfo(
             id: "message-1",
@@ -63,43 +52,178 @@ final class MessageInfoTests: XCTestCase {
 
         XCTAssertEqual(info.modelContextKey, ModelContextKey(providerID: "anthropic", modelID: "claude-sonnet"))
     }
+}
 
-    func testMarkdownRendererParsesUnorderedAndOrderedLists() {
-        let blocks = MarkdownRenderer.blocks(from: "Intro\n\n- first\n* second\n\n1. one\n2. two")
+final class ThemeControllerTests: XCTestCase {
+    @MainActor
+    func testThemeControllerDefaultsToNative() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
 
-        XCTAssertEqual(
-            blocks,
-            [
-                .paragraph("Intro"),
-                .unorderedList([
-                    .init(marker: "-", text: "first"),
-                    .init(marker: "*", text: "second")
-                ]),
-                .orderedList([
-                    .init(marker: "1.", text: "one"),
-                    .init(marker: "2.", text: "two")
+        let controller = ThemeController(defaults: defaults)
+
+        XCTAssertEqual(controller.selectedThemeID, .native)
+        XCTAssertEqual(controller.selectedTheme.id, .native)
+    }
+
+    @MainActor
+    func testThemeControllerRestoresAndPersistsSelection() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        defaults.set(OpenCodeThemeID.githubDark.rawValue, forKey: ThemeController.Constants.selectedThemeKey)
+
+        let controller = ThemeController(defaults: defaults)
+        XCTAssertEqual(controller.selectedThemeID, .githubDark)
+
+        controller.selectTheme(.nord)
+
+        XCTAssertEqual(controller.selectedThemeID, .nord)
+        XCTAssertEqual(defaults.string(forKey: ThemeController.Constants.selectedThemeKey), OpenCodeThemeID.nord.rawValue)
+    }
+}
+
+final class MessagePartToolPresentationTests: XCTestCase {
+    func testApplyPatchPresentationSummarizesFilesAndDiffStats() {
+        let part = makeToolMessagePart(
+            tool: "functions.apply_patch",
+            input: [
+                "patchText": .string("*** Begin Patch\n*** Update File: Sources/Foo.swift\n*** Add File: Sources/Bar.swift\n*** End Patch")
+            ],
+            metadata: [
+                "summary": .object([
+                    "additions": .number(12),
+                    "deletions": .number(3)
                 ])
             ]
         )
+
+        let presentation = part.toolPresentation
+
+        guard case let .patch(summary) = presentation.summaryStyle else {
+            return XCTFail("Expected patch summary style")
+        }
+
+        XCTAssertEqual(summary.target, "Foo.swift +1")
+        XCTAssertEqual(summary.additions, 12)
+        XCTAssertEqual(summary.deletions, 3)
+        XCTAssertEqual(presentation.detailFields, [ToolDetailField(title: "Files", value: "Foo.swift\nBar.swift")])
+        XCTAssertNil(presentation.statusLabel)
+        XCTAssertNil(presentation.fallbackDetail)
+
+        guard case let .patch(detail) = presentation.drawerStyle else {
+            return XCTFail("Expected patch drawer style")
+        }
+
+        XCTAssertEqual(detail.files.map(\.path), ["Sources/Foo.swift", "Sources/Bar.swift"])
+        XCTAssertEqual(detail.files.map(\.operation), [.updated, .added])
     }
 
-    func testMarkdownRendererParsesCodeFenceBlocks() {
-        let blocks = MarkdownRenderer.blocks(from: "Before\n\n```\nlet x = 1\nprint(x)\n```\n\nAfter")
+    func testApplyPatchPresentationBuildsInlineDiffData() {
+        let part = makeToolMessagePart(
+            tool: "functions.apply_patch",
+            input: [
+                "patchText": .string(
+                    "*** Begin Patch\n*** Update File: Sources/Foo.swift\n@@\n-old line\n same line\n+new line\n*** End Patch"
+                )
+            ]
+        )
 
+        let presentation = part.toolPresentation
+
+        guard case let .patch(detail) = presentation.drawerStyle else {
+            return XCTFail("Expected patch drawer style")
+        }
+
+        XCTAssertEqual(detail.files.count, 1)
+        XCTAssertEqual(detail.files[0].path, "Sources/Foo.swift")
+        XCTAssertEqual(detail.files[0].hunks.count, 1)
+        XCTAssertEqual(detail.files[0].hunks[0].header, "@@")
         XCTAssertEqual(
-            blocks,
+            detail.files[0].hunks[0].lines,
             [
-                .paragraph("Before"),
-                .codeFence("let x = 1\nprint(x)"),
-                .paragraph("After")
+                ToolPatchLine(id: 0, kind: .deletion, text: "old line"),
+                ToolPatchLine(id: 1, kind: .context, text: "same line"),
+                ToolPatchLine(id: 2, kind: .addition, text: "new line")
             ]
         )
     }
 
-    func testMarkdownRendererTreatsUnclosedFenceAsCodeFenceDuringStreaming() {
-        let blocks = MarkdownRenderer.blocks(from: "```\npartial")
+    func testApplyPatchPresentationCapturesMoveDestination() {
+        let part = makeToolMessagePart(
+            tool: "functions.apply_patch",
+            input: [
+                "patchText": .string(
+                    "*** Begin Patch\n*** Update File: Sources/Foo.swift\n*** Move to: Sources/Bar.swift\n*** End Patch"
+                )
+            ]
+        )
 
-        XCTAssertEqual(blocks, [.codeFence("partial")])
+        let presentation = part.toolPresentation
+
+        guard case let .patch(detail) = presentation.drawerStyle else {
+            return XCTFail("Expected patch drawer style")
+        }
+
+        XCTAssertEqual(detail.files.count, 1)
+        XCTAssertEqual(detail.files[0].path, "Sources/Foo.swift")
+        XCTAssertEqual(detail.files[0].destinationPath, "Sources/Bar.swift")
+        XCTAssertEqual(detail.files[0].operation, .moved)
+    }
+
+    func testBashPresentationPrefersDescriptionAndExposesCommandDetails() {
+        let part = makeToolMessagePart(
+            tool: "functions.bash",
+            status: .running,
+            input: [
+                "description": .string("shows working tree status"),
+                "command": .string("git status --short")
+            ]
+        )
+
+        let presentation = part.toolPresentation
+
+        guard case let .standard(summary) = presentation.summaryStyle else {
+            return XCTFail("Expected standard summary style")
+        }
+
+        XCTAssertEqual(summary.action, "Shows working tree status")
+        XCTAssertNil(summary.target)
+        XCTAssertEqual(presentation.detailFields, [ToolDetailField(title: "Command", value: "git status --short")])
+        XCTAssertEqual(presentation.statusLabel, "Running")
+        XCTAssertNil(presentation.fallbackDetail)
+    }
+
+    func testReadPresentationUsesDedicatedSummaryStyle() {
+        let part = makeToolMessagePart(
+            tool: "functions.read",
+            input: [
+                "filePath": .string("/tmp/Notes.swift")
+            ]
+        )
+
+        let presentation = part.toolPresentation
+
+        guard case let .read(summary) = presentation.summaryStyle else {
+            return XCTFail("Expected read summary style")
+        }
+
+        XCTAssertEqual(summary.fileName, "Notes.swift")
+        XCTAssertEqual(summary.path, "/tmp/Notes.swift")
+    }
+
+    func testUnknownToolFallsBackToStatusWhenThereAreNoDetails() {
+        let part = makeToolMessagePart(tool: "functions.custom_tool", status: .pending)
+
+        let presentation = part.toolPresentation
+
+        guard case let .standard(summary) = presentation.summaryStyle else {
+            return XCTFail("Expected standard summary style")
+        }
+
+        XCTAssertEqual(summary.action, "Custom Tool")
+        XCTAssertEqual(presentation.statusLabel, "Pending")
+        XCTAssertEqual(presentation.fallbackDetail, "Pending")
+        XCTAssertTrue(presentation.detailFields.isEmpty)
     }
 }
 
@@ -151,6 +275,7 @@ final class WorkspaceServiceTests: XCTestCase {
 final class OpenCodeAppStateTests: XCTestCase {
     func testCreateSessionUsesInjectedServiceAndCoordinatorRegistry() async throws {
         let directory = "/tmp/project"
+        let connection = WorkspaceConnection(serverURL: OpenCodeAppState.defaultServerURL, directory: directory)
         let session = makeSession(id: "created-session", directory: directory)
         let repository = PersistenceRepository(persistence: PersistenceController(inMemory: true))
         let workspaceService = MockWorkspaceService(createSessionResult: session)
@@ -171,7 +296,7 @@ final class OpenCodeAppStateTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(150))
 
         XCTAssertEqual(workspaceService.createSessionCalls, [.init(directory: directory, title: nil, parentID: nil)])
-        let resolvedCoordinator = await registry.coordinator(for: directory) as? MockWorkspaceSyncCoordinator
+        let resolvedCoordinator = await registry.coordinator(for: connection) as? MockWorkspaceSyncCoordinator
         XCTAssertTrue(resolvedCoordinator === coordinator)
         let refreshedTodos = await coordinator.refreshedTodosSessionIDsSnapshot()
         XCTAssertEqual(refreshedTodos, [session.id, session.id])
@@ -269,6 +394,360 @@ final class OpenCodeAppStateTests: XCTestCase {
         XCTAssertEqual(appState.focusedSessionID, "session-1")
         XCTAssertNil(appState.promptFocusRequest)
     }
+
+    func testLoadRestoresPersistedPaneStateAndClampsPaneWidths() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(
+                sessions: [
+                    makeSession(id: "session-1", directory: directory, updatedAt: 1_000),
+                    makeSession(id: "session-2", directory: directory, updatedAt: 2_000)
+                ],
+                statuses: [:],
+                questions: [],
+                permissions: []
+            )
+        )
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        await repository.savePanes(
+            directory: directory,
+            panes: [
+                SessionPaneState(sessionID: "session-2", position: 0, width: 1_400, isHidden: false),
+                SessionPaneState(sessionID: "session-1", position: 1, width: 120, isHidden: false)
+            ]
+        )
+
+        let appState = OpenCodeAppState(
+            workspaceService: workspaceService,
+            repository: repository,
+            persistence: persistence,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: true
+        )
+
+        await appState.load(directory: directory)
+
+        XCTAssertEqual(appState.openSessionIDs, ["session-2", "session-1"])
+        XCTAssertEqual(appState.focusedSessionID, "session-2")
+        XCTAssertEqual(appState.paneWidth(for: "session-2"), appState.maxPaneWidth)
+        XCTAssertEqual(appState.paneWidth(for: "session-1"), appState.minPaneWidth)
+    }
+
+    func testLoadOpensMostRecentVisibleSessionWhenNoPaneStateExists() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let visibleSession = makeSession(id: "session-visible", directory: directory, updatedAt: 3_000)
+        let archivedSession = makeSession(id: "session-archived", directory: directory, updatedAt: 9_000, archivedAt: 9_000)
+        let subagentSession = makeSession(id: "session-subagent", directory: directory, updatedAt: 8_000, parentID: "parent-1")
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(
+                sessions: [archivedSession, subagentSession, visibleSession],
+                statuses: [:],
+                questions: [],
+                permissions: []
+            )
+        )
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppState(
+            workspaceService: workspaceService,
+            repository: repository,
+            persistence: persistence,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+
+        XCTAssertEqual(appState.openSessionIDs, [visibleSession.id])
+        XCTAssertEqual(appState.focusedSessionID, visibleSession.id)
+    }
+
+    func testLoadFailureRestoresPreviousWorkspaceState() async throws {
+        let firstDirectory = try makeTemporaryDirectory()
+        let secondDirectory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(
+                sessions: [makeSession(id: "session-1", directory: firstDirectory)],
+                statuses: [:],
+                questions: [],
+                permissions: []
+            )
+        )
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppState(
+            workspaceService: workspaceService,
+            repository: repository,
+            persistence: persistence,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: firstDirectory)
+        let originalLiveStore = appState.liveStore
+        let originalSnapshot = appState.snapshot
+
+        workspaceService.loadWorkspaceError = URLError(.badServerResponse)
+        await appState.load(directory: secondDirectory)
+
+        XCTAssertEqual(appState.selectedDirectory, firstDirectory)
+        XCTAssertTrue(appState.liveStore === originalLiveStore)
+        XCTAssertEqual(appState.snapshot, originalSnapshot)
+        XCTAssertNotNil(appState.errorMessage)
+    }
+
+    func testConnectToRemoteServerNormalizesURLAndLoadsProjectSuggestions() async throws {
+        let client = MockOpenCodeAPIClient(
+            health: .init(healthy: true, version: "1.0.0"),
+            projects: [
+                makeProject(id: "project-b", worktree: "/tmp/b"),
+                makeProject(id: "project-a", worktree: "/tmp/a")
+            ]
+        )
+
+        let appState = OpenCodeAppState(
+            repository: PersistenceRepository(persistence: PersistenceController(inMemory: true)),
+            persistence: PersistenceController(inMemory: true),
+            persistsWorkspacePaneState: false,
+            apiClientProviderOverride: { _ in client }
+        )
+        appState.remoteServerURLText = "example.com"
+
+        appState.connectToRemoteServer()
+        try await waitForAsyncWork()
+
+        XCTAssertEqual(appState.serverURL.absoluteString, "https://example.com")
+        XCTAssertEqual(appState.remoteServerURLText, "https://example.com")
+        XCTAssertEqual(appState.launchStage, .remoteDirectoryEntry)
+        XCTAssertEqual(appState.remoteProjectSuggestions, ["/tmp/a", "/tmp/b"])
+        XCTAssertEqual(client.healthCallCount, 1)
+        XCTAssertEqual(client.projectsCallCount, 1)
+    }
+
+    func testOpenLocalDirectoryStartsServerAndUsesInjectedChooser() async throws {
+        let client = MockOpenCodeAPIClient(health: .init(healthy: false, version: "1.0.0"))
+        let probe = LocalServerProbe()
+
+        let appState = OpenCodeAppState(
+            repository: PersistenceRepository(persistence: PersistenceController(inMemory: true)),
+            persistence: PersistenceController(inMemory: true),
+            persistsWorkspacePaneState: false,
+            localServerStarter: {
+                Task {
+                    await probe.recordStart()
+                }
+                return Process()
+            },
+            apiClientProviderOverride: { _ in client },
+            directoryChooser: {
+                Task {
+                    await probe.recordChooser()
+                }
+            },
+            serverWaiter: { url, timeout in
+                await probe.recordWait(url: url, timeout: timeout)
+                return true
+            }
+        )
+
+        appState.openLocalDirectory()
+        try await waitForAsyncWork()
+
+        let snapshot = await probe.snapshot()
+        XCTAssertEqual(snapshot.startedCount, 1)
+        XCTAssertEqual(snapshot.chooserCount, 1)
+        XCTAssertEqual(snapshot.waitedURL, OpenCodeAppState.defaultServerURL)
+        XCTAssertEqual(snapshot.waitedTimeout, .seconds(10))
+        XCTAssertEqual(appState.serverURL, OpenCodeAppState.defaultServerURL)
+        XCTAssertFalse(appState.isStartingLocalServer)
+        XCTAssertNil(appState.errorMessage)
+    }
+
+    func testArchiveSessionUsesInjectedServiceAndUpdatesOpenSessions() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let session1 = makeSession(id: "session-1", directory: directory, updatedAt: 3_000)
+        let session2 = makeSession(id: "session-2", directory: directory, updatedAt: 2_000)
+        let archived = makeSession(id: "session-1", directory: directory, updatedAt: 4_000, archivedAt: 4_000)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session1, session2], statuses: [:], questions: [], permissions: []),
+            archiveSessionResult: archived
+        )
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppState(
+            workspaceService: workspaceService,
+            repository: repository,
+            persistence: persistence,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+        appState.openSessionIDs = [session1.id, session2.id]
+        appState.focusedSessionID = session1.id
+
+        appState.archiveSession(session1.id)
+        try await waitForAsyncWork()
+
+        XCTAssertEqual(workspaceService.archiveSessionCalls, [.init(directory: directory, sessionID: session1.id)])
+        XCTAssertEqual(appState.openSessionIDs, [session2.id])
+        XCTAssertEqual(appState.focusedSessionID, session2.id)
+        let updatedOpenSessions = await coordinator.updatedOpenSessionIDsSnapshot()
+        XCTAssertEqual(updatedOpenSessions.last, [session2.id])
+    }
+
+    func testAnswerActionsUseInjectedServiceAndRefreshInteractions() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let session = makeSession(id: "session-1", directory: directory)
+        let question = makeQuestion(id: "question-1", sessionID: session.id)
+        let permission = makePermission(id: "permission-1", sessionID: session.id)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
+        )
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppState(
+            workspaceService: workspaceService,
+            repository: repository,
+            persistence: persistence,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+
+        appState.answerPermission(permission, reply: .always)
+        appState.answerQuestion(question, answers: [["A"]])
+        appState.rejectQuestion(question)
+        try await waitForAsyncWork()
+
+        XCTAssertEqual(workspaceService.permissionReplyCalls, [.init(directory: directory, requestID: permission.id, reply: .always)])
+        XCTAssertEqual(workspaceService.questionReplyCalls, [.init(directory: directory, requestID: question.id, answers: [["A"]])])
+        XCTAssertEqual(workspaceService.rejectQuestionCalls, [.init(directory: directory, requestID: question.id)])
+        let refreshedInteractionsCount = await coordinator.refreshedInteractionsCountSnapshot()
+        XCTAssertEqual(refreshedInteractionsCount, 3)
+    }
+
+    func testPermissionForSessionDeduplicatesEquivalentRequests() async {
+        let connection = WorkspaceConnection(serverURL: OpenCodeAppState.defaultServerURL, directory: "/tmp/project")
+        let store = WorkspaceLiveStore(connection: connection)
+        let session = makeSession(id: "session-1", directory: connection.directory)
+        let permission = makePermission(id: "permission-1", sessionID: session.id)
+
+        store.applyWorkspaceSnapshot(
+            WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [permission, permission])
+        )
+
+        let appState = OpenCodeAppState(persistsWorkspacePaneState: false)
+        appState.bindLiveStore(store)
+
+        XCTAssertEqual(appState.permissionForSession(session.id).count, 1)
+    }
+
+    func testLoadPrefersRecentModelAndNormalizesThinkingLevelSelection() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let session = makeSession(id: "session-1", directory: directory)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
+        )
+        workspaceService.modelCatalogResult = makeRichModelCatalog()
+        workspaceService.modelContextLimitsResult = [
+            ModelContextKey(providerID: "openai", modelID: "gpt-4.1"): 128_000,
+            ModelContextKey(providerID: "anthropic", modelID: "claude-sonnet"): 200_000
+        ]
+
+        await repository.applyWorkspaceSnapshot(
+            directory: directory,
+            snapshot: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: []),
+            modelContextLimits: [:],
+            openSessionIDs: [session.id]
+        )
+        await repository.upsertMessageInfo(
+            directory: directory,
+            sessionID: session.id,
+            info: MessageInfo(
+                id: "message-1",
+                sessionID: session.id,
+                role: .assistant,
+                time: .init(created: 2_000, completed: nil),
+                parentID: nil,
+                agent: nil,
+                model: .init(providerID: "openai", modelID: "gpt-4.1"),
+                modelID: nil,
+                providerID: nil,
+                mode: nil,
+                path: nil,
+                cost: nil,
+                tokens: nil,
+                finish: nil,
+                summary: nil,
+                error: nil
+            ),
+            modelContextLimits: [:]
+        )
+
+        let appState = OpenCodeAppState(
+            workspaceService: workspaceService,
+            repository: repository,
+            persistence: persistence,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+
+        XCTAssertEqual(appState.selectedModelOption(for: session.id)?.reference, ModelReference(providerID: "openai", modelID: "gpt-4.1"))
+        XCTAssertEqual(appState.selectedThinkingLevel(for: session.id), OpenCodeAppState.defaultThinkingLevel)
+        XCTAssertEqual(appState.modelOptions(for: session.id).first?.reference, ModelReference(providerID: "openai", modelID: "gpt-4.1"))
+    }
+
+    func testSendMessageFailureRestoresDraftAndSetsError() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let session = makeSession(id: "session-1", directory: directory)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
+        )
+        workspaceService.sendMessageError = URLError(.notConnectedToInternet)
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppState(
+            workspaceService: workspaceService,
+            repository: repository,
+            persistence: persistence,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+        appState.drafts[session.id] = "Hello world"
+
+        appState.sendMessage(sessionID: session.id)
+        try await waitForAsyncWork()
+
+        XCTAssertEqual(appState.drafts[session.id], "Hello world")
+        XCTAssertNotNil(appState.errorMessage)
+        XCTAssertEqual(workspaceService.sendMessageCalls.count, 1)
+    }
 }
 
 final class FocusedSessionTimelineKeyEventTests: XCTestCase {
@@ -296,6 +775,7 @@ final class FocusedSessionTimelineKeyEventTests: XCTestCase {
 final class WorkspaceSyncCoordinatorTests: XCTestCase {
     func testRefreshAllUsesInjectedWorkspaceService() async throws {
         let directory = "/tmp/project"
+        let connection = WorkspaceConnection(serverURL: URL(string: "http://127.0.0.1:4096")!, directory: directory)
         let persistence = PersistenceController(inMemory: true)
         let repository = PersistenceRepository(persistence: persistence)
         let session = makeSession(id: "session-1", directory: directory)
@@ -311,7 +791,7 @@ final class WorkspaceSyncCoordinatorTests: XCTestCase {
         )
 
         let coordinator = WorkspaceSyncCoordinator(
-            directory: directory,
+            connection: connection,
             client: MockOpenCodeAPIClient(),
             workspaceService: service,
             repository: repository
@@ -331,6 +811,7 @@ final class WorkspaceSyncCoordinatorTests: XCTestCase {
 
     func testRefreshStatusClearsStaleRetryWhenSessionBecomesIdle() async throws {
         let directory = "/tmp/project"
+        let connection = WorkspaceConnection(serverURL: URL(string: "http://127.0.0.1:4096")!, directory: directory)
         let persistence = PersistenceController(inMemory: true)
         let repository = PersistenceRepository(persistence: persistence)
         let storeRegistry = WorkspaceLiveStoreRegistry()
@@ -349,7 +830,7 @@ final class WorkspaceSyncCoordinatorTests: XCTestCase {
             openSessionIDs: [session.id]
         )
 
-        let store = await storeRegistry.store(for: directory)
+        let store = await storeRegistry.store(for: connection)
         await MainActor.run {
             store.applyWorkspaceSnapshot(
                 WorkspaceSnapshot(
@@ -362,7 +843,7 @@ final class WorkspaceSyncCoordinatorTests: XCTestCase {
         }
 
         let coordinator = WorkspaceSyncCoordinator(
-            directory: directory,
+            connection: connection,
             client: MockOpenCodeAPIClient(),
             workspaceService: service,
             repository: repository,
@@ -383,8 +864,9 @@ final class WorkspaceSyncCoordinatorTests: XCTestCase {
 
     func testMessageUpdatedSeedsShellAndPartDeltaRendersWithoutRefresh() async throws {
         let directory = "/tmp/project"
+        let connection = WorkspaceConnection(serverURL: URL(string: "http://127.0.0.1:4096")!, directory: directory)
         let storeRegistry = WorkspaceLiveStoreRegistry()
-        let store = await storeRegistry.store(for: directory)
+        let store = await storeRegistry.store(for: connection)
         let session = makeSession(id: "session-1", directory: directory)
         let messageID = "message-1"
         let partID = "part-1"
@@ -464,8 +946,9 @@ final class WorkspaceSyncCoordinatorTests: XCTestCase {
 
     func testMessagePartUpdatedSeedsAssistantMessageWithoutPriorMessageRefresh() async throws {
         let directory = "/tmp/project"
+        let connection = WorkspaceConnection(serverURL: URL(string: "http://127.0.0.1:4096")!, directory: directory)
         let storeRegistry = WorkspaceLiveStoreRegistry()
-        let store = await storeRegistry.store(for: directory)
+        let store = await storeRegistry.store(for: connection)
         let session = makeSession(id: "session-1", directory: directory)
 
         await MainActor.run {
@@ -584,6 +1067,30 @@ final class WorkspaceSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(snapshot.messagesBySession[session.id]?.first?.visibleText, "Hello world")
     }
 
+    func testEmptyWorkspaceSnapshotDoesNotPruneExistingSessions() async throws {
+        let directory = "/tmp/project"
+        let session = makeSession(id: "session-1", directory: directory)
+        let repository = PersistenceRepository(persistence: PersistenceController(inMemory: true))
+
+        await repository.applyWorkspaceSnapshot(
+            directory: directory,
+            snapshot: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: []),
+            modelContextLimits: [:],
+            openSessionIDs: [session.id]
+        )
+
+        await repository.applyWorkspaceSnapshot(
+            directory: directory,
+            snapshot: WorkspaceSnapshot(sessions: [], statuses: [:], questions: [], permissions: []),
+            modelContextLimits: [:],
+            openSessionIDs: []
+        )
+
+        let snapshot = await repository.loadSnapshot(directory: directory)
+
+        XCTAssertEqual(snapshot.sessions.map(\.id), [session.id])
+    }
+
     func testExplicitFlushPersistsBufferedRemovalsAfterDeltas() async throws {
         let directory = "/tmp/project"
         let session = makeSession(id: "session-1", directory: directory)
@@ -668,6 +1175,23 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
         let sessionID: String
     }
 
+    struct PermissionReplyCall: Equatable {
+        let directory: String
+        let requestID: String
+        let reply: PermissionReply
+    }
+
+    struct QuestionReplyCall: Equatable {
+        let directory: String
+        let requestID: String
+        let answers: [[String]]
+    }
+
+    struct RequestCall: Equatable {
+        let directory: String
+        let requestID: String
+    }
+
     private let lock = NSLock()
 
     var workspaceSnapshotResult: WorkspaceSnapshot
@@ -680,6 +1204,8 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
     var statusesResult: [String: SessionStatus]
     var modelContextLimitsResult: [ModelContextKey: Int]
     var modelCatalogResult: ModelCatalog
+    var loadWorkspaceError: Error?
+    var sendMessageError: Error?
 
     private(set) var loadWorkspaceDirectories: [String] = []
     private(set) var loadInteractionsDirectories: [String] = []
@@ -690,6 +1216,9 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
     private(set) var loadTodosCalls: [SessionCall] = []
     private(set) var loadStatusesDirectories: [String] = []
     private(set) var sendMessageCalls: [MessageCall] = []
+    private(set) var permissionReplyCalls: [PermissionReplyCall] = []
+    private(set) var questionReplyCalls: [QuestionReplyCall] = []
+    private(set) var rejectQuestionCalls: [RequestCall] = []
 
     init(
         workspaceSnapshotResult: WorkspaceSnapshot = WorkspaceSnapshot(sessions: [], statuses: [:], questions: [], permissions: []),
@@ -717,6 +1246,9 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
 
     func loadWorkspace(directory: String) async throws -> WorkspaceSnapshot {
         record { loadWorkspaceDirectories.append(directory) }
+        if let loadWorkspaceError {
+            throw loadWorkspaceError
+        }
         return workspaceSnapshotResult
     }
 
@@ -765,11 +1297,22 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
 
     func sendMessage(directory: String, sessionID: String, text: String, model: ModelReference?, variant: String?) async throws {
         record { sendMessageCalls.append(.init(directory: directory, sessionID: sessionID, text: text, model: model, variant: variant)) }
+        if let sendMessageError {
+            throw sendMessageError
+        }
     }
 
-    func replyToPermission(directory: String, requestID: String, reply: PermissionReply) async throws {}
-    func replyToQuestion(directory: String, requestID: String, answers: [[String]]) async throws {}
-    func rejectQuestion(directory: String, requestID: String) async throws {}
+    func replyToPermission(directory: String, requestID: String, reply: PermissionReply) async throws {
+        record { permissionReplyCalls.append(.init(directory: directory, requestID: requestID, reply: reply)) }
+    }
+
+    func replyToQuestion(directory: String, requestID: String, answers: [[String]]) async throws {
+        record { questionReplyCalls.append(.init(directory: directory, requestID: requestID, answers: answers)) }
+    }
+
+    func rejectQuestion(directory: String, requestID: String) async throws {
+        record { rejectQuestionCalls.append(.init(directory: directory, requestID: requestID)) }
+    }
 
     private func record(_ update: () -> Void) {
         lock.lock()
@@ -819,6 +1362,50 @@ private actor MockWorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
     func refreshedTodosSessionIDsSnapshot() -> [String] {
         refreshedTodosSessionIDs
     }
+
+    func updatedOpenSessionIDsSnapshot() -> [[String]] {
+        updatedOpenSessionIDs
+    }
+
+    func refreshedInteractionsCountSnapshot() -> Int {
+        refreshedInteractionsCount
+    }
+}
+
+private actor LocalServerProbe {
+    struct Snapshot {
+        let startedCount: Int
+        let chooserCount: Int
+        let waitedURL: URL?
+        let waitedTimeout: Duration?
+    }
+
+    private var startedCount = 0
+    private var chooserCount = 0
+    private var waitedURL: URL?
+    private var waitedTimeout: Duration?
+
+    func recordStart() {
+        startedCount += 1
+    }
+
+    func recordChooser() {
+        chooserCount += 1
+    }
+
+    func recordWait(url: URL, timeout: Duration) {
+        waitedURL = url
+        waitedTimeout = timeout
+    }
+
+    func snapshot() -> Snapshot {
+        Snapshot(
+            startedCount: startedCount,
+            chooserCount: chooserCount,
+            waitedURL: waitedURL,
+            waitedTimeout: waitedTimeout
+        )
+    }
 }
 
 private actor TestWorkspaceSyncRegistry: WorkspaceSyncRegistryProtocol {
@@ -828,7 +1415,7 @@ private actor TestWorkspaceSyncRegistry: WorkspaceSyncRegistryProtocol {
         coordinatorInstance = coordinator
     }
 
-    func coordinator(for directory: String) -> any WorkspaceSyncCoordinating {
+    func coordinator(for connection: WorkspaceConnection) -> any WorkspaceSyncCoordinating {
         coordinatorInstance
     }
 }
@@ -838,20 +1425,42 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
     let statusesResult: [String: SessionStatus]
     let questionsResult: [QuestionRequest]
     let permissionsResult: [PermissionRequest]
+    let healthResult: OpenCodeServerHealth
+    let projectsResult: [OpenCodeProject]
 
     private let lock = NSLock()
     private(set) var recordedDirectories: [String] = []
+    private(set) var healthCallCount = 0
+    private(set) var projectsCallCount = 0
 
     init(
         sessions: [OpenCodeSession] = [],
         statuses: [String: SessionStatus] = [:],
         questions: [QuestionRequest] = [],
-        permissions: [PermissionRequest] = []
+        permissions: [PermissionRequest] = [],
+        health: OpenCodeServerHealth = .init(healthy: true, version: "1.0.0"),
+        projects: [OpenCodeProject] = []
     ) {
         sessionsResult = sessions
         statusesResult = statuses
         questionsResult = questions
         permissionsResult = permissions
+        healthResult = health
+        projectsResult = projects
+    }
+
+    func health() async throws -> OpenCodeServerHealth {
+        recordSync {
+            healthCallCount += 1
+        }
+        return healthResult
+    }
+
+    func projects() async throws -> [OpenCodeProject] {
+        recordSync {
+            projectsCallCount += 1
+        }
+        return projectsResult
     }
 
     func sessions(directory: String) async throws -> [OpenCodeSession] {
@@ -928,24 +1537,46 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
         recordedDirectories.append(directory)
         lock.unlock()
     }
+
+    private func recordSync(_ update: () -> Void) {
+        lock.lock()
+        update()
+        lock.unlock()
+    }
 }
 
 private enum TestError: Error {
     case unimplemented
 }
 
-private func makeSession(id: String, directory: String = "/tmp/project") -> OpenCodeSession {
+private func makeSession(
+    id: String,
+    directory: String = "/tmp/project",
+    updatedAt: Double = 2_000,
+    parentID: String? = nil,
+    archivedAt: Double? = nil
+) -> OpenCodeSession {
     OpenCodeSession(
         id: id,
         slug: id,
         projectID: "project-1",
         workspaceID: "workspace-1",
         directory: directory,
-        parentID: nil,
+        parentID: parentID,
         title: "Session \(id)",
         version: "1",
         summary: nil,
-        time: .init(created: 1_000, updated: 2_000, compacting: nil, archived: nil)
+        time: .init(created: 1_000, updated: updatedAt, compacting: nil, archived: archivedAt)
+    )
+}
+
+private func makeProject(id: String, worktree: String) -> OpenCodeProject {
+    OpenCodeProject(
+        id: id,
+        worktree: worktree,
+        vcsDir: nil,
+        vcs: nil,
+        time: .init(created: 1_000, initialized: 1_000)
     )
 }
 
@@ -1000,6 +1631,52 @@ private func makeModelCatalog() -> ModelCatalog {
         ],
         defaultModels: ["anthropic": "claude-sonnet"],
         connectedProviderIDs: ["anthropic"]
+    )
+}
+
+private func makeRichModelCatalog() -> ModelCatalog {
+    ModelCatalog(
+        providers: [
+            ModelProvider(
+                id: "anthropic",
+                name: "Anthropic",
+                models: [
+                    "claude-sonnet": ModelDefinition(
+                        id: "claude-sonnet",
+                        providerID: "anthropic",
+                        name: "Claude Sonnet",
+                        family: nil,
+                        status: "active",
+                        capabilities: .init(reasoning: true, toolcall: true, input: .init(text: true), output: .init(text: true)),
+                        limit: .init(context: 200_000),
+                        variants: ["high": .init(reasoningEffort: nil, reasoningSummary: nil, include: nil)],
+                        releaseDate: nil
+                    )
+                ]
+            ),
+            ModelProvider(
+                id: "openai",
+                name: "OpenAI",
+                models: [
+                    "gpt-4.1": ModelDefinition(
+                        id: "gpt-4.1",
+                        providerID: "openai",
+                        name: "GPT-4.1",
+                        family: nil,
+                        status: "active",
+                        capabilities: .init(reasoning: true, toolcall: true, input: .init(text: true), output: .init(text: true)),
+                        limit: .init(context: 128_000),
+                        variants: [
+                            "low": .init(reasoningEffort: nil, reasoningSummary: nil, include: nil),
+                            "high": .init(reasoningEffort: nil, reasoningSummary: nil, include: nil)
+                        ],
+                        releaseDate: nil
+                    )
+                ]
+            )
+        ],
+        defaultModels: ["anthropic": "claude-sonnet"],
+        connectedProviderIDs: ["anthropic", "openai"]
     )
 }
 
@@ -1091,8 +1768,63 @@ private func makeMessagePart(id: String, sessionID: String, messageID: String, t
     )
 }
 
+private func makeToolMessagePart(
+    tool: String,
+    status: ToolExecutionStatus = .completed,
+    input: [String: JSONValue] = [:],
+    metadata: [String: JSONValue]? = nil,
+    output: String? = nil,
+    error: String? = nil,
+    title: String? = nil
+) -> MessagePart {
+    MessagePart(
+        id: UUID().uuidString,
+        sessionID: "session-1",
+        messageID: "message-1",
+        type: .tool,
+        text: nil,
+        synthetic: nil,
+        ignored: nil,
+        time: nil,
+        metadata: nil,
+        callID: nil,
+        tool: tool,
+        state: .init(
+            status: status,
+            input: input,
+            raw: nil,
+            output: output,
+            title: title,
+            metadata: metadata,
+            error: error,
+            time: nil,
+            attachments: nil
+        ),
+        mime: nil,
+        filename: nil,
+        url: nil,
+        reason: nil,
+        cost: nil,
+        tokens: nil,
+        prompt: nil,
+        description: nil,
+        agent: nil,
+        model: nil,
+        command: nil,
+        name: nil,
+        source: nil,
+        hash: nil,
+        files: nil,
+        snapshot: nil
+    )
+}
+
 private func makeTemporaryDirectory() throws -> String {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url.path
+}
+
+private func waitForAsyncWork(milliseconds: UInt64 = 200) async throws {
+    try await Task.sleep(for: .milliseconds(Int(milliseconds)))
 }

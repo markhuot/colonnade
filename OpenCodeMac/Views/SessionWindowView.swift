@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SessionWindowView: View {
     @EnvironmentObject private var appState: OpenCodeAppState
+    @Environment(\.openCodeTheme) private var theme
 
     let sessionID: String
 
@@ -12,12 +13,15 @@ struct SessionWindowView: View {
             } else if let liveStore = appState.liveStore {
                 SessionColumnView(sessionState: liveStore.sessionState(for: sessionID), sessionID: sessionID)
                     .padding(20)
-                    .background(Color(nsColor: .windowBackgroundColor))
+                    .background(theme.windowBackground)
             } else {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .foregroundStyle(theme.primaryText)
+        .background(theme.windowBackground)
+        .themedWindow(theme)
         .background(
             FocusedSessionTimelineKeyHandler { direction in
                 appState.scrollFocusedSessionTimeline(to: direction)

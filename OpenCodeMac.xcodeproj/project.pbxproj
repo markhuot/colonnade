@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		130A4F163B0EFC5E2BCCFB82 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = 66954B1D0A3FFA4969F71E23 /* Textual */; };
 		2B8E0E3665D5DE83CD22B2E3 /* PersistenceCoders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9511D1AFA39A8CB8F10C1753 /* PersistenceCoders.swift */; };
 		3232F171E125BAD3B849C009 /* PromptTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A99DDE9B3B2228B13B2A8E0C /* PromptTextView.swift */; };
 		3490694066A5ACEF1B4A55C2 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECAF9D1D4203CFEF25E5D144 /* AppState.swift */; };
@@ -20,6 +21,7 @@
 		B1059EBD6FEC0B513EA5E25E /* OpenCodeAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B496861187E8823078C26EB /* OpenCodeAPIClient.swift */; };
 		C0375C8662D931E7EA64D576 /* Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56054F7F8C19F16E2E020818 /* Persistence.swift */; };
 		C13B56BBCF211199F77E5A0C /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27A7C7DF46DAEBD990EE2197 /* RootView.swift */; };
+		C44B27E54CC0855ACDA2B567 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = 813520321C67978B5CD13456 /* Textual */; };
 		CF71E5D7B1DC24C1BE37E48E /* EventPayloadDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E440406655C557E9E6AF1E56 /* EventPayloadDecoder.swift */; };
 		DE4CC036824D3B2BCFBBD2E3 /* StringBackedTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71A5611DDBE877186A746D49 /* StringBackedTypes.swift */; };
 		DE701B87CA084CDE8B805431 /* SessionStatusIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73C51D7526E02048AE253024 /* SessionStatusIcon.swift */; };
@@ -51,6 +53,7 @@
 		56054F7F8C19F16E2E020818 /* Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence.swift; sourceTree = "<group>"; };
 		5901887FE669C14CA2722161 /* OpenCodeMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenCodeMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		5B496861187E8823078C26EB /* OpenCodeAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeAPIClient.swift; sourceTree = "<group>"; };
+		64A78153A58A48CCE1C022D3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		71A5611DDBE877186A746D49 /* StringBackedTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StringBackedTypes.swift; sourceTree = "<group>"; };
 		73C51D7526E02048AE253024 /* SessionStatusIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStatusIcon.swift; sourceTree = "<group>"; };
 		9511D1AFA39A8CB8F10C1753 /* PersistenceCoders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceCoders.swift; sourceTree = "<group>"; };
@@ -65,6 +68,25 @@
 		ECAF9D1D4203CFEF25E5D144 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		FBEEBDF0F920CFBEC5CC8538 /* WorkspaceSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSyncCoordinator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		503E38228AB54D9BB24B9BB0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				130A4F163B0EFC5E2BCCFB82 /* Textual in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B06040FE7829874C887CA6E4 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C44B27E54CC0855ACDA2B567 /* Textual in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		1E2686789A452E343FE75F27 /* OpenCodeMacTests */ = {
@@ -113,6 +135,7 @@
 			children = (
 				ECAF9D1D4203CFEF25E5D144 /* AppState.swift */,
 				E440406655C557E9E6AF1E56 /* EventPayloadDecoder.swift */,
+				64A78153A58A48CCE1C022D3 /* Info.plist */,
 				1804E88459DF2C4DC0219726 /* Models.swift */,
 				5B496861187E8823078C26EB /* OpenCodeAPIClient.swift */,
 				16FEE401CDB397B512C6FF4D /* OpenCodeMacApp.swift */,
@@ -136,6 +159,7 @@
 			buildConfigurationList = 02E3B6C5EDBB1D7AFCAA7B62 /* Build configuration list for PBXNativeTarget "OpenCodeMac" */;
 			buildPhases = (
 				77293CEEC3A55F4B7E8CB249 /* Sources */,
+				B06040FE7829874C887CA6E4 /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -143,6 +167,7 @@
 			);
 			name = OpenCodeMac;
 			packageProductDependencies = (
+				813520321C67978B5CD13456 /* Textual */,
 			);
 			productName = OpenCodeMac;
 			productReference = 10D389F25A56A6CCB7E31FFF /* OpenCodeMac.app */;
@@ -153,6 +178,7 @@
 			buildConfigurationList = 736977C8CC5801DED0FE2863 /* Build configuration list for PBXNativeTarget "OpenCodeMacTests" */;
 			buildPhases = (
 				069FDAA22865285771D8F425 /* Sources */,
+				503E38228AB54D9BB24B9BB0 /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -161,6 +187,7 @@
 			);
 			name = OpenCodeMacTests;
 			packageProductDependencies = (
+				66954B1D0A3FFA4969F71E23 /* Textual */,
 			);
 			productName = OpenCodeMacTests;
 			productReference = 5901887FE669C14CA2722161 /* OpenCodeMacTests.xctest */;
@@ -190,6 +217,9 @@
 			);
 			mainGroup = AA46BF88D0A104B925D22205;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				5C89724B9D8D9AD24D3AE197 /* XCRemoteSwiftPackageReference "textual" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C13890FD092A5AE442CCA3ED /* Products */;
 			projectDirPath = "";
@@ -325,6 +355,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEVELOPMENT_TEAM = "";
+				INFOPLIST_FILE = OpenCodeMac/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -404,6 +435,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEVELOPMENT_TEAM = "";
+				INFOPLIST_FILE = OpenCodeMac/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -478,6 +510,30 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		5C89724B9D8D9AD24D3AE197 /* XCRemoteSwiftPackageReference "textual" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/textual";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		66954B1D0A3FFA4969F71E23 /* Textual */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5C89724B9D8D9AD24D3AE197 /* XCRemoteSwiftPackageReference "textual" */;
+			productName = Textual;
+		};
+		813520321C67978B5CD13456 /* Textual */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5C89724B9D8D9AD24D3AE197 /* XCRemoteSwiftPackageReference "textual" */;
+			productName = Textual;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 599A045A1C5C9BB993F0D4E1 /* Project object */;
 }

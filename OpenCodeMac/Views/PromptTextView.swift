@@ -7,6 +7,9 @@ struct PromptTextView: NSViewRepresentable {
     @Binding var text: String
     @Binding var measuredHeight: CGFloat
     let placeholder: String
+    let textColor: NSColor
+    let insertionPointColor: NSColor
+    let placeholderColor: NSColor
     let focusRequestID: UUID?
     let onFocus: () -> Void
     let onSubmit: () -> Void
@@ -23,6 +26,9 @@ struct PromptTextView: NSViewRepresentable {
             maxLineCount: maxLineCount,
             textInsets: textInsets,
             placeholder: placeholder,
+            textColor: textColor,
+            insertionPointColor: insertionPointColor,
+            placeholderColor: placeholderColor,
             focusRequestID: focusRequestID,
             onFocus: onFocus,
             onSubmit: onSubmit
@@ -51,6 +57,9 @@ struct PromptTextView: NSViewRepresentable {
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.font = .preferredFont(forTextStyle: .body)
         textView.backgroundColor = .clear
+        textView.textColor = textColor
+        textView.insertionPointColor = insertionPointColor
+        textView.placeholderColor = placeholderColor
         textView.isHorizontallyResizable = false
         textView.isVerticallyResizable = true
         textView.textContainer?.widthTracksTextView = true
@@ -69,6 +78,9 @@ struct PromptTextView: NSViewRepresentable {
         textView.onFocus = context.coordinator.onFocus
         textView.onSubmit = onSubmit
         textView.placeholder = placeholder
+        textView.textColor = textColor
+        textView.insertionPointColor = insertionPointColor
+        textView.placeholderColor = placeholderColor
         if textView.string != text {
             textView.string = text
         }
@@ -84,6 +96,9 @@ struct PromptTextView: NSViewRepresentable {
         let maxLineCount: Int
         let textInsets: NSSize
         let placeholder: String
+        let textColor: NSColor
+        let insertionPointColor: NSColor
+        let placeholderColor: NSColor
         private var lastAppliedFocusRequestID: UUID?
         let onFocus: () -> Void
         let onSubmit: () -> Void
@@ -95,6 +110,9 @@ struct PromptTextView: NSViewRepresentable {
             maxLineCount: Int,
             textInsets: NSSize,
             placeholder: String,
+            textColor: NSColor,
+            insertionPointColor: NSColor,
+            placeholderColor: NSColor,
             focusRequestID: UUID?,
             onFocus: @escaping () -> Void,
             onSubmit: @escaping () -> Void
@@ -105,6 +123,9 @@ struct PromptTextView: NSViewRepresentable {
             self.maxLineCount = maxLineCount
             self.textInsets = textInsets
             self.placeholder = placeholder
+            self.textColor = textColor
+            self.insertionPointColor = insertionPointColor
+            self.placeholderColor = placeholderColor
             lastAppliedFocusRequestID = nil
             self.onFocus = onFocus
             self.onSubmit = onSubmit
@@ -200,6 +221,7 @@ final class PromptScrollView: NSScrollView {
 final class PromptNSTextView: NSTextView {
     var onFocus: (() -> Void)?
     var onSubmit: (() -> Void)?
+    var placeholderColor: NSColor = .placeholderTextColor
     var placeholder = "" {
         didSet {
             needsDisplay = true
@@ -258,7 +280,7 @@ final class PromptNSTextView: NSTextView {
         let font = font ?? .preferredFont(forTextStyle: .body)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor.placeholderTextColor
+            .foregroundColor: placeholderColor
         ]
 
         let origin = NSPoint(

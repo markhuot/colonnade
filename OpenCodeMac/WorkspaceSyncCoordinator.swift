@@ -12,7 +12,7 @@ protocol WorkspaceSyncCoordinating: Sendable {
 }
 
 protocol WorkspaceSyncRegistryProtocol: Actor {
-    func coordinator(for directory: String) -> any WorkspaceSyncCoordinating
+    func coordinator(for connection: WorkspaceConnection) -> any WorkspaceSyncCoordinating
 }
 
 private enum MessageMutationFallback: Sendable {
@@ -22,22 +22,22 @@ private enum MessageMutationFallback: Sendable {
 actor WorkspaceSyncRegistry: WorkspaceSyncRegistryProtocol {
     static let shared = WorkspaceSyncRegistry()
 
-    private var coordinators: [String: WorkspaceSyncCoordinator] = [:]
-    private let coordinatorFactory: @Sendable (String) -> WorkspaceSyncCoordinator
+    private var coordinators: [WorkspaceConnection: WorkspaceSyncCoordinator] = [:]
+    private let coordinatorFactory: @Sendable (WorkspaceConnection) -> WorkspaceSyncCoordinator
 
-    init(coordinatorFactory: @escaping @Sendable (String) -> WorkspaceSyncCoordinator = { directory in
-        WorkspaceSyncCoordinator(directory: directory)
+    init(coordinatorFactory: @escaping @Sendable (WorkspaceConnection) -> WorkspaceSyncCoordinator = { connection in
+        WorkspaceSyncCoordinator(connection: connection)
     }) {
         self.coordinatorFactory = coordinatorFactory
     }
 
-    func coordinator(for directory: String) -> any WorkspaceSyncCoordinating {
-        if let existing = coordinators[directory] {
+    func coordinator(for connection: WorkspaceConnection) -> any WorkspaceSyncCoordinating {
+        if let existing = coordinators[connection] {
             return existing
         }
 
-        let coordinator = coordinatorFactory(directory)
-        coordinators[directory] = coordinator
+        let coordinator = coordinatorFactory(connection)
+        coordinators[connection] = coordinator
         return coordinator
     }
 }
@@ -50,7 +50,8 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
     private let repository: PersistenceRepository
     private let storeRegistry: WorkspaceLiveStoreRegistry
 
-    private let directory: String
+    private let connection: WorkspaceConnection
+    private var directory: String { connection.directory }
     private var modelContextLimits: [ModelContextKey: Int] = [:]
     private var openSessionIDs: [String] = []
 
@@ -85,15 +86,16 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
     }
 
     init(
-        directory: String,
-        client: any OpenCodeAPIClientProtocol = OpenCodeAPIClient(),
+        connection: WorkspaceConnection,
+        client: (any OpenCodeAPIClientProtocol)? = nil,
         workspaceService: (any WorkspaceServiceProtocol)? = nil,
         repository: PersistenceRepository = .shared,
         storeRegistry: WorkspaceLiveStoreRegistry = .shared
     ) {
-        self.directory = directory
-        self.client = client
-        self.workspaceService = workspaceService ?? WorkspaceService(client: client)
+        self.connection = connection
+        let resolvedClient = client ?? OpenCodeAPIClient(baseURL: connection.serverURL)
+        self.client = resolvedClient
+        self.workspaceService = workspaceService ?? WorkspaceService(client: resolvedClient)
         self.repository = repository
         self.storeRegistry = storeRegistry
     }
@@ -319,7 +321,7 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
                 lifecycle: lifecycle,
                 modelContextLimits: modelContextLimits
             )
-            let store = await storeRegistry.store(for: directory)
+            let store = await storeRegistry.store(for: connection)
             await MainActor.run {
                 store.applySessionLifecycle(session: session, lifecycle: lifecycle)
             }
@@ -337,7 +339,7 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
                 status: status,
                 modelContextLimits: modelContextLimits
             )
-            let store = await storeRegistry.store(for: directory)
+            let store = await storeRegistry.store(for: connection)
             await MainActor.run {
                 store.applyStatus(sessionID: sessionID, status: status)
             }
@@ -445,7 +447,7 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
     }
 
     private func withStore<T: Sendable>(_ body: @MainActor @escaping (WorkspaceLiveStore) -> T) async -> T {
-        let store = await storeRegistry.store(for: directory)
+        let store = await storeRegistry.store(for: connection)
         return await MainActor.run {
             body(store)
         }

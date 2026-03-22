@@ -1,6 +1,8 @@
 import Foundation
 
 protocol OpenCodeAPIClientProtocol: Sendable {
+    func health() async throws -> OpenCodeServerHealth
+    func projects() async throws -> [OpenCodeProject]
     func sessions(directory: String) async throws -> [OpenCodeSession]
     func sessionStatus(directory: String) async throws -> [String: SessionStatus]
     func messages(directory: String, sessionID: String) async throws -> [MessageEnvelope]
@@ -38,6 +40,14 @@ struct OpenCodeAPIClient: @unchecked Sendable {
 
     func sessions(directory: String) async throws -> [OpenCodeSession] {
         try await get("/session", directory: directory)
+    }
+
+    func health() async throws -> OpenCodeServerHealth {
+        try await globalGet("/global/health")
+    }
+
+    func projects() async throws -> [OpenCodeProject] {
+        try await globalGet("/project")
     }
 
     func sessionStatus(directory: String) async throws -> [String: SessionStatus] {
@@ -199,6 +209,17 @@ struct OpenCodeAPIClient: @unchecked Sendable {
 
     private func get<T: Decodable>(_ path: String, directory: String) async throws -> T {
         try await send(path: path, method: "GET", directory: directory, body: Optional<String>.none, responseType: T.self, allowNoBody: true)
+    }
+
+    private func globalGet<T: Decodable>(_ path: String) async throws -> T {
+        var request = URLRequest(url: globalURL(path: path))
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 5
+
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response)
+        return try decoder.decode(T.self, from: data)
     }
 
     private func send<Body: Encodable, Response: Decodable>(

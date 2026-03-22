@@ -13,15 +13,29 @@ settings:
     INFOPLIST_KEY_CFBundleDisplayName: OpenCodeMac
     INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
     INFOPLIST_KEY_NSHumanReadableCopyright: Copyright 2026
+packages:
+  Textual:
+    url: https://github.com/gonzalezreal/textual
+    from: 0.1.0
 targets:
   OpenCodeMac:
     type: application
     platform: macOS
+    info:
+      path: OpenCodeMac/Info.plist
+      properties:
+        CFBundleDisplayName: OpenCodeMac
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSHumanReadableCopyright: Copyright 2026
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
     sources:
       - path: OpenCodeMac
         excludes:
           - PanePersistenceStore.swift
           - SessionStore.swift
+    dependencies:
+      - package: Textual
     settings:
       base:
         CODE_SIGN_STYLE: Automatic
@@ -37,6 +51,7 @@ targets:
       - path: OpenCodeMacTests
     dependencies:
       - target: OpenCodeMac
+      - package: Textual
     settings:
       base:
         PRODUCT_NAME: OpenCodeMacTests

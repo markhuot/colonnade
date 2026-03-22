@@ -1,5 +1,245 @@
+import AppKit
 import Foundation
 import SwiftUI
+
+enum OpenCodeThemeID: String, CaseIterable, Identifiable, Codable {
+    case native
+    case githubLight = "github-light"
+    case githubDark = "github-dark"
+    case nord
+    case oneDarkPro = "one-dark-pro"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .native:
+            return "Native"
+        case .githubLight:
+            return "GitHub Light"
+        case .githubDark:
+            return "GitHub Dark"
+        case .nord:
+            return "Nord"
+        case .oneDarkPro:
+            return "One Dark Pro"
+        }
+    }
+}
+
+struct OpenCodeTheme: Equatable {
+    let id: OpenCodeThemeID
+    let preferredColorScheme: ColorScheme?
+    let windowBackgroundColor: NSColor
+    let surfaceBackgroundColor: NSColor
+    let mutedSurfaceBackgroundColor: NSColor
+    let inputBackgroundColor: NSColor
+    let primaryTextColor: NSColor
+    let secondaryTextColor: NSColor
+    let borderColor: NSColor
+    let assistantBubbleColor: NSColor
+    let codeBlockBackgroundColor: NSColor
+    let toolCardBackgroundColor: NSColor
+    let diffAdditionColor: NSColor
+    let diffAdditionBackgroundColor: NSColor
+    let diffDeletionColor: NSColor
+    let diffDeletionBackgroundColor: NSColor
+
+    static func == (lhs: OpenCodeTheme, rhs: OpenCodeTheme) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    static func resolve(_ id: OpenCodeThemeID) -> OpenCodeTheme {
+        switch id {
+        case .native:
+            return OpenCodeTheme(
+                id: .native,
+                preferredColorScheme: nil,
+                windowBackgroundColor: .windowBackgroundColor,
+                surfaceBackgroundColor: .windowBackgroundColor,
+                mutedSurfaceBackgroundColor: .controlBackgroundColor,
+                inputBackgroundColor: .textBackgroundColor,
+                primaryTextColor: .labelColor,
+                secondaryTextColor: .secondaryLabelColor,
+                borderColor: .separatorColor.withAlphaComponent(0.7),
+                assistantBubbleColor: .controlBackgroundColor,
+                codeBlockBackgroundColor: .controlBackgroundColor,
+                toolCardBackgroundColor: .controlBackgroundColor,
+                diffAdditionColor: .systemGreen,
+                diffAdditionBackgroundColor: .systemGreen.withAlphaComponent(0.16),
+                diffDeletionColor: .systemRed,
+                diffDeletionBackgroundColor: .systemRed.withAlphaComponent(0.16)
+            )
+        case .githubLight:
+            return OpenCodeTheme(
+                id: .githubLight,
+                preferredColorScheme: .light,
+                windowBackgroundColor: NSColor(hex: 0xFFFFFF),
+                surfaceBackgroundColor: NSColor(hex: 0xF6F8FA),
+                mutedSurfaceBackgroundColor: NSColor(hex: 0xEFF2F5),
+                inputBackgroundColor: NSColor(hex: 0xFFFFFF),
+                primaryTextColor: NSColor(hex: 0x1F2328),
+                secondaryTextColor: NSColor(hex: 0x656D76),
+                borderColor: NSColor(hex: 0xD0D7DE),
+                assistantBubbleColor: NSColor(hex: 0xF6F8FA),
+                codeBlockBackgroundColor: NSColor(hex: 0xEFF2F5),
+                toolCardBackgroundColor: NSColor(hex: 0xF0F3F6),
+                diffAdditionColor: NSColor(hex: 0x1A7F37),
+                diffAdditionBackgroundColor: NSColor(hex: 0xDFF3E4),
+                diffDeletionColor: NSColor(hex: 0xCF222E),
+                diffDeletionBackgroundColor: NSColor(hex: 0xFFEBE9)
+            )
+        case .githubDark:
+            return OpenCodeTheme(
+                id: .githubDark,
+                preferredColorScheme: .dark,
+                windowBackgroundColor: NSColor(hex: 0x0D1117),
+                surfaceBackgroundColor: NSColor(hex: 0x161B22),
+                mutedSurfaceBackgroundColor: NSColor(hex: 0x1F2630),
+                inputBackgroundColor: NSColor(hex: 0x0D1117),
+                primaryTextColor: NSColor(hex: 0xE6EDF3),
+                secondaryTextColor: NSColor(hex: 0x8B949E),
+                borderColor: NSColor(hex: 0x30363D),
+                assistantBubbleColor: NSColor(hex: 0x161B22),
+                codeBlockBackgroundColor: NSColor(hex: 0x11161D),
+                toolCardBackgroundColor: NSColor(hex: 0x11161D),
+                diffAdditionColor: NSColor(hex: 0x3FB950),
+                diffAdditionBackgroundColor: NSColor(hex: 0x0F381A),
+                diffDeletionColor: NSColor(hex: 0xF85149),
+                diffDeletionBackgroundColor: NSColor(hex: 0x3F1518)
+            )
+        case .nord:
+            return OpenCodeTheme(
+                id: .nord,
+                preferredColorScheme: .dark,
+                windowBackgroundColor: NSColor(hex: 0x2E3440),
+                surfaceBackgroundColor: NSColor(hex: 0x3B4252),
+                mutedSurfaceBackgroundColor: NSColor(hex: 0x434C5E),
+                inputBackgroundColor: NSColor(hex: 0x2A303B),
+                primaryTextColor: NSColor(hex: 0xECEFF4),
+                secondaryTextColor: NSColor(hex: 0xD8DEE9),
+                borderColor: NSColor(hex: 0x4C566A),
+                assistantBubbleColor: NSColor(hex: 0x434C5E),
+                codeBlockBackgroundColor: NSColor(hex: 0x2A303B),
+                toolCardBackgroundColor: NSColor(hex: 0x2A303B),
+                diffAdditionColor: NSColor(hex: 0xA3BE8C),
+                diffAdditionBackgroundColor: NSColor(hex: 0x3E4C41),
+                diffDeletionColor: NSColor(hex: 0xBF616A),
+                diffDeletionBackgroundColor: NSColor(hex: 0x4D3841)
+            )
+        case .oneDarkPro:
+            return OpenCodeTheme(
+                id: .oneDarkPro,
+                preferredColorScheme: .dark,
+                windowBackgroundColor: NSColor(hex: 0x282C34),
+                surfaceBackgroundColor: NSColor(hex: 0x31353F),
+                mutedSurfaceBackgroundColor: NSColor(hex: 0x3A3F4B),
+                inputBackgroundColor: NSColor(hex: 0x21252B),
+                primaryTextColor: NSColor(hex: 0xABB2BF),
+                secondaryTextColor: NSColor(hex: 0x7F848E),
+                borderColor: NSColor(hex: 0x4B5263),
+                assistantBubbleColor: NSColor(hex: 0x31353F),
+                codeBlockBackgroundColor: NSColor(hex: 0x21252B),
+                toolCardBackgroundColor: NSColor(hex: 0x21252B),
+                diffAdditionColor: NSColor(hex: 0x98C379),
+                diffAdditionBackgroundColor: NSColor(hex: 0x253126),
+                diffDeletionColor: NSColor(hex: 0xE06C75),
+                diffDeletionBackgroundColor: NSColor(hex: 0x3B2228)
+            )
+        }
+    }
+
+    var displayName: String { id.displayName }
+    var windowBackground: Color { Color(nsColor: windowBackgroundColor) }
+    var surfaceBackground: Color { Color(nsColor: surfaceBackgroundColor) }
+    var mutedSurfaceBackground: Color { Color(nsColor: mutedSurfaceBackgroundColor) }
+    var inputBackground: Color { Color(nsColor: inputBackgroundColor) }
+    var primaryText: Color { Color(nsColor: primaryTextColor) }
+    var secondaryText: Color { Color(nsColor: secondaryTextColor) }
+    var border: Color { Color(nsColor: borderColor) }
+    var assistantBubble: Color { Color(nsColor: assistantBubbleColor) }
+    var codeBlockBackground: Color { Color(nsColor: codeBlockBackgroundColor) }
+    var toolCardBackground: Color { Color(nsColor: toolCardBackgroundColor) }
+    var diffAddition: Color { Color(nsColor: diffAdditionColor) }
+    var diffAdditionBackground: Color { Color(nsColor: diffAdditionBackgroundColor) }
+    var diffDeletion: Color { Color(nsColor: diffDeletionColor) }
+    var diffDeletionBackground: Color { Color(nsColor: diffDeletionBackgroundColor) }
+}
+
+@MainActor
+final class ThemeController: ObservableObject {
+    enum Constants {
+        static let selectedThemeKey = "selectedTheme"
+    }
+
+    @Published private(set) var selectedThemeID: OpenCodeThemeID
+
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+
+        if let rawValue = defaults.string(forKey: Constants.selectedThemeKey),
+           let storedTheme = OpenCodeThemeID(rawValue: rawValue) {
+            selectedThemeID = storedTheme
+        } else {
+            selectedThemeID = .native
+        }
+    }
+
+    var selectedTheme: OpenCodeTheme {
+        OpenCodeTheme.resolve(selectedThemeID)
+    }
+
+    func selectTheme(_ themeID: OpenCodeThemeID) {
+        guard selectedThemeID != themeID else { return }
+        selectedThemeID = themeID
+        defaults.set(themeID.rawValue, forKey: Constants.selectedThemeKey)
+    }
+}
+
+private struct OpenCodeThemeEnvironmentKey: EnvironmentKey {
+    static let defaultValue = OpenCodeTheme.resolve(.native)
+}
+
+extension EnvironmentValues {
+    var openCodeTheme: OpenCodeTheme {
+        get { self[OpenCodeThemeEnvironmentKey.self] }
+        set { self[OpenCodeThemeEnvironmentKey.self] = newValue }
+    }
+}
+
+extension View {
+    func themedWindow(_ theme: OpenCodeTheme) -> some View {
+        background(WindowThemeView(theme: theme))
+    }
+}
+
+struct WindowThemeView: NSViewRepresentable {
+    let theme: OpenCodeTheme
+
+    func makeNSView(context: Context) -> NSView {
+        NSView(frame: .zero)
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            guard let window = nsView.window else { return }
+            window.backgroundColor = theme.windowBackgroundColor
+        }
+    }
+}
+
+private extension NSColor {
+    convenience init(hex: UInt32) {
+        self.init(
+            srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: 1
+        )
+    }
+}
 
 struct OpenCodeSession: Codable, Identifiable, Hashable {
     struct Summary: Codable, Hashable {
@@ -25,6 +265,37 @@ struct OpenCodeSession: Codable, Identifiable, Hashable {
     let version: String
     let summary: Summary?
     let time: TimeInfo
+}
+
+struct OpenCodeServerHealth: Codable, Hashable {
+    let healthy: Bool
+    let version: String
+}
+
+struct OpenCodeProject: Codable, Hashable, Identifiable {
+    struct TimeInfo: Codable, Hashable {
+        let created: Double
+        let initialized: Double?
+    }
+
+    let id: String
+    let worktree: String
+    let vcsDir: String?
+    let vcs: String?
+    let time: TimeInfo
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case worktree
+        case vcsDir
+        case vcs
+        case time
+    }
+}
+
+struct WorkspaceConnection: Codable, Hashable {
+    let serverURL: URL
+    let directory: String
 }
 
 struct ModelContextKey: Hashable {
@@ -458,7 +729,7 @@ struct EventPayload: Codable {
 }
 
 struct SessionWindowContext: Codable, Hashable {
-    let directory: String
+    let connection: WorkspaceConnection
     let sessionID: String
 }
 
@@ -504,6 +775,454 @@ struct SessionIndicator {
             }(),
             showsTodoProgress: status.showsTodoProgress
         )
+    }
+}
+
+struct ToolCallSummary: Hashable {
+    let action: String
+    let target: String?
+    let additions: Int?
+    let deletions: Int?
+}
+
+struct ToolPatchSummary: Hashable {
+    let target: String?
+    let additions: Int?
+    let deletions: Int?
+}
+
+enum ToolPatchFileOperation: String, Hashable {
+    case added
+    case updated
+    case deleted
+    case moved
+}
+
+enum ToolPatchLineKind: Hashable {
+    case context
+    case addition
+    case deletion
+}
+
+struct ToolPatchLine: Identifiable, Hashable {
+    let id: Int
+    let kind: ToolPatchLineKind
+    let text: String
+}
+
+struct ToolPatchHunk: Identifiable, Hashable {
+    let id: Int
+    let header: String?
+    let lines: [ToolPatchLine]
+}
+
+struct ToolPatchFile: Identifiable, Hashable {
+    let id: Int
+    let path: String
+    let destinationPath: String?
+    let operation: ToolPatchFileOperation
+    let hunks: [ToolPatchHunk]
+}
+
+struct ToolPatchDetail: Hashable {
+    let files: [ToolPatchFile]
+}
+
+struct ToolReadSummary: Hashable {
+    let fileName: String?
+    let path: String?
+}
+
+enum ToolSummaryStyle: Hashable {
+    case standard(ToolCallSummary)
+    case patch(ToolPatchSummary)
+    case read(ToolReadSummary)
+}
+
+enum ToolDrawerStyle: Hashable {
+    case standard
+    case patch(ToolPatchDetail)
+}
+
+struct ToolDetailField: Identifiable, Hashable {
+    let title: String
+    let value: String
+
+    var id: String { title + value }
+}
+
+struct ToolPresentation: Hashable {
+    let summaryStyle: ToolSummaryStyle
+    let drawerStyle: ToolDrawerStyle
+    let detailFields: [ToolDetailField]
+    let statusLabel: String?
+    let fallbackDetail: String?
+}
+
+extension MessagePart {
+    var toolPresentation: ToolPresentation {
+        let descriptor = toolDescriptor
+        let statusLabel = state.flatMap { $0.status == .completed ? nil : $0.status.title }
+        let hasSupplementalContent = !(state?.output?.isEmpty ?? true) || !(state?.error?.isEmpty ?? true)
+        let fallbackDetail: String?
+
+        if descriptor.detailFields.isEmpty, !hasSupplementalContent, state?.status != .completed {
+            fallbackDetail = state?.status.title ?? ToolExecutionStatus.pending.title
+        } else {
+            fallbackDetail = nil
+        }
+
+        return ToolPresentation(
+            summaryStyle: descriptor.summaryStyle,
+            drawerStyle: descriptor.drawerStyle,
+            detailFields: descriptor.detailFields,
+            statusLabel: statusLabel,
+            fallbackDetail: fallbackDetail
+        )
+    }
+
+    private var toolDescriptor: ToolDescriptor {
+        let input = state?.input ?? [:]
+
+        switch toolKey {
+        case "apply_patch":
+            let patch = Self.patchDetail(from: input["patchText"]?.stringValue)
+            let paths = patch?.files.map { Self.fileName(from: $0.destinationPath ?? $0.path) ?? ($0.destinationPath ?? $0.path) } ?? Self.patchPaths(from: input["patchText"]?.stringValue)
+            let diffStat = Self.patchDiffStat(from: state?.metadata)
+            return ToolDescriptor(
+                summaryStyle: .patch(
+                    ToolPatchSummary(
+                        target: Self.compactTargetLabel(from: paths),
+                        additions: diffStat.additions,
+                        deletions: diffStat.deletions
+                    )
+                ),
+                detailFields: paths.isEmpty ? [] : [ToolDetailField(title: "Files", value: paths.joined(separator: "\n"))],
+                drawerStyle: patch.map(ToolDrawerStyle.patch) ?? .standard
+            )
+        case "read":
+            let filePath = input["filePath"]?.stringValue
+            return ToolDescriptor(
+                summaryStyle: .read(
+                    ToolReadSummary(
+                        fileName: Self.fileName(from: filePath),
+                        path: filePath
+                    )
+                ),
+                detailFields: Self.detailField(title: "Path", value: filePath)
+            )
+        case "write", "edit":
+            let filePath = input["filePath"]?.stringValue
+            return ToolDescriptor(
+                summaryStyle: .standard(
+                    ToolCallSummary(
+                        action: toolKey.capitalized,
+                        target: Self.fileName(from: filePath),
+                        additions: nil,
+                        deletions: nil
+                    )
+                ),
+                detailFields: Self.detailField(title: "Path", value: filePath)
+            )
+        case "grep":
+            let pattern = input["pattern"]?.stringValue
+            return ToolDescriptor(
+                summaryStyle: .standard(
+                    ToolCallSummary(action: "Search", target: pattern, additions: nil, deletions: nil)
+                ),
+                detailFields: Self.detailField(title: "Pattern", value: pattern)
+            )
+        case "glob":
+            let pattern = input["pattern"]?.stringValue
+            return ToolDescriptor(
+                summaryStyle: .standard(
+                    ToolCallSummary(action: "Find", target: pattern, additions: nil, deletions: nil)
+                ),
+                detailFields: Self.detailField(title: "Pattern", value: pattern)
+            )
+        case "webfetch":
+            let url = input["url"]?.stringValue
+            return ToolDescriptor(
+                summaryStyle: .standard(
+                    ToolCallSummary(action: "Fetch", target: url, additions: nil, deletions: nil)
+                ),
+                detailFields: Self.detailField(title: "URL", value: url)
+            )
+        case "bash":
+            let command = input["command"]?.stringValue
+            let description = input["description"]?.stringValue
+            let action: String
+
+            if let description, !description.isEmpty {
+                action = Self.capitalizedSentence(description)
+            } else if let command, !command.isEmpty {
+                action = "Run"
+            } else {
+                action = "Run command"
+            }
+
+            return ToolDescriptor(
+                summaryStyle: .standard(
+                    ToolCallSummary(
+                        action: action,
+                        target: action == "Run" ? Self.truncated(command ?? "", limit: 44) : nil,
+                        additions: nil,
+                        deletions: nil
+                    )
+                ),
+                detailFields: Self.detailField(title: "Command", value: command)
+            )
+        default:
+            return ToolDescriptor(
+                summaryStyle: .standard(
+                    ToolCallSummary(
+                        action: state?.title.flatMap { $0.isEmpty ? nil : $0 } ?? Self.humanizedToolName(toolKey),
+                        target: nil,
+                        additions: nil,
+                        deletions: nil
+                    )
+                ),
+                detailFields: []
+            )
+        }
+    }
+
+    private var toolKey: String {
+        let raw = tool ?? "tool"
+        return raw.split(separator: ".").last.map(String.init) ?? raw
+    }
+
+    private static func detailField(title: String, value: String?) -> [ToolDetailField] {
+        guard let value, !value.isEmpty else { return [] }
+        return [ToolDetailField(title: title, value: value)]
+    }
+
+    private static func humanizedToolName(_ tool: String) -> String {
+        tool
+            .split(separator: "_")
+            .map { $0.capitalized }
+            .joined(separator: " ")
+    }
+
+    private static func capitalizedSentence(_ value: String) -> String {
+        guard let first = value.first else { return value }
+        return String(first).uppercased() + value.dropFirst()
+    }
+
+    private static func truncated(_ value: String, limit: Int) -> String {
+        guard value.count > limit else { return value }
+        return String(value.prefix(limit - 1)) + "..."
+    }
+
+    private static func fileName(from path: String?) -> String? {
+        guard let path, !path.isEmpty else { return nil }
+        return (path as NSString).lastPathComponent
+    }
+
+    private static func compactTargetLabel(from paths: [String]) -> String? {
+        guard let first = paths.first else { return nil }
+        guard paths.count == 1 else { return "\(first) +\(paths.count - 1)" }
+        return first
+    }
+
+    private static func patchPaths(from patchText: String?) -> [String] {
+        guard let patchText, !patchText.isEmpty else { return [] }
+
+        let prefixes = ["*** Update File: ", "*** Add File: ", "*** Delete File: "]
+        var paths: [String] = []
+
+        for line in patchText.components(separatedBy: .newlines) {
+            guard let prefix = prefixes.first(where: { line.hasPrefix($0) }) else {
+                continue
+            }
+
+            let path = String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+            guard !path.isEmpty else { continue }
+
+            let fileName = fileName(from: path) ?? path
+            if !paths.contains(fileName) {
+                paths.append(fileName)
+            }
+        }
+
+        return paths
+    }
+
+    private static func patchDiffStat(from metadata: [String: JSONValue]?) -> (additions: Int?, deletions: Int?) {
+        guard let metadata else { return (nil, nil) }
+
+        let additions = jsonInt(metadata["additions"])
+            ?? jsonInt(metadata["insertions"])
+            ?? jsonInt(metadata["summary"]?.objectValue?["additions"])
+        let deletions = jsonInt(metadata["deletions"])
+            ?? jsonInt(metadata["removals"])
+            ?? jsonInt(metadata["summary"]?.objectValue?["deletions"])
+
+        return (additions, deletions)
+    }
+
+    private static func patchDetail(from patchText: String?) -> ToolPatchDetail? {
+        guard let patchText, !patchText.isEmpty else { return nil }
+
+        struct FileBuilder {
+            let id: Int
+            let path: String
+            var destinationPath: String?
+            var operation: ToolPatchFileOperation
+            var hunks: [ToolPatchHunk]
+        }
+
+        var files: [ToolPatchFile] = []
+        var currentFile: FileBuilder?
+        var currentHunkHeader: String?
+        var currentLines: [ToolPatchLine] = []
+        var nextFileID = 0
+        var nextHunkID = 0
+        var nextLineID = 0
+
+        func buildFile(from builder: FileBuilder) -> ToolPatchFile {
+            ToolPatchFile(
+                id: builder.id,
+                path: builder.path,
+                destinationPath: builder.destinationPath,
+                operation: builder.operation,
+                hunks: builder.hunks
+            )
+        }
+
+        func flushHunk() {
+            guard var file = currentFile else { return }
+            guard currentHunkHeader != nil || !currentLines.isEmpty else { return }
+
+            file.hunks.append(
+                ToolPatchHunk(
+                    id: nextHunkID,
+                    header: currentHunkHeader,
+                    lines: currentLines
+                )
+            )
+            nextHunkID += 1
+            currentFile = file
+            currentHunkHeader = nil
+            currentLines = []
+        }
+
+        func flushFile() {
+            flushHunk()
+
+            guard let file = currentFile else { return }
+            files.append(buildFile(from: file))
+            currentFile = nil
+        }
+
+        func beginFile(path: String, operation: ToolPatchFileOperation) {
+            flushFile()
+            currentFile = FileBuilder(id: nextFileID, path: path, destinationPath: nil, operation: operation, hunks: [])
+            nextFileID += 1
+        }
+
+        func updateCurrentFile(_ mutate: (inout FileBuilder) -> Void) {
+            guard var file = currentFile else { return }
+            mutate(&file)
+            currentFile = file
+        }
+
+        func appendLine(kind: ToolPatchLineKind, text: String) {
+            guard currentFile != nil else { return }
+            currentLines.append(ToolPatchLine(id: nextLineID, kind: kind, text: text))
+            nextLineID += 1
+        }
+
+        let filePrefixes: [(String, ToolPatchFileOperation)] = [
+            ("*** Update File: ", .updated),
+            ("*** Add File: ", .added),
+            ("*** Delete File: ", .deleted)
+        ]
+
+        for line in patchText.components(separatedBy: .newlines) {
+            if line == "*** Begin Patch" || line == "*** End Patch" {
+                continue
+            }
+
+            if let (prefix, operation) = filePrefixes.first(where: { line.hasPrefix($0.0) }) {
+                let path = String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+                guard !path.isEmpty else { continue }
+                beginFile(path: path, operation: operation)
+                continue
+            }
+
+            if line.hasPrefix("*** Move to: ") {
+                let destinationPath = String(line.dropFirst(13)).trimmingCharacters(in: .whitespaces)
+                guard !destinationPath.isEmpty else { continue }
+                updateCurrentFile {
+                    $0.destinationPath = destinationPath
+                    if $0.operation == .updated {
+                        $0.operation = .moved
+                    }
+                }
+                continue
+            }
+
+            if line.hasPrefix("@@") {
+                flushHunk()
+                currentHunkHeader = line
+                continue
+            }
+
+            if line.hasPrefix("+") && !line.hasPrefix("+++") {
+                appendLine(kind: .addition, text: String(line.dropFirst()))
+                continue
+            }
+
+            if line.hasPrefix("-") && !line.hasPrefix("---") {
+                appendLine(kind: .deletion, text: String(line.dropFirst()))
+                continue
+            }
+
+            if line.hasPrefix(" ") {
+                appendLine(kind: .context, text: String(line.dropFirst()))
+                continue
+            }
+
+            if line.isEmpty {
+                if currentHunkHeader != nil || !currentLines.isEmpty {
+                    appendLine(kind: .context, text: "")
+                }
+                continue
+            }
+
+            appendLine(kind: .context, text: line)
+        }
+
+        flushFile()
+
+        guard !files.isEmpty else { return nil }
+        return ToolPatchDetail(files: files)
+    }
+
+    private static func jsonInt(_ value: JSONValue?) -> Int? {
+        guard let value else { return nil }
+
+        switch value {
+        case let .number(number):
+            return Int(number)
+        case let .string(string):
+            return Int(string)
+        default:
+            return nil
+        }
+    }
+}
+
+private struct ToolDescriptor {
+    let summaryStyle: ToolSummaryStyle
+    let drawerStyle: ToolDrawerStyle
+    let detailFields: [ToolDetailField]
+
+    init(summaryStyle: ToolSummaryStyle, detailFields: [ToolDetailField], drawerStyle: ToolDrawerStyle = .standard) {
+        self.summaryStyle = summaryStyle
+        self.drawerStyle = drawerStyle
+        self.detailFields = detailFields
     }
 }
 
@@ -730,6 +1449,10 @@ extension SessionStatus {
 }
 
 extension OpenCodeSession: @unchecked Sendable {}
+extension OpenCodeServerHealth: @unchecked Sendable {}
+extension OpenCodeProject: @unchecked Sendable {}
+extension OpenCodeProject.TimeInfo: @unchecked Sendable {}
+extension WorkspaceConnection: @unchecked Sendable {}
 extension OpenCodeSession.Summary: @unchecked Sendable {}
 extension OpenCodeSession.TimeInfo: @unchecked Sendable {}
 extension ModelContextKey: @unchecked Sendable {}

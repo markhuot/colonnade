@@ -220,7 +220,9 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
 
 @MainActor
 final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
-    let directory: String
+    let connection: WorkspaceConnection
+
+    var directory: String { connection.directory }
 
     @Published private(set) var sessions: [SessionDisplay] = []
     @Published private(set) var paneStates: [String: SessionPaneState] = [:]
@@ -228,8 +230,8 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
     private var modelContextLimits: [ModelContextKey: Int] = [:]
     private var sessionStates: [String: SessionLiveState] = [:]
 
-    init(directory: String) {
-        self.directory = directory
+    init(connection: WorkspaceConnection) {
+        self.connection = connection
     }
 
     func sessionState(for sessionID: String) -> SessionLiveState {
@@ -419,17 +421,17 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
 actor WorkspaceLiveStoreRegistry {
     static let shared = WorkspaceLiveStoreRegistry()
 
-    private var stores: [String: WorkspaceLiveStore] = [:]
+    private var stores: [WorkspaceConnection: WorkspaceLiveStore] = [:]
 
-    func store(for directory: String) async -> WorkspaceLiveStore {
-        if let existing = stores[directory] {
+    func store(for connection: WorkspaceConnection) async -> WorkspaceLiveStore {
+        if let existing = stores[connection] {
             return existing
         }
 
         let store = await MainActor.run {
-            WorkspaceLiveStore(directory: directory)
+            WorkspaceLiveStore(connection: connection)
         }
-        stores[directory] = store
+        stores[connection] = store
         return store
     }
 }

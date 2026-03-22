@@ -202,6 +202,17 @@ actor PersistenceRepository {
         await context.perform {
             let workspace = Self.findOrCreateWorkspace(directory: directory, context: context)
             let workspaceID = workspace.id ?? directory
+            let existingSessionRequest = SessionEntity.fetchRequest()
+            existingSessionRequest.predicate = NSPredicate(format: "workspaceID == %@", workspaceID)
+            let existingSessions = (try? context.fetch(existingSessionRequest)) ?? []
+
+            if snapshot.sessions.isEmpty, !existingSessions.isEmpty {
+                self.logger.notice(
+                    "Ignoring empty workspace snapshot directory=\(directory, privacy: .public) existingSessions=\(existingSessions.count, privacy: .public) openSessions=\(openSessionIDs.count, privacy: .public)"
+                )
+                return
+            }
+
             workspace.projectName = (directory as NSString).lastPathComponent
             workspace.lastSyncedAt = Date()
 

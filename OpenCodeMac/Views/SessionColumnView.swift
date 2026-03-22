@@ -1,251 +1,56 @@
 import AppKit
 import OSLog
 import SwiftUI
+import Textual
+private struct MarkdownContentView: View {
+    @Environment(\.openCodeTheme) private var theme
 
-enum MarkdownRenderer {
-    struct ListItem: Equatable {
-        let marker: String
-        let text: String
+    let text: String
+    let messageRole: MessageRole
+    var baseFont: Font? = nil
+    var foregroundStyle: AnyShapeStyle? = nil
+
+    private var contentAlignment: Alignment {
+        messageRole.isAssistant ? .leading : .trailing
     }
 
-    enum Block: Equatable {
-        case paragraph(String)
-        case unorderedList([ListItem])
-        case orderedList([ListItem])
-        case codeFence(String)
-    }
-
-    static func attributedString(from text: String) -> AttributedString? {
-        guard !text.isEmpty else { return AttributedString("") }
-
-        do {
-            return try AttributedString(
-                markdown: text,
-                options: AttributedString.MarkdownParsingOptions(
-                    interpretedSyntax: .inlineOnlyPreservingWhitespace,
-                    failurePolicy: .returnPartiallyParsedIfPossible
+    var body: some View {
+        StructuredText(markdown: text)
+            .font(baseFont)
+            .applyForegroundStyle(foregroundStyle)
+            .textual.textSelection(.enabled)
+            .textual.structuredTextStyle(.gitHub)
+            .textual.codeBlockStyle(
+                OpenCodeCodeBlockStyle(
+                    foregroundStyle: foregroundStyle,
+                    backgroundColor: messageRole.isAssistant ? theme.codeBlockBackground : Color.accentColor.opacity(0.12),
+                    alignment: contentAlignment
                 )
             )
-        } catch {
-            return nil
-        }
-    }
-
-    static func blocks(from text: String) -> [Block] {
-        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
-        let lines = normalized.components(separatedBy: "\n")
-
-        var blocks: [Block] = []
-        var paragraphLines: [String] = []
-        var listItems: [ListItem] = []
-        var activeListType: ListType?
-        var codeFenceLines: [String] = []
-        var inCodeFence = false
-
-        func flushParagraph() {
-            guard !paragraphLines.isEmpty else { return }
-            blocks.append(.paragraph(paragraphLines.joined(separator: "\n")))
-            paragraphLines.removeAll()
-        }
-
-        func flushList() {
-            guard let currentListType = activeListType, !listItems.isEmpty else { return }
-            switch currentListType {
-            case .unordered:
-                blocks.append(.unorderedList(listItems))
-            case .ordered:
-                blocks.append(.orderedList(listItems))
-            }
-            listItems.removeAll()
-            activeListType = nil
-        }
-
-        func flushCodeFence() {
-            guard inCodeFence else { return }
-            blocks.append(.codeFence(codeFenceLines.joined(separator: "\n")))
-            codeFenceLines.removeAll()
-            inCodeFence = false
-        }
-
-        for line in lines {
-            if isFenceDelimiter(line) {
-                flushParagraph()
-                flushList()
-
-                if inCodeFence {
-                    flushCodeFence()
-                } else {
-                    inCodeFence = true
-                }
-                continue
-            }
-
-            if inCodeFence {
-                codeFenceLines.append(line)
-                continue
-            }
-
-            if line.trimmingCharacters(in: .whitespaces).isEmpty {
-                flushParagraph()
-                flushList()
-                continue
-            }
-
-            if let unordered = unorderedListItem(from: line) {
-                flushParagraph()
-                if activeListType == .ordered {
-                    flushList()
-                }
-                activeListType = .unordered
-                listItems.append(unordered)
-                continue
-            }
-
-            if let ordered = orderedListItem(from: line) {
-                flushParagraph()
-                if activeListType == .unordered {
-                    flushList()
-                }
-                activeListType = .ordered
-                listItems.append(ordered)
-                continue
-            }
-
-            if activeListType != nil, !listItems.isEmpty {
-                let continuation = line.trimmingCharacters(in: .whitespaces)
-                let last = listItems.removeLast()
-                listItems.append(ListItem(marker: last.marker, text: last.text + "\n" + continuation))
-                continue
-            }
-
-            paragraphLines.append(line)
-        }
-
-        flushParagraph()
-        flushList()
-        flushCodeFence()
-        return blocks
-    }
-
-    private enum ListType {
-        case unordered
-        case ordered
-    }
-
-    private static func isFenceDelimiter(_ line: String) -> Bool {
-        line.trimmingCharacters(in: .whitespaces).hasPrefix("```")
-    }
-
-    private static func unorderedListItem(from line: String) -> ListItem? {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") else { return nil }
-        let marker = String(trimmed.prefix(1))
-        let text = String(trimmed.dropFirst(2))
-        return ListItem(marker: marker, text: text)
-    }
-
-    private static func orderedListItem(from line: String) -> ListItem? {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard let dotIndex = trimmed.firstIndex(of: ".") else { return nil }
-        let number = trimmed[..<dotIndex]
-        guard !number.isEmpty, number.allSatisfy(\.isNumber) else { return nil }
-
-        let remainderStart = trimmed.index(after: dotIndex)
-        guard remainderStart < trimmed.endIndex, trimmed[remainderStart] == " " else { return nil }
-
-        let textStart = trimmed.index(after: remainderStart)
-        let text = String(trimmed[textStart...])
-        return ListItem(marker: String(number) + ".", text: text)
+            .frame(maxWidth: .infinity, alignment: contentAlignment)
     }
 }
 
-private struct MarkdownTextView: View {
-    let text: String
-    var baseFont: Font? = nil
-    var foregroundStyle: AnyShapeStyle? = nil
+private struct OpenCodeCodeBlockStyle: StructuredText.CodeBlockStyle {
+    var foregroundStyle: AnyShapeStyle?
+    var backgroundColor: Color
+    var alignment: Alignment
 
-    var body: some View {
-        Group {
-            if let attributed = MarkdownRenderer.attributedString(from: text) {
-                Text(attributed)
-            } else {
-                Text(text)
-            }
-        }
-        .font(baseFont)
-        .applyForegroundStyle(foregroundStyle)
-        .textSelection(.enabled)
-    }
-}
-
-private struct MarkdownContentView: View {
-    let text: String
-    var baseFont: Font? = nil
-    var foregroundStyle: AnyShapeStyle? = nil
-
-    private var blocks: [MarkdownRenderer.Block] {
-        MarkdownRenderer.blocks(from: text)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                blockView(block)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder
-    private func blockView(_ block: MarkdownRenderer.Block) -> some View {
-        switch block {
-        case let .paragraph(text):
-            MarkdownTextView(text: text, baseFont: baseFont, foregroundStyle: foregroundStyle)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        case let .unorderedList(items):
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    MarkdownListItemView(item: item, baseFont: baseFont, foregroundStyle: foregroundStyle)
-                }
-            }
-        case let .orderedList(items):
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    MarkdownListItemView(item: item, baseFont: baseFont, foregroundStyle: foregroundStyle)
-                }
-            }
-        case let .codeFence(code):
-            ScrollView(.horizontal) {
-                Text(code)
-                    .font(.system(.body, design: .monospaced))
-                    .applyForegroundStyle(foregroundStyle)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-            }
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.black.opacity(0.06))
-            )
-        }
-    }
-}
-
-private struct MarkdownListItemView: View {
-    let item: MarkdownRenderer.ListItem
-    var baseFont: Font? = nil
-    var foregroundStyle: AnyShapeStyle? = nil
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text(item.marker)
-                .font(baseFont)
+    func makeBody(configuration: Configuration) -> some View {
+        ScrollView(.horizontal) {
+            configuration.label
+                .font(.system(.body, design: .monospaced))
                 .applyForegroundStyle(foregroundStyle)
-
-            MarkdownTextView(text: item.text, baseFont: baseFont, foregroundStyle: foregroundStyle)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+                .textual.padding(.horizontal, .fontScaled(0.75))
+                .textual.padding(.vertical, .fontScaled(0.6))
+                .frame(maxWidth: .infinity, alignment: alignment)
         }
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(backgroundColor)
+        )
+        .textual.blockSpacing(.fontScaled(top: 0.4, bottom: 0.8))
     }
 }
 
@@ -262,6 +67,7 @@ private extension View {
 
 struct SessionColumnView: View {
     @EnvironmentObject private var appState: OpenCodeAppState
+    @Environment(\.openCodeTheme) private var theme
     @ObservedObject var sessionState: SessionLiveState
 
     private let logger = Logger(subsystem: "ai.opencode.mac", category: "ui-sync")
@@ -288,7 +94,7 @@ struct SessionColumnView: View {
         }
         .background(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(theme.surfaceBackground)
                 .shadow(color: .black.opacity(0.08), radius: 14, x: 0, y: 6)
         )
         .overlay(
@@ -324,13 +130,14 @@ struct SessionColumnView: View {
     }
 
     private var borderColor: Color {
-        appState.focusedSessionID == sessionID ? Color.accentColor.opacity(0.85) : Color.primary.opacity(0.08)
+        appState.focusedSessionID == sessionID ? Color.accentColor.opacity(0.85) : theme.border.opacity(0.7)
     }
 }
 
 private struct SessionHeaderView: View {
     @Environment(\.openWindow) private var openWindow
     @EnvironmentObject private var appState: OpenCodeAppState
+    @Environment(\.openCodeTheme) private var theme
 
     let sessionID: String
     let session: SessionDisplay?
@@ -351,7 +158,7 @@ private struct SessionHeaderView: View {
                                 if isHoveringStatusIcon {
                                     Image(systemName: "xmark")
                                         .font(.caption.weight(.bold))
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(theme.secondaryText)
                                 } else {
                                     SessionStatusIcon(color: indicator.color)
                                 }
@@ -372,17 +179,17 @@ private struct SessionHeaderView: View {
 
                     Text(contextUsageText ?? "No context usage yet")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryText)
                 }
 
                 Spacer(minLength: 10)
 
                 HStack(spacing: 8) {
                     Button {
-                        if let directory = appState.selectedDirectory {
+                        if let workspaceConnection = appState.workspaceConnection {
                             openWindow(
                                 id: "session-window",
-                                value: SessionWindowContext(directory: directory, sessionID: sessionID)
+                                value: SessionWindowContext(connection: workspaceConnection, sessionID: sessionID)
                             )
                         }
                     } label: {
@@ -399,6 +206,7 @@ private struct SessionHeaderView: View {
 
 private struct SessionTimelineView: View {
     @EnvironmentObject private var appState: OpenCodeAppState
+    @Environment(\.openCodeTheme) private var theme
 
     @State private var scrollMetrics = TimelineScrollMetrics.zero
     @State private var isPinnedToBottom = true
@@ -443,7 +251,7 @@ private struct SessionTimelineView: View {
                     }
                 )
             }
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))
+            .background(theme.mutedSurfaceBackground.opacity(0.8))
             .onAppear {
                 requestScroll(to: .bottom, with: proxy, animated: false)
             }
@@ -731,6 +539,7 @@ private struct TimelineScrollObserver: NSViewRepresentable {
 
 private struct SessionComposerView: View {
     @EnvironmentObject private var appState: OpenCodeAppState
+    @Environment(\.openCodeTheme) private var theme
 
     private static let placeholderOptions = [
         "Let's get started!",
@@ -782,6 +591,9 @@ private struct SessionComposerView: View {
                         ),
                         measuredHeight: $promptHeight,
                         placeholder: placeholderText,
+                        textColor: theme.primaryTextColor,
+                        insertionPointColor: theme.primaryTextColor,
+                        placeholderColor: theme.secondaryTextColor,
                         focusRequestID: appState.promptFocusRequest?.sessionID == sessionID ? appState.promptFocusRequest?.id : nil,
                         onFocus: {
                             appState.focusSession(sessionID)
@@ -792,10 +604,6 @@ private struct SessionComposerView: View {
                     )
                     .frame(height: promptHeight)
                     .padding(4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(Color(nsColor: .textBackgroundColor))
-                    )
 
                     HStack {
                         if !modelOptions.isEmpty {
@@ -854,87 +662,96 @@ private struct SessionPermissionPresentationKey: Hashable {
     }
 }
 
+private enum TimelineMessageLayout {
+    static let textLeadingInset: CGFloat = 20
+    static let messageCardPadding: CGFloat = 14
+    static let toolCardPadding: CGFloat = 10
+    static let promptCardPadding: CGFloat = 14
+
+    static func leadingOffset(for contentPadding: CGFloat) -> CGFloat {
+        max(textLeadingInset - contentPadding, 0)
+    }
+}
+
 private struct MessageCard: View {
     @AppStorage("showsThinking") private var showsThinking = true
+    @Environment(\.openCodeTheme) private var theme
 
     let message: MessageEnvelope
     let showsTimestamp: Bool
 
     var body: some View {
-        VStack(alignment: alignment, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             if showsTimestamp {
                 MessageCardHeader(message: message)
             }
 
-            VStack(alignment: alignment, spacing: 10) {
-                if !message.visibleText.isEmpty {
-                    MarkdownContentView(text: message.visibleText)
-                        .multilineTextAlignment(textAlignment)
-                        .frame(maxWidth: .infinity, alignment: contentAlignment)
-                }
+            if showsMessageBubble {
+                VStack(alignment: .leading, spacing: 10) {
+                    if !message.visibleText.isEmpty {
+                        MarkdownContentView(text: message.visibleText, messageRole: message.info.role)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
 
-                if showsThinking, !message.reasoningText.isEmpty {
-                    MarkdownContentView(
-                        text: message.reasoningText,
-                        baseFont: .callout,
-                        foregroundStyle: AnyShapeStyle(.secondary)
-                    )
-                        .multilineTextAlignment(textAlignment)
-                        .frame(maxWidth: .infinity, alignment: contentAlignment)
-                }
+                    if showsThinking, !message.reasoningText.isEmpty {
+                        MarkdownContentView(
+                            text: message.reasoningText,
+                            messageRole: message.info.role,
+                            baseFont: .callout,
+                            foregroundStyle: AnyShapeStyle(.secondary)
+                        )
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
 
-                ForEach(message.toolParts) { toolPart in
-                    ToolPartView(part: toolPart)
-                }
+                    if let finish = message.stepFinish, finish.reason?.localizedCaseInsensitiveCompare("tool-calls") != .orderedSame {
+                        MessageFinishView(part: finish)
+                    }
 
-                if let finish = message.stepFinish, finish.reason?.localizedCaseInsensitiveCompare("tool-calls") != .orderedSame {
-                    MessageFinishView(part: finish)
+                    if message.info.error != nil {
+                        Text(message.info.error?.prettyDescription ?? "Unknown error")
+                            .font(.caption)
+                            .multilineTextAlignment(.leading)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
-
-                if message.info.error != nil {
-                    Text(message.info.error?.prettyDescription ?? "Unknown error")
-                        .font(.caption)
-                        .multilineTextAlignment(textAlignment)
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: contentAlignment)
-                }
+                .padding(TimelineMessageLayout.messageCardPadding)
+                .background(bubbleBackground)
+                .padding(.leading, TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.messageCardPadding))
             }
-            .padding(14)
-            .background(bubbleBackground)
+
+            ForEach(message.toolParts) { toolPart in
+                ToolPartView(part: toolPart)
+                    .padding(.leading, TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.toolCardPadding))
+            }
         }
-        .frame(maxWidth: .infinity, alignment: frameAlignment)
-    }
-
-    private var alignment: HorizontalAlignment {
-        message.info.role.isAssistant ? .leading : .trailing
-    }
-
-    private var frameAlignment: Alignment {
-        message.info.role.isAssistant ? .leading : .trailing
-    }
-
-    private var contentAlignment: Alignment {
-        message.info.role.isAssistant ? .leading : .trailing
-    }
-
-    private var textAlignment: TextAlignment {
-        message.info.role.isAssistant ? .leading : .trailing
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var bubbleBackground: some View {
         RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(message.info.role.isAssistant ? Color(nsColor: .controlBackgroundColor) : Color.accentColor.opacity(0.16))
+            .fill(message.info.role.isAssistant ? theme.assistantBubble : Color.accentColor.opacity(0.16))
+    }
+
+    private var showsMessageBubble: Bool {
+        !message.visibleText.isEmpty
+            || (showsThinking && !message.reasoningText.isEmpty)
+            || (message.stepFinish?.reason?.localizedCaseInsensitiveCompare("tool-calls") != .orderedSame && message.stepFinish != nil)
+            || message.info.error != nil
     }
 }
 
 private struct MessageCardHeader: View {
+    @Environment(\.openCodeTheme) private var theme
     let message: MessageEnvelope
 
     var body: some View {
         Text(Self.timestampFormatter.string(from: message.createdAt))
             .frame(maxWidth: .infinity, alignment: .center)
         .font(.caption.weight(.medium))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(theme.secondaryText)
     }
 
     private static let timestampFormatter: DateFormatter = {
@@ -946,6 +763,7 @@ private struct MessageCardHeader: View {
 }
 
 private struct MessageFinishView: View {
+    @Environment(\.openCodeTheme) private var theme
     let part: MessagePart
 
     var body: some View {
@@ -959,22 +777,21 @@ private struct MessageFinishView: View {
             }
         }
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(theme.secondaryText)
     }
 }
 
 private struct ToolPartView: View {
+    @Environment(\.openCodeTheme) private var theme
     let part: MessagePart
     @State private var isExpanded = false
 
-    private var summary: ToolCallSummary {
-        part.toolCallSummary
+    private var presentation: ToolPresentation {
+        part.toolPresentation
     }
 
     private var statusLabel: String? {
-        guard let status = part.state?.status else { return nil }
-        guard status != .completed else { return nil }
-        return status.title
+        presentation.statusLabel
     }
 
     var body: some View {
@@ -984,41 +801,20 @@ private struct ToolPartView: View {
                     isExpanded.toggle()
                 }
             } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Group {
-                        Text(summary.action)
-                            .fontWeight(.semibold)
-
-                        if let target = summary.target {
-                            Text(verbatim: "`\(target)`")
-                                .font(.caption.monospaced())
-                        }
-
-                        if let additions = summary.additions {
-                            Text("+\(additions)")
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.green)
-                        }
-
-                        if let deletions = summary.deletions {
-                            Text("-\(deletions)")
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.red)
-                        }
-                    }
-                    .font(.caption)
+                HStack(alignment: .center, spacing: 8) {
+                    ToolSummaryView(style: presentation.summaryStyle)
 
                     Spacer(minLength: 8)
 
                     if let statusLabel {
                         Text(statusLabel)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.secondaryText)
                     }
 
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryText)
                 }
                 .contentShape(Rectangle())
             }
@@ -1032,24 +828,167 @@ private struct ToolPartView: View {
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.black.opacity(0.035))
+                .fill(theme.toolCardBackground)
         )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct ToolSummaryView: View {
+    let style: ToolSummaryStyle
+
+    var body: some View {
+        switch style {
+        case let .standard(summary):
+            StandardToolSummaryView(summary: summary)
+        case let .patch(summary):
+            PatchToolSummaryView(summary: summary)
+        case let .read(summary):
+            ReadToolSummaryView(summary: summary)
+        }
+    }
+}
+
+private struct StandardToolSummaryView: View {
+    let summary: ToolCallSummary
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(summary.action)
+                .fontWeight(.semibold)
+
+            if let target = summary.target {
+                Text(verbatim: "`\(target)`")
+                    .font(.caption.monospaced())
+            }
+
+            if let additions = summary.additions {
+                Text("+\(additions)")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.green)
+            }
+
+            if let deletions = summary.deletions {
+                Text("-\(deletions)")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.red)
+            }
+        }
+        .font(.caption)
+    }
+}
+
+private struct PatchToolSummaryView: View {
+    @Environment(\.openCodeTheme) private var theme
+    let summary: ToolPatchSummary
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Image(systemName: "wand.and.stars")
+                .foregroundStyle(Color.accentColor)
+
+            Text("Patch")
+                .fontWeight(.semibold)
+
+            if let target = summary.target {
+                Text(verbatim: "`\(target)`")
+                    .font(.caption.monospaced())
+            }
+
+            if let additions = summary.additions {
+                summaryBadge(text: "+\(additions)", tint: theme.diffAddition, background: theme.diffAdditionBackground)
+            }
+
+            if let deletions = summary.deletions {
+                summaryBadge(text: "-\(deletions)", tint: theme.diffDeletion, background: theme.diffDeletionBackground)
+            }
+        }
+        .font(.caption)
+    }
+
+    private func summaryBadge(text: String, tint: Color, background: Color) -> some View {
+        Text(text)
+            .font(.caption.monospaced())
+            .foregroundStyle(tint)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(background)
+            )
+    }
+}
+
+private struct ReadToolSummaryView: View {
+    @Environment(\.openCodeTheme) private var theme
+    let summary: ToolReadSummary
+    @State private var phase: CGFloat = 0
+
+    private var text: String {
+        summary.fileName ?? summary.path ?? "Read"
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Image(systemName: "cat")
+                .symbolEffect(.variableColor.iterative, options: .repeating, value: phase)
+
+            Text("Read")
+                .fontWeight(.semibold)
+
+            TimelineView(.animation(minimumInterval: 0.12, paused: false)) { timeline in
+                let tick = timeline.date.timeIntervalSinceReferenceDate
+                Text(scrollingLabel(at: tick))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(theme.secondaryText)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: 220, alignment: .leading)
+            .clipped()
+        }
+        .font(.caption)
+        .onAppear {
+            phase += 1
+        }
+    }
+
+    private func scrollingLabel(at tick: TimeInterval) -> String {
+        let padding = "     "
+        let base = text.isEmpty ? "Read" : text
+        let marquee = base + padding + base
+        let characters = Array(marquee)
+        guard !characters.isEmpty else { return "" }
+
+        let window = min(24, characters.count)
+        let offset = Int((tick * 8).rounded(.down)) % characters.count
+        let rotated = Array(characters[offset...] + characters[..<offset])
+        return String(rotated.prefix(window))
     }
 }
 
 private struct ToolPartDrawerView: View {
+    @Environment(\.openCodeTheme) private var theme
     let part: MessagePart
 
     var body: some View {
+        let presentation = part.toolPresentation
+
         VStack(alignment: .leading, spacing: 10) {
             if let title = part.state?.title, !title.isEmpty {
                 Text(title)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.secondaryText)
             }
 
-            ForEach(part.toolDetailFields) { field in
+            ForEach(presentation.detailFields) { field in
                 ToolPartDetailSection(title: field.title, value: field.value)
+            }
+
+            switch presentation.drawerStyle {
+            case .standard:
+                EmptyView()
+            case let .patch(detail):
+                PatchToolDetailView(detail: detail)
             }
 
             if let output = part.state?.output, !output.isEmpty {
@@ -1060,20 +999,164 @@ private struct ToolPartDrawerView: View {
                 ToolPartDetailSection(title: "Error", value: error, isError: true)
             }
 
-            if part.toolDetailFields.isEmpty,
-               (part.state?.output?.isEmpty ?? true),
-               (part.state?.error?.isEmpty ?? true) {
-                if part.state?.status != .completed {
-                    Text(part.state?.status.title ?? ToolExecutionStatus.pending.title)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            if let fallbackDetail = presentation.fallbackDetail {
+                Text(fallbackDetail)
+                    .font(.caption)
+                    .foregroundStyle(theme.secondaryText)
             }
         }
     }
 }
 
+private struct PatchToolDetailView: View {
+    let detail: ToolPatchDetail
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(detail.files) { file in
+                PatchFileCardView(file: file)
+            }
+        }
+    }
+}
+
+private struct PatchFileCardView: View {
+    @Environment(\.openCodeTheme) private var theme
+    let file: ToolPatchFile
+
+    private var title: String {
+        file.destinationPath ?? file.path
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+
+                Text(file.operation.rawValue.capitalized)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(theme.secondaryText)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(theme.mutedSurfaceBackground)
+                    )
+
+                if let destinationPath = file.destinationPath, destinationPath != file.path {
+                    Text("from \(file.path)")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(theme.secondaryText)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(file.hunks) { hunk in
+                    PatchHunkView(hunk: hunk)
+                }
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(theme.codeBlockBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(theme.border.opacity(0.6), lineWidth: 1)
+        )
+    }
+}
+
+private struct PatchHunkView: View {
+    @Environment(\.openCodeTheme) private var theme
+    let hunk: ToolPatchHunk
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let header = hunk.header {
+                Text(header)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(theme.secondaryText)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+            }
+
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(hunk.lines) { line in
+                    PatchDiffLineView(line: line)
+                }
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(theme.toolCardBackground.opacity(0.7))
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct PatchDiffLineView: View {
+    @Environment(\.openCodeTheme) private var theme
+    let line: ToolPatchLine
+
+    private var symbol: String {
+        switch line.kind {
+        case .context:
+            return " "
+        case .addition:
+            return "+"
+        case .deletion:
+            return "-"
+        }
+    }
+
+    private var foreground: Color {
+        switch line.kind {
+        case .context:
+            return theme.primaryText
+        case .addition:
+            return theme.diffAddition
+        case .deletion:
+            return theme.diffDeletion
+        }
+    }
+
+    private var background: Color {
+        switch line.kind {
+        case .context:
+            return .clear
+        case .addition:
+            return theme.diffAdditionBackground
+        case .deletion:
+            return theme.diffDeletionBackground
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            Text(symbol)
+                .foregroundStyle(foreground)
+                .frame(width: 12, alignment: .leading)
+
+            Text(verbatim: line.text.isEmpty ? " " : line.text)
+                .foregroundStyle(foreground)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .font(.system(.caption, design: .monospaced))
+        .textSelection(.enabled)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 2)
+        .background(background)
+    }
+}
+
 private struct ToolPartDetailSection: View {
+    @Environment(\.openCodeTheme) private var theme
     let title: String
     let value: String
     var isError = false
@@ -1082,184 +1165,16 @@ private struct ToolPartDetailSection: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.secondaryText)
 
             ScrollView(.horizontal) {
                 Text(value)
                     .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(isError ? .red : .primary)
+                    .foregroundStyle(isError ? .red : theme.primaryText)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxHeight: 110)
-        }
-    }
-}
-
-private struct ToolCallSummary {
-    let action: String
-    let target: String?
-    let additions: Int?
-    let deletions: Int?
-}
-
-private struct ToolDetailField: Identifiable {
-    let title: String
-    let value: String
-
-    var id: String { title + value }
-}
-
-private extension MessagePart {
-    var toolCallSummary: ToolCallSummary {
-        let input = state?.input ?? [:]
-
-        switch toolKey {
-        case "apply_patch":
-            let paths = Self.patchPaths(from: input["patchText"]?.stringValue)
-            let diffStat = Self.patchDiffStat(from: state?.metadata)
-            return ToolCallSummary(
-                action: "Patch",
-                target: Self.compactTargetLabel(from: paths),
-                additions: diffStat.additions,
-                deletions: diffStat.deletions
-            )
-        case "read":
-            return ToolCallSummary(action: "Read", target: Self.fileName(from: input["filePath"]?.stringValue), additions: nil, deletions: nil)
-        case "write":
-            return ToolCallSummary(action: "Write", target: Self.fileName(from: input["filePath"]?.stringValue), additions: nil, deletions: nil)
-        case "edit":
-            return ToolCallSummary(action: "Edit", target: Self.fileName(from: input["filePath"]?.stringValue), additions: nil, deletions: nil)
-        case "grep":
-            return ToolCallSummary(action: "Search", target: input["pattern"]?.stringValue, additions: nil, deletions: nil)
-        case "glob":
-            return ToolCallSummary(action: "Find", target: input["pattern"]?.stringValue, additions: nil, deletions: nil)
-        case "webfetch":
-            return ToolCallSummary(action: "Fetch", target: input["url"]?.stringValue, additions: nil, deletions: nil)
-        case "bash":
-            if let description = input["description"]?.stringValue, !description.isEmpty {
-                return ToolCallSummary(action: Self.capitalizedSentence(description), target: nil, additions: nil, deletions: nil)
-            }
-
-            if let command = input["command"]?.stringValue, !command.isEmpty {
-                return ToolCallSummary(action: "Run", target: Self.truncated(command, limit: 44), additions: nil, deletions: nil)
-            }
-
-            return ToolCallSummary(action: "Run command", target: nil, additions: nil, deletions: nil)
-        default:
-            if let title = state?.title, !title.isEmpty {
-                return ToolCallSummary(action: title, target: nil, additions: nil, deletions: nil)
-            }
-
-            return ToolCallSummary(action: Self.humanizedToolName(toolKey), target: nil, additions: nil, deletions: nil)
-        }
-    }
-
-    var toolDetailFields: [ToolDetailField] {
-        let input = state?.input ?? [:]
-
-        switch toolKey {
-        case "apply_patch":
-            let paths = Self.patchPaths(from: input["patchText"]?.stringValue)
-            guard !paths.isEmpty else { return [] }
-            return [ToolDetailField(title: "Files", value: paths.joined(separator: "\n"))]
-        case "read", "write", "edit":
-            guard let filePath = input["filePath"]?.stringValue, !filePath.isEmpty else { return [] }
-            return [ToolDetailField(title: "Path", value: filePath)]
-        case "grep", "glob":
-            guard let pattern = input["pattern"]?.stringValue, !pattern.isEmpty else { return [] }
-            return [ToolDetailField(title: "Pattern", value: pattern)]
-        case "webfetch":
-            guard let url = input["url"]?.stringValue, !url.isEmpty else { return [] }
-            return [ToolDetailField(title: "URL", value: url)]
-        case "bash":
-            guard let command = input["command"]?.stringValue, !command.isEmpty else { return [] }
-            return [ToolDetailField(title: "Command", value: command)]
-        default:
-            return []
-        }
-    }
-
-    private var toolKey: String {
-        let raw = tool ?? "tool"
-        return raw.split(separator: ".").last.map(String.init) ?? raw
-    }
-
-    private static func humanizedToolName(_ tool: String) -> String {
-        tool
-            .split(separator: "_")
-            .map { $0.capitalized }
-            .joined(separator: " ")
-    }
-
-    private static func capitalizedSentence(_ value: String) -> String {
-        guard let first = value.first else { return value }
-        return String(first).uppercased() + value.dropFirst()
-    }
-
-    private static func truncated(_ value: String, limit: Int) -> String {
-        guard value.count > limit else { return value }
-        return String(value.prefix(limit - 1)) + "..."
-    }
-
-    private static func fileName(from path: String?) -> String? {
-        guard let path, !path.isEmpty else { return nil }
-        return (path as NSString).lastPathComponent
-    }
-
-    private static func compactTargetLabel(from paths: [String]) -> String? {
-        guard let first = paths.first else { return nil }
-        guard paths.count > 1 else { return first }
-        return "\(first) +\(paths.count - 1)"
-    }
-
-    private static func patchPaths(from patchText: String?) -> [String] {
-        guard let patchText, !patchText.isEmpty else { return [] }
-
-        var paths: [String] = []
-
-        for line in patchText.components(separatedBy: .newlines) {
-            let prefixes = ["*** Update File: ", "*** Add File: ", "*** Delete File: "]
-
-            guard let prefix = prefixes.first(where: { line.hasPrefix($0) }) else {
-                continue
-            }
-
-            let path = String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
-            guard !path.isEmpty else { continue }
-
-            let fileName = fileName(from: path) ?? path
-            if !paths.contains(fileName) {
-                paths.append(fileName)
-            }
-        }
-
-        return paths
-    }
-
-    private static func patchDiffStat(from metadata: [String: JSONValue]?) -> (additions: Int?, deletions: Int?) {
-        guard let metadata else { return (nil, nil) }
-
-        let additions = jsonInt(metadata["additions"])
-            ?? jsonInt(metadata["insertions"])
-            ?? jsonInt(metadata["summary"]?.objectValue?["additions"])
-        let deletions = jsonInt(metadata["deletions"])
-            ?? jsonInt(metadata["removals"])
-            ?? jsonInt(metadata["summary"]?.objectValue?["deletions"])
-
-        return (additions, deletions)
-    }
-
-    private static func jsonInt(_ value: JSONValue?) -> Int? {
-        guard let value else { return nil }
-
-        switch value {
-        case let .number(number):
-            return Int(number)
-        case let .string(string):
-            return Int(string)
-        default:
-            return nil
         }
     }
 }
@@ -1300,6 +1215,8 @@ private struct PermissionPromptView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.red.opacity(0.08))
         )
+        .padding(.leading, TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.promptCardPadding))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -1337,10 +1254,13 @@ private struct QuestionCard: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.blue.opacity(0.10))
         )
+        .padding(.leading, TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.promptCardPadding))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 private struct QuestionGroupView: View {
+    @Environment(\.openCodeTheme) private var theme
     let question: QuestionRequest.Question
     @Binding var selections: [String: Set<String>]
 
@@ -1350,7 +1270,7 @@ private struct QuestionGroupView: View {
                 .font(.subheadline.weight(.semibold))
             Text(question.question)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.secondaryText)
 
             ForEach(question.options, id: \.id) { option in
                 Toggle(isOn: Binding(
@@ -1371,7 +1291,7 @@ private struct QuestionGroupView: View {
                         Text(option.label)
                         Text(option.description)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.secondaryText)
                     }
                 }
                 .toggleStyle(.checkbox)

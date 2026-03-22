@@ -4,21 +4,65 @@ import SwiftUI
 @main
 struct OpenCodeMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @StateObject private var themeController = ThemeController()
 
     var body: some Scene {
         WindowGroup("OpenCode", id: "workspace-root") {
             WorkspaceRootContainer()
+                .environmentObject(themeController)
+                .environment(\.openCodeTheme, themeController.selectedTheme)
+                .preferredColorScheme(themeController.selectedTheme.preferredColorScheme)
         }
         .defaultSize(width: 1440, height: 920)
 
         WindowGroup("Session", id: "session-window", for: SessionWindowContext.self) { $context in
             SessionWindowContainer(context: context)
+                .environmentObject(themeController)
+                .environment(\.openCodeTheme, themeController.selectedTheme)
+                .preferredColorScheme(themeController.selectedTheme.preferredColorScheme)
         }
         .defaultSize(width: 760, height: 920)
+
+        Settings {
+            PreferencesView()
+                .environmentObject(themeController)
+                .environment(\.openCodeTheme, themeController.selectedTheme)
+                .preferredColorScheme(themeController.selectedTheme.preferredColorScheme)
+        }
     }
 
     var commands: some Commands {
         WorkspaceCommands()
+    }
+}
+
+private struct PreferencesView: View {
+    @EnvironmentObject private var themeController: ThemeController
+    @Environment(\.openCodeTheme) private var theme
+
+    var body: some View {
+        Form {
+            Picker("Theme", selection: Binding(
+                get: { themeController.selectedThemeID },
+                set: { themeController.selectTheme($0) }
+            )) {
+                ForEach(OpenCodeThemeID.allCases) { themeID in
+                    Text(themeID.displayName)
+                        .tag(themeID)
+                }
+            }
+            .pickerStyle(.menu)
+
+            Text("Native keeps the current macOS window and text colors. Shiki themes currently update the window background and text colors.")
+                .font(.callout)
+                .foregroundStyle(theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .formStyle(.grouped)
+        .padding(24)
+        .frame(width: 460)
+        .background(theme.windowBackground)
+        .themedWindow(theme)
     }
 }
 
@@ -261,7 +305,8 @@ private struct SessionWindowContainer: View {
         _appState = StateObject(
             wrappedValue: OpenCodeAppState(
                 persistsWorkspacePaneState: false,
-                initialDirectory: context?.directory,
+                initialServerURL: context?.connection.serverURL ?? OpenCodeAppState.defaultServerURL,
+                initialDirectory: context?.connection.directory,
                 initialOpenSessionIDs: context.map { [$0.sessionID] } ?? []
             )
         )

@@ -8,13 +8,29 @@ import OSLog
 @MainActor
 final class OpenCodeAppState: ObservableObject {
     static let defaultThinkingLevel = "__default__"
+    static let defaultServerURL = URL(string: "http://127.0.0.1:4096")!
+
+    enum LaunchStage: Equatable {
+        case checkingLocalServer
+        case chooseServerMode
+        case localFolderSelection
+        case remoteServerEntry
+        case remoteDirectoryEntry
+    }
 
     @Published var selectedDirectory: String?
+    @Published var serverURL: URL
     @Published var openSessionIDs: [String] = []
     @Published var focusedSessionID: String?
     @Published var drafts: [String: String] = [:]
     @Published var isLoading = false
     @Published var errorMessage: String?
+    @Published var launchStage: LaunchStage = .checkingLocalServer
+    @Published var remoteServerURLText: String = ""
+    @Published var remoteDirectoryText: String = ""
+    @Published private(set) var remoteProjectSuggestions: [String] = []
+    @Published private(set) var isStartingLocalServer = false
+    @Published private(set) var isValidatingRemoteServer = false
     @Published private(set) var focusedSessionScrollRequest: SessionTimelineScrollRequest?
     @Published private(set) var promptFocusRequest: SessionPromptFocusRequest?
     @Published private(set) var paneWidths: [String: CGFloat] = [:]
@@ -26,25 +42,31 @@ final class OpenCodeAppState: ObservableObject {
 
     private let logger = Logger(subsystem: "ai.opencode.mac", category: "workspace")
     private let uiSyncLogger = Logger(subsystem: "ai.opencode.mac", category: "ui-sync")
-    private let workspaceService: any WorkspaceServiceProtocol
     private let repository: PersistenceRepository
     private let persistence: PersistenceController
     private let syncRegistry: any WorkspaceSyncRegistryProtocol
     private let storeRegistry: WorkspaceLiveStoreRegistry
     private let persistsWorkspacePaneState: Bool
     private let restoresLastSelectedDirectory: Bool
+    private let apiClientProvider: @Sendable (URL) -> any OpenCodeAPIClientProtocol
+    private let workspaceServiceProvider: @Sendable (URL) -> any WorkspaceServiceProtocol
+    private let localServerStarter: @Sendable () throws -> Process
+    private let directoryChooserOverride: (@MainActor () -> Void)?
+    private let serverWaiterOverride: (@Sendable (URL, Duration) async -> Bool)?
 
+    private let initialServerURL: URL
     private let initialDirectory: String?
     private let initialOpenSessionIDs: [String]
     private var hasBootstrapped = false
     private var modelContextLimits: [ModelContextKey: Int] = [:]
+    private var localServerProcess: Process?
 
     let defaultPaneWidth: CGFloat = 720
     let minPaneWidth: CGFloat = 360
     let maxPaneWidth: CGFloat = 960
 
     init(
-        client: any OpenCodeAPIClientProtocol = OpenCodeAPIClient(),
+        client: (any OpenCodeAPIClientProtocol)? = nil,
         workspaceService: (any WorkspaceServiceProtocol)? = nil,
         repository: PersistenceRepository = .shared,
         persistence: PersistenceController = .shared,
@@ -52,18 +74,56 @@ final class OpenCodeAppState: ObservableObject {
         storeRegistry: WorkspaceLiveStoreRegistry = .shared,
         persistsWorkspacePaneState: Bool = true,
         restoresLastSelectedDirectory: Bool = false,
+        initialServerURL: URL = OpenCodeAppState.defaultServerURL,
         initialDirectory: String? = nil,
-        initialOpenSessionIDs: [String] = []
+        initialOpenSessionIDs: [String] = [],
+        localServerStarter: (@Sendable () throws -> Process)? = nil,
+        apiClientProviderOverride: (@Sendable (URL) -> any OpenCodeAPIClientProtocol)? = nil,
+        workspaceServiceProviderOverride: (@Sendable (URL) -> any WorkspaceServiceProtocol)? = nil,
+        directoryChooser: (@MainActor () -> Void)? = nil,
+        serverWaiter: (@Sendable (URL, Duration) async -> Bool)? = nil
     ) {
-        self.workspaceService = workspaceService ?? WorkspaceService(client: client)
         self.repository = repository
         self.persistence = persistence
         self.syncRegistry = syncRegistry
         self.storeRegistry = storeRegistry
         self.persistsWorkspacePaneState = persistsWorkspacePaneState
         self.restoresLastSelectedDirectory = restoresLastSelectedDirectory
+        self.initialServerURL = initialServerURL
+        self.serverURL = initialServerURL
         self.initialDirectory = initialDirectory
         self.initialOpenSessionIDs = initialOpenSessionIDs
+
+        if let apiClientProviderOverride {
+            apiClientProvider = apiClientProviderOverride
+        } else if let client {
+            apiClientProvider = { (_: URL) in client }
+        } else {
+            apiClientProvider = { (url: URL) in OpenCodeAPIClient(baseURL: url) }
+        }
+
+        if let workspaceServiceProviderOverride {
+            workspaceServiceProvider = workspaceServiceProviderOverride
+        } else if let workspaceService {
+            workspaceServiceProvider = { (_: URL) in workspaceService }
+        } else {
+            let clientProvider = apiClientProvider
+            workspaceServiceProvider = { (url: URL) in
+                WorkspaceService(client: clientProvider(url))
+            }
+        }
+
+        self.localServerStarter = localServerStarter ?? {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["opencode", "serve"]
+            process.standardOutput = Pipe()
+            process.standardError = Pipe()
+            try process.run()
+            return process
+        }
+        directoryChooserOverride = directoryChooser
+        serverWaiterOverride = serverWaiter
     }
 
     var sessions: [SessionDisplay] {
@@ -76,6 +136,19 @@ final class OpenCodeAppState: ObservableObject {
 
     var projectName: String? {
         selectedDirectory.map { ($0 as NSString).lastPathComponent }
+    }
+
+    var isUsingLocalServer: Bool {
+        serverURL == Self.defaultServerURL
+    }
+
+    var serverDisplayText: String {
+        serverURL.absoluteString
+    }
+
+    var workspaceConnection: WorkspaceConnection? {
+        guard let selectedDirectory else { return nil }
+        return WorkspaceConnection(serverURL: serverURL, directory: selectedDirectory)
     }
 
     var messagesBySession: [String: [MessageEnvelope]] {
@@ -105,8 +178,12 @@ final class OpenCodeAppState: ObservableObject {
         let bootstrapDirectory = initialDirectory ?? selectedDirectory
         if let bootstrapDirectory,
            FileManager.default.fileExists(atPath: bootstrapDirectory) {
+            launchStage = initialServerURL == Self.defaultServerURL ? .localFolderSelection : .remoteDirectoryEntry
             await load(directory: bootstrapDirectory)
+            return
         }
+
+        launchStage = initialServerURL == Self.defaultServerURL ? .chooseServerMode : .remoteServerEntry
     }
 
     func chooseDirectory() {
@@ -124,29 +201,136 @@ final class OpenCodeAppState: ObservableObject {
         }
     }
 
+    func showRemoteServerEntry() {
+        clearWorkspaceSelection()
+        remoteServerURLText = remoteServerURLText.isEmpty ? "https://" : remoteServerURLText
+        launchStage = .remoteServerEntry
+    }
+
+    func openLocalDirectory() {
+        guard !isStartingLocalServer else { return }
+
+        Task {
+            isStartingLocalServer = true
+            errorMessage = nil
+
+            do {
+                let isReachable = await isServerReachable(at: Self.defaultServerURL)
+                if !isReachable {
+                    localServerProcess = try localServerStarter()
+                    let becameReachable = if let serverWaiterOverride {
+                        await serverWaiterOverride(Self.defaultServerURL, .seconds(10))
+                    } else {
+                        await waitForServer(at: Self.defaultServerURL, timeout: .seconds(10))
+                    }
+                    guard becameReachable else {
+                        throw StartupError.serverStartTimedOut
+                    }
+                }
+
+                serverURL = Self.defaultServerURL
+                if let directoryChooserOverride {
+                    directoryChooserOverride()
+                } else {
+                    chooseDirectory()
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+
+            isStartingLocalServer = false
+        }
+    }
+
+    func connectToRemoteServer() {
+        guard !isValidatingRemoteServer else { return }
+
+        Task {
+            isValidatingRemoteServer = true
+            errorMessage = nil
+
+            do {
+                let resolvedURL = try normalizedServerURL(from: remoteServerURLText)
+                let client = apiClientProvider(resolvedURL)
+                let health = try await client.health()
+                guard health.healthy else {
+                    throw StartupError.serverUnhealthy
+                }
+
+                serverURL = resolvedURL
+                launchStage = .remoteDirectoryEntry
+                await refreshRemoteProjectSuggestions()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+
+            isValidatingRemoteServer = false
+        }
+    }
+
+    func refreshRemoteProjectSuggestions() async {
+        do {
+            let projects = try await apiClientProvider(serverURL).projects()
+            remoteProjectSuggestions = projects.map(\.worktree).sorted()
+        } catch {
+            logger.notice("Project suggestions unavailable: \(error.localizedDescription, privacy: .public)")
+            remoteProjectSuggestions = []
+        }
+    }
+
+    func chooseRemoteProjectSuggestion(_ path: String) {
+        remoteDirectoryText = path
+    }
+
+    func connectToRemoteDirectory() {
+        let trimmedPath = remoteDirectoryText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPath.isEmpty else { return }
+
+        Task {
+            await load(directory: trimmedPath)
+        }
+    }
+
+    func resetServerSelection() {
+        clearWorkspaceSelection()
+        serverURL = Self.defaultServerURL
+        remoteProjectSuggestions = []
+        remoteDirectoryText = ""
+        launchStage = .chooseServerMode
+    }
+
     func load(directory: String) async {
         guard !directory.isEmpty else { return }
 
-        logger.info("Loading directory: \(directory, privacy: .public)")
-        selectedDirectory = directory
+        let trimmedDirectory = directory.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDirectory.isEmpty else { return }
+
+        let previousDirectory = selectedDirectory
+        let previousLiveStore = liveStore
+        let previousSnapshot = snapshot
+        let workspaceService = workspaceServiceProvider(serverURL)
+        let connection = WorkspaceConnection(serverURL: serverURL, directory: trimmedDirectory)
+
+        logger.info("Loading directory: \(trimmedDirectory, privacy: .public) server=\(self.serverURL.absoluteString, privacy: .public)")
+        selectedDirectory = trimmedDirectory
         isLoading = true
         errorMessage = nil
         WorkspaceCommandCenter.shared.bind(appState: self)
 
-        let liveStore = await storeRegistry.store(for: directory)
+        let liveStore = await storeRegistry.store(for: connection)
         bindLiveStore(liveStore)
 
         if persistsWorkspacePaneState {
-            await repository.selectWorkspace(directory: directory)
+            await repository.selectWorkspace(directory: trimmedDirectory)
         }
 
         do {
-            let persistedSnapshot = await repository.loadSnapshot(directory: directory)
+            let persistedSnapshot = await repository.loadSnapshot(directory: trimmedDirectory)
             snapshot = persistedSnapshot
             liveStore.replacePaneStates(persistedSnapshot.paneStates)
             liveStore.applyPersistenceSnapshot(persistedSnapshot)
 
-            async let workspaceSnapshotTask = workspaceService.loadWorkspace(directory: directory)
+            async let workspaceSnapshotTask = workspaceService.loadWorkspace(directory: trimmedDirectory)
             async let modelCatalogTask = workspaceService.loadModelCatalog()
             async let modelContextLimitTask = workspaceService.loadModelContextLimits()
 
@@ -166,7 +350,7 @@ final class OpenCodeAppState: ObservableObject {
             }
 
             await repository.applyWorkspaceSnapshot(
-                directory: directory,
+                directory: trimmedDirectory,
                 snapshot: workspaceSnapshot,
                 modelContextLimits: modelContextLimits,
                 openSessionIDs: openSessionIDs
@@ -174,7 +358,7 @@ final class OpenCodeAppState: ObservableObject {
             liveStore.applyWorkspaceSnapshot(workspaceSnapshot)
 
             if persistsWorkspacePaneState {
-                restorePaneState(for: directory)
+                restorePaneState(for: trimmedDirectory)
             }
 
             if openSessionIDs.isEmpty, let mostRecent = visibleSessions.first {
@@ -196,7 +380,7 @@ final class OpenCodeAppState: ObservableObject {
 
             reconcileModelSelections()
 
-            let coordinator = await syncRegistry.coordinator(for: directory)
+            let coordinator = await syncRegistry.coordinator(for: connection)
             await coordinator.updateModelContextLimits(modelContextLimits)
             await coordinator.updateOpenSessionIDs(openSessionIDs)
             try await coordinator.start(modelContextLimits: modelContextLimits, openSessionIDs: openSessionIDs, performInitialSync: false)
@@ -205,9 +389,18 @@ final class OpenCodeAppState: ObservableObject {
                 await coordinator.refreshTodos(sessionID: sessionID)
                 await coordinator.refreshMessages(sessionID: sessionID)
             }
+            launchStage = isUsingLocalServer ? .localFolderSelection : .remoteDirectoryEntry
         } catch {
             logger.error("Load failed: \(error.localizedDescription, privacy: .public)")
             errorMessage = error.localizedDescription
+            selectedDirectory = previousDirectory
+            snapshot = previousSnapshot
+            self.liveStore = previousLiveStore
+            WorkspaceCommandCenter.shared.updateAvailability(
+                selectedDirectory: selectedDirectory,
+                focusedSessionID: focusedSessionID,
+                openSessionIDs: openSessionIDs
+            )
         }
 
         isLoading = false
@@ -240,8 +433,8 @@ final class OpenCodeAppState: ObservableObject {
 
         Task {
             await syncOpenSessions()
-            if let selectedDirectory {
-                let coordinator = await syncRegistry.coordinator(for: selectedDirectory)
+            if let workspaceConnection {
+                let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
                 await coordinator.refreshTodos(sessionID: sessionID)
                 await coordinator.refreshMessages(sessionID: sessionID)
             }
@@ -319,8 +512,10 @@ final class OpenCodeAppState: ObservableObject {
         guard let selectedDirectory else { return }
         Task {
             do {
+                let workspaceService = workspaceServiceProvider(serverURL)
                 let session = try await workspaceService.createSession(directory: selectedDirectory, title: nil, parentID: nil)
-                let coordinator = await syncRegistry.coordinator(for: selectedDirectory)
+                guard let workspaceConnection else { return }
+                let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
                 await repository.applySessionLifecycle(
                     directory: selectedDirectory,
                     session: session,
@@ -343,8 +538,10 @@ final class OpenCodeAppState: ObservableObject {
 
         Task {
             do {
+                let workspaceService = workspaceServiceProvider(serverURL)
                 let session = try await workspaceService.archiveSession(directory: selectedDirectory, sessionID: sessionID)
-                let coordinator = await syncRegistry.coordinator(for: selectedDirectory)
+                guard let workspaceConnection else { return }
+                let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
                 await repository.applySessionLifecycle(
                     directory: selectedDirectory,
                     session: session,
@@ -363,9 +560,10 @@ final class OpenCodeAppState: ObservableObject {
     }
 
     func refreshMessages(for sessionID: String) {
-        guard let selectedDirectory else { return }
+        guard workspaceConnection != nil else { return }
         Task {
-            let coordinator = await syncRegistry.coordinator(for: selectedDirectory)
+            guard let workspaceConnection else { return }
+            let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
             await coordinator.refreshMessages(sessionID: sessionID)
         }
     }
@@ -471,6 +669,7 @@ final class OpenCodeAppState: ObservableObject {
 
         Task {
             do {
+                let workspaceService = workspaceServiceProvider(serverURL)
                 try await workspaceService.sendMessage(
                     directory: selectedDirectory,
                     sessionID: sessionID,
@@ -478,7 +677,8 @@ final class OpenCodeAppState: ObservableObject {
                     model: selectedModel,
                     variant: selectedVariant
                 )
-                let coordinator = await syncRegistry.coordinator(for: selectedDirectory)
+                guard let workspaceConnection else { return }
+                let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
                 await coordinator.refreshMessages(sessionID: sessionID)
             } catch {
                 drafts[sessionID] = draft
@@ -492,8 +692,10 @@ final class OpenCodeAppState: ObservableObject {
         guard let selectedDirectory else { return }
         Task {
             do {
+                let workspaceService = workspaceServiceProvider(serverURL)
                 try await workspaceService.replyToPermission(directory: selectedDirectory, requestID: request.id, reply: reply)
-                let coordinator = await syncRegistry.coordinator(for: selectedDirectory)
+                guard let workspaceConnection else { return }
+                let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
                 await coordinator.refreshInteractions(sessionID: request.sessionID)
             } catch {
                 errorMessage = error.localizedDescription
@@ -505,8 +707,10 @@ final class OpenCodeAppState: ObservableObject {
         guard let selectedDirectory else { return }
         Task {
             do {
+                let workspaceService = workspaceServiceProvider(serverURL)
                 try await workspaceService.replyToQuestion(directory: selectedDirectory, requestID: request.id, answers: answers)
-                let coordinator = await syncRegistry.coordinator(for: selectedDirectory)
+                guard let workspaceConnection else { return }
+                let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
                 await coordinator.refreshInteractions(sessionID: request.sessionID)
             } catch {
                 errorMessage = error.localizedDescription
@@ -518,8 +722,10 @@ final class OpenCodeAppState: ObservableObject {
         guard let selectedDirectory else { return }
         Task {
             do {
+                let workspaceService = workspaceServiceProvider(serverURL)
                 try await workspaceService.rejectQuestion(directory: selectedDirectory, requestID: request.id)
-                let coordinator = await syncRegistry.coordinator(for: selectedDirectory)
+                guard let workspaceConnection else { return }
+                let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
                 await coordinator.refreshInteractions(sessionID: request.sessionID)
             } catch {
                 errorMessage = error.localizedDescription
@@ -544,8 +750,8 @@ final class OpenCodeAppState: ObservableObject {
     }
 
     private func syncOpenSessions() async {
-        guard let selectedDirectory else { return }
-        let coordinator = await syncRegistry.coordinator(for: selectedDirectory)
+        guard let workspaceConnection else { return }
+        let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
         await coordinator.updateOpenSessionIDs(openSessionIDs)
     }
 
@@ -722,6 +928,72 @@ final class OpenCodeAppState: ObservableObject {
     private func requestPromptFocus(for sessionID: String) {
         promptFocusRequest = SessionPromptFocusRequest(sessionID: sessionID)
     }
+
+    private func clearWorkspaceSelection() {
+        selectedDirectory = nil
+        openSessionIDs = []
+        focusedSessionID = nil
+        liveStore = nil
+        paneWidths = [:]
+        modelCatalog = ModelCatalog(providers: [], defaultModels: [:], connectedProviderIDs: [])
+        selectedModelBySession = [:]
+        selectedThinkingLevelBySession = [:]
+        WorkspaceCommandCenter.shared.updateAvailability(
+            selectedDirectory: nil,
+            focusedSessionID: nil,
+            openSessionIDs: []
+        )
+    }
+
+    private func normalizedServerURL(from text: String) throws -> URL {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw StartupError.invalidServerURL
+        }
+
+        let candidate = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        guard var components = URLComponents(string: candidate),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              let host = components.host,
+              !host.isEmpty else {
+            throw StartupError.invalidServerURL
+        }
+
+        components.path = components.path.isEmpty ? "" : components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = components.url else {
+            throw StartupError.invalidServerURL
+        }
+
+        remoteServerURLText = url.absoluteString
+        return url
+    }
+
+    private func isServerReachable(at url: URL) async -> Bool {
+        do {
+            return try await apiClientProvider(url).health().healthy
+        } catch {
+            return false
+        }
+    }
+
+    private func waitForServer(at url: URL, timeout: Duration) async -> Bool {
+        let clock = ContinuousClock()
+        let start = clock.now
+        while start.duration(to: clock.now) < timeout {
+            if await isServerReachable(at: url) {
+                return true
+            }
+
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch {
+                return false
+            }
+        }
+
+        return false
+    }
 }
 
 struct SessionTimelineScrollRequest: Equatable {
@@ -750,5 +1022,22 @@ private struct PermissionPresentationKey: Hashable {
         always = request.always
         toolMessageID = request.tool?.messageID
         toolCallID = request.tool?.callID
+    }
+}
+
+private enum StartupError: LocalizedError {
+    case invalidServerURL
+    case serverUnhealthy
+    case serverStartTimedOut
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidServerURL:
+            return "Enter a valid http:// or https:// server URL."
+        case .serverUnhealthy:
+            return "The remote opencode server did not report as healthy."
+        case .serverStartTimedOut:
+            return "The local opencode server did not start on :4096 in time."
+        }
     }
 }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var appState: OpenCodeAppState
+    @Environment(\.openCodeTheme) private var theme
 
     var body: some View {
         NavigationSplitView {
@@ -16,9 +17,10 @@ struct RootView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background(theme.windowBackground)
         }
         .navigationTitle(appState.projectName ?? "Choose Project")
+        .foregroundStyle(theme.primaryText)
         .alert("OpenCode Error", isPresented: Binding(
             get: { appState.errorMessage != nil },
             set: { isPresented in
@@ -33,6 +35,8 @@ struct RootView: View {
         } message: {
             Text(appState.errorMessage ?? "")
         }
+        .background(theme.windowBackground)
+        .themedWindow(theme)
         .background(
             FocusedSessionTimelineKeyHandler { direction in
                 appState.scrollFocusedSessionTimeline(to: direction)
@@ -43,14 +47,37 @@ struct RootView: View {
 
 private struct SidebarView: View {
     @EnvironmentObject private var appState: OpenCodeAppState
+    @Environment(\.openCodeTheme) private var theme
     @State private var sessionPendingArchive: SessionDisplay?
 
     var body: some View {
         List(selection: sessionListSelection) {
             if appState.selectedDirectory == nil {
                 Section {
-                    Button("Choose Project Folder") {
-                        appState.chooseDirectory()
+                    switch appState.launchStage {
+                    case .localFolderSelection:
+                        Button("Choose Project Folder") {
+                            appState.chooseDirectory()
+                        }
+                    case .chooseServerMode:
+                        Button("Open Local Directory") {
+                            appState.openLocalDirectory()
+                        }
+                        .disabled(appState.isStartingLocalServer)
+
+                        Button("Open Remote Directory") {
+                            appState.showRemoteServerEntry()
+                        }
+                    case .remoteServerEntry:
+                        Button("Back to Server Options") {
+                            appState.resetServerSelection()
+                        }
+                    case .remoteDirectoryEntry:
+                        Button("Change Server") {
+                            appState.showRemoteServerEntry()
+                        }
+                    case .checkingLocalServer:
+                        ProgressView()
                     }
                 }
             }
@@ -64,7 +91,7 @@ private struct SidebarView: View {
                         )
                     } else {
                         Text("No sessions yet")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.secondaryText)
                     }
                 }
             }
@@ -123,6 +150,7 @@ private struct SidebarView: View {
 
 private struct SessionListSection: View {
     @ObservedObject var liveStore: WorkspaceLiveStore
+    @Environment(\.openCodeTheme) private var theme
 
     let onArchiveRequest: (SessionDisplay) -> Void
 
@@ -133,7 +161,7 @@ private struct SessionListSection: View {
     var body: some View {
         if visibleSessions.isEmpty {
             Text("No sessions yet")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.secondaryText)
         } else {
             ForEach(visibleSessions) { session in
                 SessionRow(
@@ -153,6 +181,7 @@ private struct SessionListSection: View {
 }
 
 private struct SessionRow: View {
+    @Environment(\.openCodeTheme) private var theme
     let session: SessionDisplay
     let indicator: SessionIndicator
     let todoProgress: TodoProgress?
@@ -178,7 +207,7 @@ private struct SessionRow: View {
                     }
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.secondaryText)
             }
 
             Spacer(minLength: 0)
