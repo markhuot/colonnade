@@ -10,7 +10,7 @@ struct OpenCodeApp: App {
     @StateObject private var localServerPreferencesController = OpenCodeAppModelFactory.localServerPreferencesController
 
     var body: some Scene {
-        WindowGroup("OpenCode", id: "workspace-root") {
+        WindowGroup("Colonnade", id: "workspace-root") {
             WorkspaceRootContainer()
                 .environmentObject(themeController)
                 .environmentObject(modelPreferencesController)

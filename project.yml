@@ -7,10 +7,10 @@ settings:
     SWIFT_VERSION: 6.0
     GENERATE_INFOPLIST_FILE: YES
     PRODUCT_BUNDLE_IDENTIFIER: ai.opencode.mac
-    PRODUCT_NAME: OpenCode
+    PRODUCT_NAME: Colonnade
     CURRENT_PROJECT_VERSION: 1
     MARKETING_VERSION: 0.1.0
-    INFOPLIST_KEY_CFBundleDisplayName: OpenCode
+    INFOPLIST_KEY_CFBundleDisplayName: Colonnade
     INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
     INFOPLIST_KEY_NSHumanReadableCopyright: Copyright 2026
 packages:
@@ -27,7 +27,7 @@ targets:
     info:
       path: OpenCodeMac/Info.plist
       properties:
-        CFBundleDisplayName: OpenCode
+        CFBundleDisplayName: Colonnade
         LSApplicationCategoryType: public.app-category.developer-tools
         NSHumanReadableCopyright: Copyright 2026
         NSAppTransportSecurity:
@@ -60,5 +60,7 @@ targets:
       - package: Textual
     settings:
       base:
+        BUNDLE_LOADER: $(TEST_HOST)
         PRODUCT_NAME: OpenCodeTests
         PRODUCT_MODULE_NAME: OpenCodeTests
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Colonnade.app/Contents/MacOS/Colonnade

@@ -21,7 +21,7 @@ struct RootView: View {
         }
         .navigationTitle(appState.projectName ?? "Choose Project")
         .foregroundStyle(theme.primaryText)
-        .alert("OpenCode Error", isPresented: Binding(
+        .alert("Colonnade Error", isPresented: Binding(
             get: { appState.errorMessage != nil },
             set: { isPresented in
                 if !isPresented {

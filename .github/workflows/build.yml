@@ -1,0 +1,43 @@
+name: Build Colonnade
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build release app
+        run: xcodebuild -project OpenCode.xcodeproj -scheme OpenCode -configuration Release -destination 'platform=macOS' -derivedDataPath build/DerivedData CURRENT_PROJECT_VERSION=${{ github.run_number }} CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+
+      - name: Package app bundle
+        run: ditto -c -k --sequesterRsrc --keepParent build/DerivedData/Build/Products/Release/Colonnade.app build/Colonnade-${{ github.run_number }}.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Colonnade-${{ github.run_number }}
+          path: build/Colonnade-${{ github.run_number }}.zip
+
+      - name: Create GitHub release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.run_number }}
+          name: Build ${{ github.run_number }}
+          files: build/Colonnade-${{ github.run_number }}.zip
+          generate_release_notes: true

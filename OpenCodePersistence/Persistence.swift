@@ -3,7 +3,7 @@ import Foundation
 import OSLog
 
 enum PersistenceModel {
-    static let name = "OpenCode"
+    static let name = "Colonnade"
 }
 
 final class PersistenceController: @unchecked Sendable {
@@ -79,7 +79,7 @@ final class PersistenceController: @unchecked Sendable {
             fatalError("Failed to prepare Application Support directory: \(error.localizedDescription)")
         }
 
-        return supportDirectory.appendingPathComponent("OpenCode.sqlite")
+        return supportDirectory.appendingPathComponent("Colonnade.sqlite")
     }
 
     private static func makeModel() -> NSManagedObjectModel {
