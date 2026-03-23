@@ -659,6 +659,32 @@ final class OpenCodeAppModel: ObservableObject {
         }
     }
 
+    func moveOpenSession(_ sessionID: String, before targetSessionID: String? = nil) {
+        guard let sourceIndex = openSessionIDs.firstIndex(of: sessionID) else { return }
+
+        var reorderedSessionIDs = openSessionIDs
+        reorderedSessionIDs.remove(at: sourceIndex)
+
+        if let targetSessionID {
+            guard sessionID != targetSessionID,
+                  let targetIndex = reorderedSessionIDs.firstIndex(of: targetSessionID) else {
+                return
+            }
+            reorderedSessionIDs.insert(sessionID, at: targetIndex)
+        } else {
+            reorderedSessionIDs.append(sessionID)
+        }
+
+        guard reorderedSessionIDs != openSessionIDs else { return }
+
+        openSessionIDs = reorderedSessionIDs
+        persistPaneStateIfPossible()
+
+        Task {
+            await syncOpenSessions()
+        }
+    }
+
     func paneWidth(for sessionID: String) -> CGFloat {
         paneWidths[sessionID] ?? defaultPaneWidth
     }
@@ -686,8 +712,10 @@ final class OpenCodeAppModel: ObservableObject {
         guard let selectedDirectory else { return }
         Task {
             do {
+                logger.notice("Create session started directory=\(selectedDirectory, privacy: .public)")
                 let workspaceService = workspaceServiceProvider(serverURL)
                 let session = try await workspaceService.createSession(directory: selectedDirectory, title: nil, parentID: nil)
+                logger.notice("Create session created directory=\(selectedDirectory, privacy: .public) sessionID=\(session.id, privacy: .public)")
                 guard let workspaceConnection else { return }
                 let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
                 await repository.applySessionLifecycle(
@@ -698,6 +726,9 @@ final class OpenCodeAppModel: ObservableObject {
                 )
                 liveStore?.applySessionLifecycle(session: session, lifecycle: .created)
                 await coordinator.refreshTodos(sessionID: session.id)
+                logger.notice(
+                    "Create session applied local lifecycle directory=\(selectedDirectory, privacy: .public) sessionID=\(session.id, privacy: .public) visibleSessions=\(self.visibleSessions.count, privacy: .public)"
+                )
                 openSession(session.id, focusPrompt: true)
             } catch {
                 logger.error("Create session failed: \(error.localizedDescription, privacy: .public)")
@@ -728,6 +759,25 @@ final class OpenCodeAppModel: ObservableObject {
                 await coordinator.updateOpenSessionIDs(openSessionIDs)
             } catch {
                 logger.error("Archive session failed for \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func stopSession(_ sessionID: String) {
+        guard let selectedDirectory else { return }
+        guard sessions.contains(where: { $0.id == sessionID }) else { return }
+
+        Task {
+            do {
+                let workspaceService = workspaceServiceProvider(serverURL)
+                try await workspaceService.stopSession(directory: selectedDirectory, sessionID: sessionID)
+                guard let workspaceConnection else { return }
+                let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
+                await coordinator.refreshMessages(sessionID: sessionID)
+                await coordinator.refreshInteractions(sessionID: sessionID)
+            } catch {
+                logger.error("Stop session failed for \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 errorMessage = error.localizedDescription
             }
         }
@@ -829,6 +879,9 @@ final class OpenCodeAppModel: ObservableObject {
 
         Task {
             do {
+                logger.notice(
+                    "Send message started directory=\(selectedDirectory, privacy: .public) sessionID=\(sessionID, privacy: .public) textBytes=\(draft.utf8.count, privacy: .public)"
+                )
                 let workspaceService = workspaceServiceProvider(serverURL)
                 try await workspaceService.sendMessage(
                     directory: selectedDirectory,
@@ -838,9 +891,15 @@ final class OpenCodeAppModel: ObservableObject {
                     model: selectedModel,
                     variant: selectedVariant
                 )
+                logger.notice(
+                    "Send message request completed directory=\(selectedDirectory, privacy: .public) sessionID=\(sessionID, privacy: .public)"
+                )
                 guard let workspaceConnection else { return }
                 let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
                 await coordinator.refreshMessages(sessionID: sessionID)
+                logger.notice(
+                    "Send message forced refresh completed directory=\(selectedDirectory, privacy: .public) sessionID=\(sessionID, privacy: .public)"
+                )
             } catch {
                 setDraft(draft, for: sessionID)
                 logger.error("Send failed for \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")

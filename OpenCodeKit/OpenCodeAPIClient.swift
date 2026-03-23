@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 protocol OpenCodeAPIClientProtocol: Sendable {
     func health() async throws -> OpenCodeServerHealth
@@ -10,6 +11,7 @@ protocol OpenCodeAPIClientProtocol: Sendable {
     func todos(directory: String, sessionID: String) async throws -> [SessionTodo]
     func createSession(directory: String, title: String?, parentID: String?) async throws -> OpenCodeSession
     func archiveSession(directory: String, sessionID: String, archivedAtMS: Double) async throws -> OpenCodeSession
+    func abortSession(directory: String, sessionID: String) async throws
     func sendMessage(directory: String, sessionID: String, text: String, agent: String?, model: ModelReference?, variant: String?) async throws
     func modelCatalog() async throws -> ModelCatalog
     func questions(directory: String) async throws -> [QuestionRequest]
@@ -23,6 +25,7 @@ protocol OpenCodeAPIClientProtocol: Sendable {
 
 struct OpenCodeAPIClient: @unchecked Sendable {
     let baseURL: URL
+    private let logger = Logger(subsystem: "ai.opencode.app", category: "network")
     private let session: URLSession
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
@@ -83,13 +86,24 @@ struct OpenCodeAPIClient: @unchecked Sendable {
             let title: String?
         }
 
-        return try await send(
+        let parentDescription = parentID ?? "nil"
+        logger.notice(
+            "Create session request directory=\(directory, privacy: .public) parentID=\(parentDescription, privacy: .public) titleProvided=\(title != nil, privacy: .public)"
+        )
+
+        let session: OpenCodeSession = try await send(
             path: "/session",
             method: "POST",
             directory: directory,
             body: Body(parentID: parentID, title: title),
             responseType: OpenCodeSession.self
         )
+
+        logger.notice(
+            "Create session succeeded directory=\(directory, privacy: .public) sessionID=\(session.id, privacy: .public)"
+        )
+
+        return session
     }
 
     func archiveSession(directory: String, sessionID: String, archivedAtMS: Double = Date().timeIntervalSince1970 * 1000) async throws -> OpenCodeSession {
@@ -110,6 +124,17 @@ struct OpenCodeAPIClient: @unchecked Sendable {
         )
     }
 
+    func abortSession(directory: String, sessionID: String) async throws {
+        _ = try await send(
+            path: "/session/\(sessionID)/abort",
+            method: "POST",
+            directory: directory,
+            body: Optional<String>.none,
+            responseType: Bool.self,
+            allowNoBody: true
+        )
+    }
+
     func sendMessage(directory: String, sessionID: String, text: String, agent: String?, model: ModelReference?, variant: String?) async throws {
         struct TextPartInput: Encodable {
             let type: MessagePartKind = .text
@@ -123,6 +148,12 @@ struct OpenCodeAPIClient: @unchecked Sendable {
             let variant: String?
         }
 
+        let agentDescription = agent ?? "nil"
+        let variantDescription = variant ?? "nil"
+        logger.notice(
+            "Send message request directory=\(directory, privacy: .public) sessionID=\(sessionID, privacy: .public) textBytes=\(text.utf8.count, privacy: .public) agent=\(agentDescription, privacy: .public) model=\(modelDescription(model), privacy: .public) variant=\(variantDescription, privacy: .public)"
+        )
+
         _ = try await send(
             path: "/session/\(sessionID)/prompt_async",
             method: "POST",
@@ -131,6 +162,10 @@ struct OpenCodeAPIClient: @unchecked Sendable {
             responseType: EmptyResponse.self,
             acceptEmptyResponse: true
         )
+
+        logger.notice(
+            "Send message accepted directory=\(directory, privacy: .public) sessionID=\(sessionID, privacy: .public)"
+        )
     }
 
     func modelCatalog() async throws -> ModelCatalog {
@@ -138,7 +173,7 @@ struct OpenCodeAPIClient: @unchecked Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(response: response, data: data, requestURL: request.url)
         return try decoder.decode(ModelCatalog.self, from: data)
     }
 
@@ -213,14 +248,37 @@ struct OpenCodeAPIClient: @unchecked Sendable {
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         request.timeoutInterval = 60 * 60 * 24
-        let (bytes, response) = try await session.bytes(for: request)
-        try validate(response: response)
+        let requestURLString = request.url?.absoluteString ?? "nil"
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw APIError.invalidResponse
+        logger.notice(
+            "Opening event stream directory=\(directory, privacy: .public) url=\(requestURLString, privacy: .public)"
+        )
+
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+            try validate(response: response, requestURL: request.url)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw APIError.invalidResponse
+            }
+
+            let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? "unknown"
+            logger.notice(
+                "Event stream opened directory=\(directory, privacy: .public) status=\(httpResponse.statusCode, privacy: .public) contentType=\(contentType, privacy: .public)"
+            )
+            if !contentType.localizedCaseInsensitiveContains("text/event-stream") {
+                logger.error(
+                    "Event stream content type mismatch directory=\(directory, privacy: .public) contentType=\(contentType, privacy: .public)"
+                )
+            }
+
+            return EventStreamConnection(bytes: bytes, response: httpResponse)
+        } catch {
+            logger.error(
+                "Open event stream failed directory=\(directory, privacy: .public) url=\(requestURLString, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
+            throw error
         }
-
-        return EventStreamConnection(bytes: bytes, response: httpResponse)
     }
 
     private func get<T: Decodable>(_ path: String, directory: String) async throws -> T {
@@ -234,7 +292,7 @@ struct OpenCodeAPIClient: @unchecked Sendable {
         request.timeoutInterval = 5
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(response: response, data: data, requestURL: request.url)
         return try decoder.decode(T.self, from: data)
     }
 
@@ -260,7 +318,7 @@ struct OpenCodeAPIClient: @unchecked Sendable {
         }
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(response: response, data: data, requestURL: request.url)
 
         if acceptEmptyResponse, data.isEmpty, let empty = EmptyResponse() as? Response {
             return empty
@@ -285,14 +343,28 @@ struct OpenCodeAPIClient: @unchecked Sendable {
         baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
     }
 
-    private func validate(response: URLResponse) throws {
+    private func validate(response: URLResponse, data: Data? = nil, requestURL: URL? = nil) throws {
         guard let response = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }
 
         guard (200 ..< 300).contains(response.statusCode) else {
-            throw APIError.httpStatus(response.statusCode)
+            let bodySnippet = responseBodySnippet(from: data)
+            throw APIError.httpStatus(code: response.statusCode, path: requestURL?.path, bodySnippet: bodySnippet)
         }
+    }
+
+    private func responseBodySnippet(from data: Data?) -> String? {
+        guard let data, !data.isEmpty else { return nil }
+        let value = String(decoding: data, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+        return String(value.prefix(300))
+    }
+
+    private func modelDescription(_ model: ModelReference?) -> String {
+        guard let model else { return "nil" }
+        return "\(model.providerID)/\(model.modelID)"
     }
 }
 
@@ -300,14 +372,16 @@ extension OpenCodeAPIClient: OpenCodeAPIClientProtocol {}
 
 enum APIError: LocalizedError {
     case invalidResponse
-    case httpStatus(Int)
+    case httpStatus(code: Int, path: String?, bodySnippet: String?)
 
     var errorDescription: String? {
         switch self {
         case .invalidResponse:
             return "The opencode server returned an invalid response."
-        case let .httpStatus(statusCode):
-            return "The opencode server returned HTTP \(statusCode)."
+        case let .httpStatus(statusCode, path, bodySnippet):
+            let pathSegment = path.map { " for \($0)" } ?? ""
+            let bodySegment = bodySnippet.map { " Response: \($0)" } ?? ""
+            return "The opencode server returned HTTP \(statusCode)\(pathSegment).\(bodySegment)"
         }
     }
 }

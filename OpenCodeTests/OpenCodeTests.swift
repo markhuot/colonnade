@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
 import XCTest
-@testable import OpenCode
+@testable import Colonnade
 
 final class TodoProgressTests: XCTestCase {
     func testFromCountsOnlyNonCancelledTodos() {
@@ -561,6 +561,14 @@ final class WorkspaceServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.permissions, [permission])
         XCTAssertEqual(client.recordedDirectories, ["/tmp/project", "/tmp/project", "/tmp/project", "/tmp/project"])
     }
+
+    func testStopSessionUsesInjectedClient() async throws {
+        let client = MockOpenCodeAPIClient()
+
+        try await WorkspaceService(client: client).stopSession(directory: "/tmp/project", sessionID: "session-1")
+
+        XCTAssertEqual(client.abortSessionCalls, [.init(directory: "/tmp/project", sessionID: "session-1")])
+    }
 }
 
 @MainActor
@@ -627,6 +635,35 @@ final class OpenCodeAppModelTests: XCTestCase {
         XCTAssertEqual(workspaceService.sendMessageCalls.first?.model, ModelReference(providerID: "anthropic", modelID: "claude-sonnet"))
         let refreshedMessages = await coordinator.refreshedMessageSessionIDsSnapshot()
         XCTAssertEqual(refreshedMessages.suffix(1), [session.id])
+    }
+
+    func testStopSessionUsesInjectedServiceAndRefreshesCoordinator() async throws {
+        let directory = try makeTemporaryDirectory()
+        let repository = PersistenceRepository(persistence: PersistenceController(inMemory: true))
+        let session = makeSession(id: "session-1", directory: directory)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [session.id: .busy], questions: [], permissions: [])
+        )
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false,
+            initialDirectory: directory
+        )
+
+        await appState.load(directory: directory)
+        appState.stopSession(session.id)
+        try await waitForAsyncWork()
+
+        XCTAssertEqual(workspaceService.stopSessionCalls, [.init(directory: directory, sessionID: session.id)])
+        let refreshedMessages = await coordinator.refreshedMessageSessionIDsSnapshot()
+        XCTAssertEqual(refreshedMessages.suffix(1), [session.id])
+        let refreshedInteractions = await coordinator.refreshedInteractionsCountSnapshot()
+        XCTAssertEqual(refreshedInteractions, 1)
     }
 
     func testFocusPreviousPaneMovesFocusAndRequestsPromptFocus() {
@@ -696,6 +733,41 @@ final class OpenCodeAppModelTests: XCTestCase {
         XCTAssertEqual(appState.openSessionIDs, [])
         XCTAssertNil(appState.focusedSessionID)
         XCTAssertNil(appState.promptFocusRequest)
+    }
+
+    func testMoveOpenSessionReordersPanesBeforeTarget() {
+        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
+        appState.openSessionIDs = ["session-1", "session-2", "session-3"]
+        appState.focusedSessionID = "session-2"
+
+        appState.moveOpenSession("session-3", before: "session-1")
+
+        XCTAssertEqual(appState.openSessionIDs, ["session-3", "session-1", "session-2"])
+        XCTAssertEqual(appState.focusedSessionID, "session-2")
+    }
+
+    func testMoveOpenSessionAppendsPaneWhenNoTargetProvided() {
+        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
+        appState.openSessionIDs = ["session-1", "session-2", "session-3"]
+
+        appState.moveOpenSession("session-1")
+
+        XCTAssertEqual(appState.openSessionIDs, ["session-2", "session-3", "session-1"])
+    }
+
+    func testMoveOpenSessionPersistsUpdatedPaneOrder() async throws {
+        let directory = try makeTemporaryDirectory()
+        let repository = PersistenceRepository(persistence: PersistenceController(inMemory: true))
+        let appState = OpenCodeAppModel(repository: repository, persistsWorkspacePaneState: true)
+        appState.selectedDirectory = directory
+        appState.openSessionIDs = ["session-1", "session-2", "session-3"]
+
+        appState.moveOpenSession("session-3", before: "session-2")
+        try await waitForAsyncWork()
+
+        let snapshot = await repository.loadSnapshot(directory: directory)
+        let panes = snapshot.paneStates.values.sorted { $0.position < $1.position }
+        XCTAssertEqual(panes.map(\.sessionID), ["session-1", "session-3", "session-2"])
     }
 
     func testWorkspaceCommandCenterTracksPaneFocusAfterBinding() {
@@ -1559,6 +1631,18 @@ final class OpenCodeAppModelTests: XCTestCase {
     }
 }
 
+final class SessionListEscapeKeyEventTests: XCTestCase {
+    func testEscapeRequestsStopWhenListIsFocused() {
+        XCTAssertTrue(SessionListEscapeKeyEvent.shouldRequestStop(keyCode: 53, modifiers: [], isListFocused: true))
+    }
+
+    func testEscapeIgnoresModifiedKeysOrUnfocusedList() {
+        XCTAssertFalse(SessionListEscapeKeyEvent.shouldRequestStop(keyCode: 53, modifiers: [.command], isListFocused: true))
+        XCTAssertFalse(SessionListEscapeKeyEvent.shouldRequestStop(keyCode: 53, modifiers: [], isListFocused: false))
+        XCTAssertFalse(SessionListEscapeKeyEvent.shouldRequestStop(keyCode: 115, modifiers: [], isListFocused: true))
+    }
+}
+
 final class WorkspaceSyncCoordinatorTests: XCTestCase {
     func testRetryStatusUsesBusyIndicatorTint() {
         let indicator = SessionIndicator.resolve(
@@ -2012,6 +2096,7 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
     private(set) var loadInteractionsDirectories: [String] = []
     private(set) var createSessionCalls: [CreateSessionCall] = []
     private(set) var archiveSessionCalls: [SessionCall] = []
+    private(set) var stopSessionCalls: [SessionCall] = []
     private(set) var loadSessionsDirectories: [String] = []
     private(set) var loadMessagesCalls: [SessionCall] = []
     private(set) var loadTodosCalls: [SessionCall] = []
@@ -2071,6 +2156,10 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
     func archiveSession(directory: String, sessionID: String) async throws -> OpenCodeSession {
         record { archiveSessionCalls.append(.init(directory: directory, sessionID: sessionID)) }
         return archiveSessionResult
+    }
+
+    func stopSession(directory: String, sessionID: String) async throws {
+        record { stopSessionCalls.append(.init(directory: directory, sessionID: sessionID)) }
     }
 
     func loadSessions(directory: String) async throws -> [OpenCodeSession] {
@@ -2247,6 +2336,7 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
     private(set) var recordedDirectories: [String] = []
     private(set) var healthCallCount = 0
     private(set) var projectsCallCount = 0
+    private(set) var abortSessionCalls: [MockWorkspaceService.SessionCall] = []
 
     init(
         sessions: [OpenCodeSession] = [],
@@ -2312,6 +2402,13 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
     func archiveSession(directory: String, sessionID: String, archivedAtMS: Double) async throws -> OpenCodeSession {
         record(directory)
         throw TestError.unimplemented
+    }
+
+    func abortSession(directory: String, sessionID: String) async throws {
+        recordSync {
+            recordedDirectories.append(directory)
+            abortSessionCalls.append(.init(directory: directory, sessionID: sessionID))
+        }
     }
 
     func sendMessage(directory: String, sessionID: String, text: String, agent: String?, model: ModelReference?, variant: String?) async throws {

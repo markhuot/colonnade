@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct RootView: View {
@@ -44,6 +45,7 @@ private struct SidebarView: View {
     @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
     @State private var sessionPendingArchive: SessionDisplay?
+    @State private var sessionPendingStop: SessionDisplay?
 
     var body: some View {
         List(selection: sessionListSelection) {
@@ -82,6 +84,7 @@ private struct SidebarView: View {
                     SessionListSection(
                         liveStore: liveStore,
                         openSessionIDs: appState.openSessionIDs,
+                        onStopRequest: { sessionPendingStop = $0 },
                         onArchiveRequest: { sessionPendingArchive = $0 }
                     )
                 } else {
@@ -97,6 +100,11 @@ private struct SidebarView: View {
                 }
             }
         }
+        .background(
+            SessionListEscapeKeyHandler {
+                requestStopForFocusedSession()
+            }
+        )
         .overlay {
             if appState.isLoading && appState.selectedDirectory != nil && appState.sessions.isEmpty {
                 ProgressView()
@@ -112,6 +120,29 @@ private struct SidebarView: View {
                 }
                 .disabled(appState.selectedDirectory == nil)
             }
+        }
+        .alert(
+            "Stop Session?",
+            isPresented: Binding(
+                get: { sessionPendingStop != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        sessionPendingStop = nil
+                    }
+                }
+            ),
+            presenting: sessionPendingStop
+        ) { session in
+            Button("Stop", role: .destructive) {
+                appState.stopSession(session.id)
+                sessionPendingStop = nil
+            }
+
+            Button("Cancel", role: .cancel) {
+                sessionPendingStop = nil
+            }
+        } message: { session in
+            Text("Stop \"\(session.title)\"? The current run will be aborted.")
         }
         .alert(
             "Archive Session?",
@@ -147,6 +178,16 @@ private struct SidebarView: View {
             }
         )
     }
+
+    private func requestStopForFocusedSession() {
+        guard let focusedSessionID = appState.focusedSessionID,
+              let session = appState.visibleSessions.first(where: { $0.id == focusedSessionID }),
+              session.status?.isThinkingActive == true else {
+            return
+        }
+
+        sessionPendingStop = session
+    }
 }
 
 private struct SessionListSection: View {
@@ -154,6 +195,7 @@ private struct SessionListSection: View {
     let openSessionIDs: [String]
     @Environment(\.openCodeTheme) private var theme
 
+    let onStopRequest: (SessionDisplay) -> Void
     let onArchiveRequest: (SessionDisplay) -> Void
 
     private var visibleSessions: [SessionDisplay] {
@@ -204,11 +246,107 @@ private struct SessionListSection: View {
             todoProgress: session.todoProgress
         )
         .contextMenu {
+            if session.status?.isThinkingActive == true {
+                Button("Stop Session...", role: .destructive) {
+                    onStopRequest(session)
+                }
+            }
+
             Button("Archive Session...", role: .destructive) {
                 onArchiveRequest(session)
             }
         }
         .tag(session.id)
+    }
+}
+
+struct SessionListEscapeKeyEvent {
+    static func shouldRequestStop(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, isListFocused: Bool) -> Bool {
+        guard isListFocused else { return false }
+
+        let activeModifiers = modifiers.intersection(.deviceIndependentFlagsMask)
+        let disallowedModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
+        guard activeModifiers.intersection(disallowedModifiers).isEmpty else { return false }
+
+        return keyCode == 53
+    }
+}
+
+private struct SessionListEscapeKeyHandler: NSViewRepresentable {
+    let onEscape: () -> Void
+
+    func makeNSView(context: Context) -> SessionListEscapeKeyMonitorView {
+        let view = SessionListEscapeKeyMonitorView()
+        view.onEscape = onEscape
+        return view
+    }
+
+    func updateNSView(_ nsView: SessionListEscapeKeyMonitorView, context: Context) {
+        nsView.onEscape = onEscape
+    }
+}
+
+private final class SessionListEscapeKeyMonitorView: NSView {
+    var onEscape: (() -> Void)?
+
+    private var monitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        installMonitor()
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil {
+            removeMonitor()
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    private func installMonitor() {
+        removeMonitor()
+
+        guard let window else { return }
+
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self, weak window] event in
+            guard let self, let window, event.window === window else { return event }
+
+            let shouldRequestStop = SessionListEscapeKeyEvent.shouldRequestStop(
+                keyCode: event.keyCode,
+                modifiers: event.modifierFlags,
+                isListFocused: isListFocused(in: window)
+            )
+
+            guard shouldRequestStop else { return event }
+            onEscape?()
+            return nil
+        }
+    }
+
+    private func removeMonitor() {
+        guard let monitor else { return }
+        NSEvent.removeMonitor(monitor)
+        self.monitor = nil
+    }
+
+    private func isListFocused(in window: NSWindow) -> Bool {
+        guard let firstResponder = window.firstResponder as? NSView else { return false }
+
+        if firstResponder is NSTableView || firstResponder is NSOutlineView {
+            return true
+        }
+
+        return firstResponder.enclosingTableView != nil || firstResponder.enclosingOutlineView != nil
+    }
+}
+
+private extension NSView {
+    var enclosingTableView: NSTableView? {
+        sequence(first: self as NSView?, next: { $0?.superview }).first { $0 is NSTableView } as? NSTableView
+    }
+
+    var enclosingOutlineView: NSOutlineView? {
+        sequence(first: self as NSView?, next: { $0?.superview }).first { $0 is NSOutlineView } as? NSOutlineView
     }
 }
 

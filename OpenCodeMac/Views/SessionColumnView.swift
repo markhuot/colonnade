@@ -146,6 +146,7 @@ struct SessionColumnView: View {
 
     let sessionID: String
     var chrome: SessionColumnChrome = .pane
+    var onPaneDragStarted: (() -> Void)? = nil
 
     var body: some View {
         let session = sessionState.session
@@ -165,7 +166,9 @@ struct SessionColumnView: View {
                     sessionID: sessionID,
                     session: session,
                     indicator: session?.indicator ?? SessionIndicator.resolve(status: nil, hasPendingPermission: false),
-                    contextUsageText: session?.contextUsageText
+                    contextUsageText: session?.contextUsageText,
+                    allowsPaneDrag: chrome == .pane,
+                    onPaneDragStarted: onPaneDragStarted
                 )
                 Divider()
             }
@@ -261,6 +264,8 @@ private struct SessionHeaderView: View {
     let session: SessionDisplay?
     let indicator: SessionIndicator
     let contextUsageText: String?
+    var allowsPaneDrag = false
+    var onPaneDragStarted: (() -> Void)? = nil
 
     @State private var isHoveringStatusIcon = false
 
@@ -322,6 +327,29 @@ private struct SessionHeaderView: View {
             }
         }
         .padding(18)
+        .modifier(SessionHeaderDragModifier(
+            allowsPaneDrag: allowsPaneDrag,
+            sessionID: sessionID,
+            onPaneDragStarted: onPaneDragStarted
+        ))
+    }
+}
+
+private struct SessionHeaderDragModifier: ViewModifier {
+    let allowsPaneDrag: Bool
+    let sessionID: String
+    let onPaneDragStarted: (() -> Void)?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if allowsPaneDrag {
+            content.onDrag {
+                onPaneDragStarted?()
+                return SessionPaneDrag.itemProvider(for: sessionID)
+            }
+        } else {
+            content
+        }
     }
 }
 

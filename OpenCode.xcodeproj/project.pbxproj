@@ -82,6 +82,7 @@
 		DCD767603ED6CBE8F67DC3D0 /* gruvbox-light-soft.json in Resources */ = {isa = PBXBuildFile; fileRef = 4C636692B66849AAD4D35FD5 /* gruvbox-light-soft.json */; };
 		DDBE3B745792B795CDD246C7 /* PlatformModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5EB9CE9B86015966328BCE5 /* PlatformModels.swift */; };
 		DE4332967B2B45A2BDD39C79 /* github-light-default.json in Resources */ = {isa = PBXBuildFile; fileRef = 8AEC86B30BDBEFDFC3BCC1B3 /* github-light-default.json */; };
+		E13D9A42D326D965E3FABB55 /* SessionPaneDrag.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60CBD03206FD1CFFCC98F8EF /* SessionPaneDrag.swift */; };
 		E248B295358F1B2372D37822 /* OpenCodeAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14EC8AE42C80968027536CB3 /* OpenCodeAppState.swift */; };
 		E4892181B4A4222D15FCCE4D /* light-plus.json in Resources */ = {isa = PBXBuildFile; fileRef = F9D2992D5599F25BDE2B2001 /* light-plus.json */; };
 		E687AF1282AE97C2661B5BE8 /* catppuccin-mocha.json in Resources */ = {isa = PBXBuildFile; fileRef = 1CD6EC87D9F37C58D8E45227 /* catppuccin-mocha.json */; };
@@ -142,6 +143,7 @@
 		5CD055A8CF30370EB27BC136 /* WorkspaceLiveStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceLiveStore.swift; sourceTree = "<group>"; };
 		602074E16D05E0CDBE97410D /* OpenCodeAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeAPIClient.swift; sourceTree = "<group>"; };
 		60269834F2626A995F081968 /* ProjectSelectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSelectorView.swift; sourceTree = "<group>"; };
+		60CBD03206FD1CFFCC98F8EF /* SessionPaneDrag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPaneDrag.swift; sourceTree = "<group>"; };
 		647DB9E7C3D7CBAC2136CD0F /* kanagawa-lotus.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "kanagawa-lotus.json"; sourceTree = "<group>"; };
 		6885BC9CB7EB2511DF937195 /* poimandres.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = poimandres.json; sourceTree = "<group>"; };
 		6A73B7A12E1A8F474974FD7E /* catppuccin-macchiato.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "catppuccin-macchiato.json"; sourceTree = "<group>"; };
@@ -391,6 +393,7 @@
 				D15451F12CC1193E39223DDD /* PromptTextView.swift */,
 				562AF3A187EF417E7441A050 /* RootView.swift */,
 				778068AAF9758A3F61A1475A /* SessionColumnView.swift */,
+				60CBD03206FD1CFFCC98F8EF /* SessionPaneDrag.swift */,
 				EA69A9728F6E4EC784812E19 /* SessionStatusIcon.swift */,
 				E4AEA298CB2C2137AA867AF0 /* SessionWindowView.swift */,
 			);
@@ -583,6 +586,7 @@
 				A7E7F228E5A323320EC9EE03 /* PromptTextView.swift in Sources */,
 				17FC30AF2252D7B6DA41C32D /* RootView.swift in Sources */,
 				888C91D1FF013A270CDC5CA8 /* SessionColumnView.swift in Sources */,
+				E13D9A42D326D965E3FABB55 /* SessionPaneDrag.swift in Sources */,
 				F946373AD2B3F582C582AE5A /* SessionStatusIcon.swift in Sources */,
 				B8CB8D66585A1797D11C7C42 /* SessionWindowView.swift in Sources */,
 				8AE08AE7F03B9D743B4ECF0A /* SharedModels.swift in Sources */,

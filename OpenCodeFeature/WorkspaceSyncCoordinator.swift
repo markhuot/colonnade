@@ -230,9 +230,13 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
     private func startEventStream() {
         eventTask?.cancel()
         eventTask = Task {
+            self.logger.notice("Starting event stream loop directory=\(self.directory, privacy: .public)")
             while !Task.isCancelled {
                 do {
                     let connection = try await client.openEventStream(directory: directory)
+                    self.logger.notice(
+                        "Event stream connected directory=\(self.directory, privacy: .public) status=\(connection.response.statusCode, privacy: .public)"
+                    )
                     var payloadLines: [String] = []
                     var lineBuffer = Data()
 
@@ -260,14 +264,14 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
 
                     await repository.flushBufferedStreamMutations()
 
-                    logger.error("Event stream ended without cancellation; reconnecting")
+                    self.logger.error("Event stream ended without cancellation directory=\(self.directory, privacy: .public); reconnecting")
                 } catch is CancellationError {
                     await repository.flushBufferedStreamMutations()
-                    logger.notice("Event stream cancelled")
+                    self.logger.notice("Event stream cancelled directory=\(self.directory, privacy: .public)")
                     break
                 } catch {
                     await repository.flushBufferedStreamMutations()
-                    logger.error("Event stream failed: \(error.localizedDescription, privacy: .public)")
+                    self.logger.error("Event stream failed directory=\(self.directory, privacy: .public): \(error.localizedDescription, privacy: .public)")
                     try? await Task.sleep(for: .seconds(1.5))
                 }
             }
@@ -277,6 +281,10 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
     private func handleEventData(_ payload: String) async {
         do {
             let event = try payloadDecoder.decode(payload)
+            let sessionID = eventSessionID(from: event) ?? "nil"
+            logger.notice(
+                "SSE event received directory=\(self.directory, privacy: .public) type=\(event.type.rawString, privacy: .public) sessionID=\(sessionID, privacy: .public)"
+            )
             await handle(payload: event)
         } catch {
             logger.error("Event decode failed: \(error.localizedDescription, privacy: .public) payload=\(String(payload.prefix(200)), privacy: .private)")
@@ -305,6 +313,7 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
     private func handle(payload: EventPayload) async {
         switch payload.type {
         case .serverConnected:
+            logger.notice("SSE server connected event directory=\(self.directory, privacy: .public)")
             return
 
         case .sessionCreated, .sessionUpdated, .sessionDeleted:
@@ -313,6 +322,10 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
                 let session = sessionObject.decoded(OpenCodeSession.self),
                 let lifecycle = payload.type.lifecycleEvent
             else { return }
+
+            logger.notice(
+                "Session lifecycle event directory=\(self.directory, privacy: .public) type=\(payload.type.rawString, privacy: .public) sessionID=\(session.id, privacy: .public)"
+            )
 
             await repository.applySessionLifecycle(
                 directory: directory,
@@ -348,6 +361,10 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
                 let infoObject = payload.object(.info),
                 let info = infoObject.decoded(MessageInfo.self)
             else { return }
+
+            logger.notice(
+                "Message updated event directory=\(self.directory, privacy: .public) sessionID=\(info.sessionID, privacy: .public) messageID=\(info.id, privacy: .public)"
+            )
 
             await withStore { store in
                 store.upsertMessageInfo(info)
@@ -427,10 +444,23 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
 
         case .todoUpdated:
             if let sessionID = payload.string(.sessionID) {
+                logger.notice(
+                    "Todo updated event directory=\(self.directory, privacy: .public) sessionID=\(sessionID, privacy: .public)"
+                )
                 await refreshTodos(sessionID: sessionID)
             }
 
-        case .sessionError, .unknown:
+        case .sessionError:
+            let sessionID = eventSessionID(from: payload) ?? "nil"
+            logger.error(
+                "Session error event directory=\(self.directory, privacy: .public) sessionID=\(sessionID, privacy: .public) details=\(self.payloadSummary(payload), privacy: .public)"
+            )
+            return
+
+        case .unknown:
+            logger.notice(
+                "Unknown SSE event directory=\(self.directory, privacy: .public) details=\(self.payloadSummary(payload), privacy: .public)"
+            )
             return
         }
     }
@@ -502,5 +532,16 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
         }
 
         return String(decoding: lineData, as: UTF8.self)
+    }
+
+    private func payloadSummary(_ payload: EventPayload) -> String {
+        let sessionID = eventSessionID(from: payload) ?? "nil"
+        let details = payload.propertyObject.isEmpty
+            ? "none"
+            : payload.propertyObject
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key)=\($0.value.prettyDescription)" }
+                .joined(separator: " | ")
+        return "type=\(payload.type.rawString) sessionID=\(sessionID) properties=\(details)"
     }
 }

@@ -227,6 +227,7 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
 @MainActor
 final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
     let connection: WorkspaceConnection
+    private let logger = Logger(subsystem: "ai.opencode.app", category: "workspace-sync")
 
     var directory: String { connection.directory }
 
@@ -329,10 +330,17 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
     }
 
     func applySessionLifecycle(session: OpenCodeSession, lifecycle: SessionLifecycleEvent) {
+        let lifecycleDescription = String(describing: lifecycle)
         switch lifecycle {
         case .created, .updated:
+            logger.notice(
+                "Apply session lifecycle sessionID=\(session.id, privacy: .public) lifecycle=\(lifecycleDescription, privacy: .public) updatedAtMS=\(session.time.updated, privacy: .public)"
+            )
             sessionState(for: session.id).applySessionModel(session)
         case .deleted:
+            logger.notice(
+                "Apply session lifecycle sessionID=\(session.id, privacy: .public) lifecycle=\(lifecycleDescription, privacy: .public)"
+            )
             sessionStates.removeValue(forKey: session.id)
             paneStates.removeValue(forKey: session.id)
         }
@@ -431,6 +439,11 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
                 }
                 return lhs.updatedAtMS > rhs.updatedAtMS
             }
+
+        let orderedSessionIDs = sessions.map(\.id).joined(separator: ",")
+        logger.notice(
+            "Refresh sessions list count=\(self.sessions.count, privacy: .public) order=\(orderedSessionIDs, privacy: .public)"
+        )
     }
 }
 

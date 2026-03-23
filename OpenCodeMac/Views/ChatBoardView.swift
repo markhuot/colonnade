@@ -4,6 +4,7 @@ import SwiftUI
 struct ChatBoardView: View {
     @EnvironmentObject private var appState: OpenCodeAppModel
     @State private var transientPaneWidths: [String: CGFloat] = [:]
+    @State private var draggedSessionID: String?
 
     let sessionIDs: [String]
 
@@ -21,6 +22,14 @@ struct ChatBoardView: View {
                         ForEach(sessionIDs, id: \.self) { sessionID in
                             paneView(for: sessionID, liveStore: liveStore)
                         }
+
+                        Color.clear
+                            .frame(width: 44)
+                            .contentShape(Rectangle())
+                            .dropDestination(for: String.self) { items, _ in
+                                handlePaneDropToEnd(items: items)
+                            } isTargeted: { _ in
+                            }
                     }
                     .padding(20)
                 }
@@ -34,9 +43,15 @@ struct ChatBoardView: View {
                 }
                 .onChange(of: appState.openSessionIDs) { _, _ in
                     pruneTransientPaneWidths()
+                    if let draggedSessionID, !sessionIDs.contains(draggedSessionID) {
+                        self.draggedSessionID = nil
+                    }
                 }
                 .onChange(of: sessionIDs) { _, _ in
                     pruneTransientPaneWidths()
+                    if let draggedSessionID, !sessionIDs.contains(draggedSessionID) {
+                        self.draggedSessionID = nil
+                    }
                     scrollToFocusedSession(with: proxy)
                 }
             }
@@ -54,7 +69,13 @@ struct ChatBoardView: View {
     private func paneView(for sessionID: String, liveStore: WorkspaceLiveStore) -> some View {
         let width = paneWidth(for: sessionID)
 
-        SessionColumnView(sessionState: liveStore.sessionState(for: sessionID), sessionID: sessionID)
+        SessionColumnView(
+            sessionState: liveStore.sessionState(for: sessionID),
+            sessionID: sessionID,
+            onPaneDragStarted: {
+                draggedSessionID = sessionID
+            }
+        )
             .id(sessionID)
             .frame(width: width)
             .overlay(alignment: Alignment.trailing) {
@@ -71,6 +92,10 @@ struct ChatBoardView: View {
                     }
                 )
                 .offset(x: 9)
+            }
+            .dropDestination(for: String.self) { items, _ in
+                handlePaneDrop(items: items, before: sessionID)
+            } isTargeted: { _ in
             }
     }
 
@@ -92,6 +117,34 @@ struct ChatBoardView: View {
 
     private func pruneTransientPaneWidths() {
         transientPaneWidths = transientPaneWidths.filter { sessionIDs.contains($0.key) }
+    }
+
+    private func handlePaneDrop(items: [String], before targetSessionID: String) -> Bool {
+        let sourceSessionID = items.first ?? draggedSessionID
+        guard let sourceSessionID,
+              sourceSessionID != targetSessionID,
+              sessionIDs.contains(sourceSessionID),
+              sessionIDs.contains(targetSessionID) else {
+            draggedSessionID = nil
+            return false
+        }
+
+        appState.moveOpenSession(sourceSessionID, before: targetSessionID)
+        draggedSessionID = nil
+        return true
+    }
+
+    private func handlePaneDropToEnd(items: [String]) -> Bool {
+        let sourceSessionID = items.first ?? draggedSessionID
+        guard let sourceSessionID,
+              sessionIDs.contains(sourceSessionID) else {
+            draggedSessionID = nil
+            return false
+        }
+
+        appState.moveOpenSession(sourceSessionID)
+        draggedSessionID = nil
+        return true
     }
 
     private func scrollToFocusedSession(with proxy: ScrollViewProxy, animated: Bool = true) {
