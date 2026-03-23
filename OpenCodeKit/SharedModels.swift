@@ -518,7 +518,7 @@ struct SessionIndicator: Hashable {
         }
 
         return SessionIndicator(
-            tint: status.indicatorTint,
+            tint: status.activityTint,
             label: {
                 if case .busy = status {
                     return nil
@@ -1212,12 +1212,10 @@ extension MessageInfo {
 }
 
 extension SessionStatus {
-    var indicatorTint: SessionIndicatorTint {
+    var activityTint: SessionIndicatorTint {
         switch self {
-        case .busy:
+        case .busy, .retry:
             return .busy
-        case .retry:
-            return .retry
         case .idle, .unknown:
             return .idle
         }

@@ -58,7 +58,6 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
     private var eventTask: Task<Void, Never>?
     private var messageRefreshTasks: [String: Task<Void, Never>] = [:]
     private var todoRefreshTasks: [String: Task<Void, Never>] = [:]
-    private var statusRefreshTasks: [String: Task<Void, Never>] = [:]
     private var sessionRefreshTask: Task<Void, Never>?
     private var didStart = false
 
@@ -360,7 +359,6 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
             await withStore { store in
                 store.upsertMessageInfo(info)
             }
-            await scheduleStatusRefresh(for: info.sessionID)
 
         case .messageRemoved:
             guard let sessionID = payload.string(.sessionID) else { return }
@@ -384,7 +382,6 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
                 if let partObject = payload.object(.part), let part = partObject.decoded(MessagePart.self) {
                     if part.type == .stepFinish {
                         await repository.flushBufferedStreamMutations()
-                        await scheduleStatusRefresh(for: sessionID)
                     }
                     await repository.flushBufferedStreamMutations()
                     let appliedPart = await withStore { store in
@@ -464,16 +461,6 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
             guard !Task.isCancelled else { return }
             logger.notice("Executing scheduled message refresh for \(sessionID, privacy: .public) reason=\(reason.summary, privacy: .public)")
             await refreshMessages(sessionID: sessionID)
-        }
-    }
-
-    private func scheduleStatusRefresh(for sessionID: String) async {
-        logger.notice("Scheduling status refresh for \(sessionID, privacy: .public)")
-        statusRefreshTasks[sessionID]?.cancel()
-        statusRefreshTasks[sessionID] = Task {
-            try? await Task.sleep(for: .milliseconds(250))
-            guard !Task.isCancelled else { return }
-            await refreshStatus(sessionID: sessionID)
         }
     }
 

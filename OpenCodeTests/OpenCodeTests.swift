@@ -414,6 +414,42 @@ final class OpenCodeAppModelTests: XCTestCase {
         XCTAssertNil(appState.promptFocusRequest)
     }
 
+    func testCloseFocusedSessionMovesFocusToPaneOnRight() {
+        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
+        appState.openSessionIDs = ["session-1", "session-2", "session-3"]
+        appState.focusedSessionID = "session-2"
+
+        appState.closeSession("session-2")
+
+        XCTAssertEqual(appState.openSessionIDs, ["session-1", "session-3"])
+        XCTAssertEqual(appState.focusedSessionID, "session-3")
+        XCTAssertEqual(appState.promptFocusRequest?.sessionID, "session-3")
+    }
+
+    func testCloseFocusedSessionMovesFocusToPaneOnLeftWhenNoPaneOnRight() {
+        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
+        appState.openSessionIDs = ["session-1", "session-2", "session-3"]
+        appState.focusedSessionID = "session-3"
+
+        appState.closeSession("session-3")
+
+        XCTAssertEqual(appState.openSessionIDs, ["session-1", "session-2"])
+        XCTAssertEqual(appState.focusedSessionID, "session-2")
+        XCTAssertEqual(appState.promptFocusRequest?.sessionID, "session-2")
+    }
+
+    func testCloseLastFocusedSessionClearsFocus() {
+        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
+        appState.openSessionIDs = ["session-1"]
+        appState.focusedSessionID = "session-1"
+
+        appState.closeSession("session-1")
+
+        XCTAssertEqual(appState.openSessionIDs, [])
+        XCTAssertNil(appState.focusedSessionID)
+        XCTAssertNil(appState.promptFocusRequest)
+    }
+
     func testWorkspaceCommandCenterTracksPaneFocusAfterBinding() {
         let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
         let commandCenter = WorkspaceCommandCenter.shared
@@ -445,6 +481,30 @@ final class OpenCodeAppModelTests: XCTestCase {
 
         XCTAssertTrue(commandCenter.canFocusPreviousPane)
         XCTAssertTrue(commandCenter.canFocusNextPane)
+    }
+
+    func testWorkspaceCommandCenterEnablesCloseSessionForFocusedWorkspacePane() {
+        let commandCenter = WorkspaceCommandCenter.shared
+
+        commandCenter.updateAvailability(
+            selectedDirectory: "/tmp/project",
+            focusedSessionID: "session-1",
+            openSessionIDs: ["session-1"]
+        )
+
+        XCTAssertTrue(commandCenter.canCloseFocusedSession)
+    }
+
+    func testWorkspaceCommandCenterDisablesCloseSessionWithoutFocusedWorkspacePane() {
+        let commandCenter = WorkspaceCommandCenter.shared
+
+        commandCenter.updateAvailability(
+            selectedDirectory: "/tmp/project",
+            focusedSessionID: nil,
+            openSessionIDs: ["session-1"]
+        )
+
+        XCTAssertFalse(commandCenter.canCloseFocusedSession)
     }
 
     func testLoadRestoresPersistedPaneStateAndClampsPaneWidths() async throws {
@@ -851,6 +911,17 @@ final class FocusedSessionTimelineKeyEventTests: XCTestCase {
 }
 
 final class WorkspaceSyncCoordinatorTests: XCTestCase {
+    func testRetryStatusUsesBusyIndicatorTint() {
+        let indicator = SessionIndicator.resolve(
+            status: .retry(attempt: 1, message: "Retrying", next: 123),
+            hasPendingPermission: false
+        )
+
+        XCTAssertEqual(indicator.tint, .busy)
+        XCTAssertEqual(indicator.label, "Retrying")
+        XCTAssertTrue(indicator.showsTodoProgress)
+    }
+
     func testRefreshAllUsesInjectedWorkspaceService() async throws {
         let directory = "/tmp/project"
         let connection = WorkspaceConnection(serverURL: URL(string: "http://127.0.0.1:4096")!, directory: directory)

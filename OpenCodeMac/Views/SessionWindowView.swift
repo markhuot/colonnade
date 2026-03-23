@@ -11,9 +11,13 @@ struct SessionWindowView: View {
             if sessionID.isEmpty {
                 ContentUnavailableView("No Session", systemImage: "bubble.left.and.text.bubble.right")
             } else if let liveStore = appState.liveStore {
-                SessionColumnView(sessionState: liveStore.sessionState(for: sessionID), sessionID: sessionID)
-                    .padding(20)
-                    .background(theme.windowBackground)
+                SessionColumnView(
+                    sessionState: liveStore.sessionState(for: sessionID),
+                    sessionID: sessionID,
+                    chrome: .window
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(theme.windowBackground)
             } else {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

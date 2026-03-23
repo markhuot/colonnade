@@ -54,6 +54,65 @@ private struct OpenCodeCodeBlockStyle: StructuredText.CodeBlockStyle {
     }
 }
 
+private struct SelectableToolTextView: NSViewRepresentable {
+    let text: String
+    let textColor: NSColor
+
+    private static let font = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+    private static let verticalPadding: CGFloat = 6
+    private static let horizontalPadding: CGFloat = 2
+    private static let maxHeight: CGFloat = 110
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = false
+        scrollView.hasHorizontalScroller = true
+        scrollView.autohidesScrollers = true
+
+        let textView = NSTextView()
+        textView.drawsBackground = false
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.allowsUndo = false
+        textView.textContainerInset = NSSize(width: Self.horizontalPadding, height: Self.verticalPadding)
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = true
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.widthTracksTextView = false
+
+        scrollView.documentView = textView
+        update(textView)
+        return scrollView
+    }
+
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let textView = nsView.documentView as? NSTextView else { return }
+        update(textView)
+    }
+
+    var idealHeight: CGFloat {
+        let lineHeight = ceil(NSLayoutManager().defaultLineHeight(for: Self.font))
+        let lineCount = max(text.split(separator: "\n", omittingEmptySubsequences: false).count, 1)
+        let contentHeight = lineHeight * CGFloat(lineCount) + (Self.verticalPadding * 2)
+        return min(max(contentHeight, lineHeight + (Self.verticalPadding * 2)), Self.maxHeight)
+    }
+
+    private func update(_ textView: NSTextView) {
+        if textView.string != text {
+            textView.string = text
+        }
+
+        textView.font = Self.font
+        textView.textColor = textColor
+    }
+}
+
 private extension View {
     @ViewBuilder
     func applyForegroundStyle(_ style: AnyShapeStyle?) -> some View {
@@ -73,6 +132,7 @@ struct SessionColumnView: View {
     private let logger = Logger(subsystem: "ai.opencode.app", category: "ui-sync")
 
     let sessionID: String
+    var chrome: SessionColumnChrome = .pane
 
     var body: some View {
         let session = sessionState.session
@@ -81,32 +141,24 @@ struct SessionColumnView: View {
         let permissions = deduplicatedPermissions(sessionState.permissions)
 
         VStack(spacing: 0) {
-            SessionHeaderView(
-                sessionID: sessionID,
-                session: session,
-                indicator: session?.indicator ?? SessionIndicator.resolve(status: nil, hasPendingPermission: false),
-                contextUsageText: session?.contextUsageText
-            )
-            Divider()
+            if chrome == .pane {
+                SessionHeaderView(
+                    sessionID: sessionID,
+                    session: session,
+                    indicator: session?.indicator ?? SessionIndicator.resolve(status: nil, hasPendingPermission: false),
+                    contextUsageText: session?.contextUsageText
+                )
+                Divider()
+            }
             SessionTimelineView(sessionID: sessionID, messages: messages, questions: questions)
             Divider()
             SessionComposerView(sessionID: sessionID, permissions: permissions)
         }
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(theme.surfaceBackground)
-                .shadow(color: .black.opacity(0.08), radius: 14, x: 0, y: 6)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(borderColor, lineWidth: appState.focusedSessionID == sessionID ? 2 : 1)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(backgroundView)
+        .overlay { overlayView }
+        .contentShape(Rectangle())
         .onTapGesture {
             appState.focusSession(sessionID)
-        }
-        .task(id: sessionID) {
-            appState.openSession(sessionID)
         }
         .onAppear {
             let partCount = messages.reduce(0) { $0 + $1.parts.count }
@@ -132,6 +184,31 @@ struct SessionColumnView: View {
     private var borderColor: Color {
         appState.focusedSessionID == sessionID ? Color.accentColor.opacity(0.85) : theme.border.opacity(0.7)
     }
+
+    @ViewBuilder
+    private var backgroundView: some View {
+        switch chrome {
+        case .pane:
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(theme.surfaceBackground)
+                .shadow(color: .black.opacity(0.08), radius: 14, x: 0, y: 6)
+        case .window:
+            theme.surfaceBackground
+        }
+    }
+
+    @ViewBuilder
+    private var overlayView: some View {
+        if chrome == .pane {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(borderColor, lineWidth: appState.focusedSessionID == sessionID ? 2 : 1)
+        }
+    }
+}
+
+enum SessionColumnChrome {
+    case pane
+    case window
 }
 
 private struct SessionHeaderView: View {
@@ -857,6 +934,10 @@ private struct ToolPartView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(theme.toolCardBackground)
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(theme.border.opacity(0.6), lineWidth: 1)
+        )
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -1178,20 +1259,25 @@ private struct ToolPartDetailSection: View {
     let value: String
     var isError = false
 
+    private var resolvedTextColor: NSColor {
+        isError ? .systemRed : theme.primaryTextColor
+    }
+
+    private var contentHeight: CGFloat {
+        SelectableToolTextView(text: value, textColor: resolvedTextColor).idealHeight
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(theme.secondaryText)
 
-            ScrollView(.horizontal) {
-                Text(value)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(isError ? .red : theme.primaryText)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxHeight: 110)
+            SelectableToolTextView(
+                text: value,
+                textColor: resolvedTextColor
+            )
+            .frame(maxWidth: .infinity, minHeight: 28, idealHeight: contentHeight, maxHeight: 110)
         }
     }
 }

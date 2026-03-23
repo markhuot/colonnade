@@ -418,10 +418,14 @@ final class OpenCodeAppModel: ObservableObject {
 
     func closeSession(_ sessionID: String) {
         let closingFocusedSession = focusedSessionID == sessionID
+        let closingIndex = openSessionIDs.firstIndex(of: sessionID)
         openSessionIDs.removeAll { $0 == sessionID }
         paneWidths.removeValue(forKey: sessionID)
         if closingFocusedSession {
-            focusedSessionID = openSessionIDs.last
+            focusedSessionID = sessionIDToFocusAfterClosingSession(at: closingIndex)
+            if let focusedSessionID {
+                requestPromptFocus(for: focusedSessionID)
+            }
         }
         persistPaneStateIfPossible()
 
@@ -869,6 +873,18 @@ final class OpenCodeAppModel: ObservableObject {
         guard openSessionIDs.indices.contains(targetIndex) else { return }
 
         focusSession(openSessionIDs[targetIndex], focusPrompt: true)
+    }
+
+    private func sessionIDToFocusAfterClosingSession(at closingIndex: Int?) -> String? {
+        guard let closingIndex else { return nil }
+
+        if openSessionIDs.indices.contains(closingIndex) {
+            return openSessionIDs[closingIndex]
+        }
+
+        let leftIndex = closingIndex - 1
+        guard openSessionIDs.indices.contains(leftIndex) else { return nil }
+        return openSessionIDs[leftIndex]
     }
 
     private func requestPromptFocus(for sessionID: String) {

@@ -87,6 +87,11 @@ private struct WorkspaceRootContainer: View {
                 WorkspaceCommandCenter.shared.bind(appState: appState)
                 await appState.bootstrapIfNeeded()
             }
+            .background(
+                WindowObserver { window in
+                    WorkspaceCommandCenter.shared.registerWorkspaceWindow(window)
+                }
+            )
     }
 }
 
@@ -124,6 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         static let refreshMessagesMenuItemTag = 9_021
         static let fileNewWindowMenuItemTag = 9_030
         static let fileNewSessionMenuItemTag = 9_031
+        static let fileCloseSessionMenuItemTag = 9_032
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -163,10 +169,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         WorkspaceCommandCenter.shared.createSession()
     }
 
+    @objc private func closeSessionFromMenu() {
+        WorkspaceCommandCenter.shared.closeFocusedSession()
+    }
+
     @objc func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.tag {
         case Constants.fileNewSessionMenuItemTag:
             return WorkspaceCommandCenter.shared.canCreateSession
+        case Constants.fileCloseSessionMenuItemTag:
+            return WorkspaceCommandCenter.shared.canCloseFocusedSession
         case Constants.thinkingMenuItemTag:
             menuItem.title = thinkingMenuItemTitle
             return true
@@ -194,8 +206,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let fileMenu = NSApp.mainMenu?.items.first(where: { $0.title == "File" })?.submenu else { return }
         fileMenu.delegate = self
 
+        if let closeWindowItem = fileMenu.items.first(where: { item in
+            item.action == #selector(NSWindow.performClose(_:))
+        }) {
+            closeWindowItem.keyEquivalent = ""
+            closeWindowItem.keyEquivalentModifierMask = []
+        }
+
         if let windowItem = fileMenu.item(withTag: Constants.fileNewWindowMenuItemTag),
-           let sessionItem = fileMenu.item(withTag: Constants.fileNewSessionMenuItemTag) {
+           let sessionItem = fileMenu.item(withTag: Constants.fileNewSessionMenuItemTag),
+           let closeSessionItem = fileMenu.item(withTag: Constants.fileCloseSessionMenuItemTag) {
             windowItem.title = "New Window"
             windowItem.keyEquivalent = "n"
             windowItem.keyEquivalentModifierMask = [.command]
@@ -205,6 +225,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             sessionItem.target = self
             sessionItem.keyEquivalent = "t"
             sessionItem.keyEquivalentModifierMask = [.command]
+
+            closeSessionItem.title = "Close Session"
+            closeSessionItem.action = #selector(closeSessionFromMenu)
+            closeSessionItem.target = self
+            closeSessionItem.keyEquivalent = "w"
+            closeSessionItem.keyEquivalentModifierMask = [.command]
 
             if let newMenuIndex = fileMenu.items.firstIndex(where: { $0.title == "New" && $0.submenu != nil }) {
                 fileMenu.removeItem(at: newMenuIndex)
@@ -241,6 +267,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sessionItem.tag = Constants.fileNewSessionMenuItemTag
         sessionItem.keyEquivalentModifierMask = [.command]
         fileMenu.insertItem(sessionItem, at: newMenuIndex + 1)
+
+        let closeSessionItem = NSMenuItem(title: "Close Session", action: #selector(closeSessionFromMenu), keyEquivalent: "w")
+        closeSessionItem.target = self
+        closeSessionItem.tag = Constants.fileCloseSessionMenuItemTag
+        closeSessionItem.keyEquivalentModifierMask = [.command]
+
+        let insertionIndex = fileMenu.items.firstIndex(where: { $0.action == #selector(NSWindow.performClose(_:)) }) ?? fileMenu.items.count
+        fileMenu.insertItem(closeSessionItem, at: insertionIndex)
     }
 
     private func installViewMenuItems() {
@@ -374,6 +408,8 @@ private struct SessionWindowContainer: View {
     let context: SessionWindowContext
     @StateObject private var appState: OpenCodeAppModel
 
+    private static let toolbarIdentifier = NSToolbar.Identifier("ai.opencode.session-window-toolbar")
+
     init(context: SessionWindowContext) {
         self.context = context
         _appState = StateObject(
@@ -385,8 +421,72 @@ private struct SessionWindowContainer: View {
         SessionWindowView(sessionID: context.sessionID)
             .environmentObject(appState)
             .task {
+                WorkspaceCommandCenter.shared.bindSessionWindow(appState: appState, sessionID: context.sessionID)
                 await appState.bootstrapIfNeeded()
             }
+            .background(
+                WindowObserver { window in
+                    configureWindow(window, session: session)
+                    WorkspaceCommandCenter.shared.registerSessionWindow(window, sessionID: context.sessionID)
+                }
+            )
+    }
+
+    private var session: SessionDisplay? {
+        appState.liveStore?.sessionState(for: context.sessionID).session
+    }
+
+    private func configureWindow(_ window: NSWindow?, session: SessionDisplay?) {
+        guard let window else { return }
+
+        if window.toolbar?.identifier != Self.toolbarIdentifier {
+            let toolbar = NSToolbar(identifier: Self.toolbarIdentifier)
+            toolbar.displayMode = .iconOnly
+            window.toolbar = toolbar
+        }
+
+        window.title = session?.title ?? context.sessionID
+        window.subtitle = session?.contextUsageText ?? ""
+        window.titleVisibility = .visible
+        window.titlebarAppearsTransparent = true
+        window.toolbarStyle = .unified
+        window.isMovableByWindowBackground = true
+    }
+}
+
+private struct WindowObserver: NSViewRepresentable {
+    let onWindowChange: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> WindowObserverView {
+        let view = WindowObserverView()
+        view.onWindowChange = onWindowChange
+        return view
+    }
+
+    func updateNSView(_ nsView: WindowObserverView, context: Context) {
+        nsView.onWindowChange = onWindowChange
+        nsView.notifyWindowChange()
+    }
+}
+
+private final class WindowObserverView: NSView {
+    var onWindowChange: ((NSWindow?) -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        notifyWindowChange()
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        onWindowChange?(newWindow)
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    func notifyWindowChange() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.onWindowChange?(self.window)
+        }
     }
 }
 
@@ -417,8 +517,12 @@ final class WorkspaceCommandCenter: ObservableObject {
     @Published private(set) var canRefreshFocusedSession = false
     @Published private(set) var canFocusPreviousPane = false
     @Published private(set) var canFocusNextPane = false
+    @Published private(set) var canCloseFocusedSession = false
 
     private weak var appState: OpenCodeAppModel?
+    private weak var workspaceWindow: NSWindow?
+    private var sessionWindowStates: [String: OpenCodeAppModel] = [:]
+    private var sessionWindowsByNumber: [Int: String] = [:]
     private var availabilityCancellables: Set<AnyCancellable> = []
 
     private init() {}
@@ -436,6 +540,55 @@ final class WorkspaceCommandCenter: ObservableObject {
                 )
             }
             .store(in: &availabilityCancellables)
+
+    }
+
+    func bindSessionWindow(appState: OpenCodeAppModel, sessionID: String) {
+        sessionWindowStates[sessionID] = appState
+        updateAvailability(
+            selectedDirectory: self.appState?.selectedDirectory,
+            focusedSessionID: self.appState?.focusedSessionID,
+            openSessionIDs: self.appState?.openSessionIDs ?? []
+        )
+    }
+
+    func registerWorkspaceWindow(_ window: NSWindow?) {
+        workspaceWindow = window
+    }
+
+    func registerSessionWindow(_ window: NSWindow?, sessionID: String) {
+        if let existingNumber = sessionWindowsByNumber.first(where: { $0.value == sessionID })?.key,
+           window?.windowNumber != existingNumber {
+            sessionWindowsByNumber.removeValue(forKey: existingNumber)
+        }
+
+        if let window {
+            sessionWindowsByNumber[window.windowNumber] = sessionID
+        } else {
+            sessionWindowStates.removeValue(forKey: sessionID)
+        }
+    }
+
+    func closeFocusedSession() {
+        guard let target = closeTarget() else { return }
+
+        switch target {
+        case let .workspace(appState, sessionID):
+            appState.closeSession(sessionID)
+        case let .sessionWindow(appState, sessionID, windowNumber):
+            appState.closeSession(sessionID)
+            if let window = currentWindow(), window.windowNumber == windowNumber {
+                window.close()
+            }
+            sessionWindowStates.removeValue(forKey: sessionID)
+            sessionWindowsByNumber.removeValue(forKey: windowNumber)
+        }
+
+        updateAvailability(
+            selectedDirectory: self.appState?.selectedDirectory,
+            focusedSessionID: self.appState?.focusedSessionID,
+            openSessionIDs: self.appState?.openSessionIDs ?? []
+        )
     }
 
     func createSession() {
@@ -490,5 +643,44 @@ final class WorkspaceCommandCenter: ObservableObject {
         let hasFocusedPane = focusedSessionID.map(openSessionIDs.contains) ?? false
         canFocusPreviousPane = hasFocusedPane
         canFocusNextPane = hasFocusedPane
+        canCloseFocusedSession = closeTarget(
+            selectedDirectory: selectedDirectory,
+            focusedSessionID: focusedSessionID,
+            openSessionIDs: openSessionIDs
+        ) != nil
+    }
+
+    private enum CloseTarget {
+        case workspace(OpenCodeAppModel, String)
+        case sessionWindow(OpenCodeAppModel, String, Int)
+    }
+
+    private func closeTarget(
+        selectedDirectory: String? = nil,
+        focusedSessionID: String? = nil,
+        openSessionIDs: [String]? = nil
+    ) -> CloseTarget? {
+        if let currentWindowNumber,
+           let sessionID = sessionWindowsByNumber[currentWindowNumber],
+           let appState = sessionWindowStates[sessionID] {
+            return .sessionWindow(appState, sessionID, currentWindowNumber)
+        }
+
+        guard let appState,
+              selectedDirectory ?? appState.selectedDirectory != nil,
+              let focusedSessionID = focusedSessionID ?? appState.focusedSessionID,
+              (openSessionIDs ?? appState.openSessionIDs).contains(focusedSessionID) else {
+            return nil
+        }
+
+        return .workspace(appState, focusedSessionID)
+    }
+
+    private var currentWindowNumber: Int? {
+        currentWindow()?.windowNumber
+    }
+
+    private func currentWindow() -> NSWindow? {
+        NSApp.keyWindow ?? NSApp.mainWindow ?? workspaceWindow
     }
 }
