@@ -120,7 +120,7 @@ actor PersistenceRepository {
         await flushBufferedStreamMutationsIfNeeded()
         let context = persistence.newBackgroundContext()
         let startedAt = ContinuousClock.now
-        let snapshot = await context.perform {
+        let snapshot = context.performAndWait {
             Self.makeSnapshot(context: context, directory: directory)
         }
         let duration = startedAt.duration(to: .now)
@@ -135,7 +135,7 @@ actor PersistenceRepository {
     func loadLastSelectedDirectory() async -> String? {
         await flushBufferedStreamMutationsIfNeeded()
         let context = persistence.newBackgroundContext()
-        return await context.perform {
+        return context.performAndWait {
             let request = WorkspaceEntity.fetchRequest()
             request.fetchLimit = 1
             request.predicate = NSPredicate(format: "isSelected == YES")
@@ -147,7 +147,7 @@ actor PersistenceRepository {
     func selectWorkspace(directory: String) async {
         await flushBufferedStreamMutationsIfNeeded()
         let context = persistence.newBackgroundContext()
-        await context.perform {
+        context.performAndWait {
             let request = WorkspaceEntity.fetchRequest()
             if let workspaces = try? context.fetch(request) {
                 for workspace in workspaces {
@@ -165,7 +165,7 @@ actor PersistenceRepository {
     func savePanes(directory: String, panes: [SessionPaneState]) async {
         await flushBufferedStreamMutationsIfNeeded()
         let context = persistence.newBackgroundContext()
-        await context.perform {
+        context.performAndWait {
             let workspace = Self.findOrCreateWorkspace(directory: directory, context: context)
             let workspaceID = workspace.id ?? directory
 
@@ -200,7 +200,7 @@ actor PersistenceRepository {
             "Applying workspace snapshot directory=\(directory, privacy: .public) sessions=\(snapshot.sessions.count, privacy: .public) statuses=\(snapshot.statuses.count, privacy: .public) openSessions=\(openSessionIDs.count, privacy: .public)"
         )
         let context = persistence.newBackgroundContext()
-        await context.perform {
+        context.performAndWait {
             let workspace = Self.findOrCreateWorkspace(directory: directory, context: context)
             let workspaceID = workspace.id ?? directory
             let existingSessionRequest = SessionEntity.fetchRequest()
@@ -231,7 +231,7 @@ actor PersistenceRepository {
     func replaceSessions(directory: String, sessions: [OpenCodeSession], modelContextLimits: [ModelContextKey: Int]) async {
         await flushBufferedStreamMutationsIfNeeded()
         let context = persistence.newBackgroundContext()
-        await context.perform {
+        context.performAndWait {
             let workspace = Self.findOrCreateWorkspace(directory: directory, context: context)
             let workspaceID = workspace.id ?? directory
             Self.pruneMissingSessions(sessions.map(\.id), workspaceID: workspaceID, context: context)
@@ -249,7 +249,7 @@ actor PersistenceRepository {
             "Replacing messages sessionID=\(sessionID, privacy: .public) count=\(messages.count, privacy: .public) parts=\(partCount, privacy: .public) lastMessageID=\(lastMessageID, privacy: .public)"
         )
         let context = persistence.newBackgroundContext()
-        await context.perform {
+        context.performAndWait {
             let workspace = Self.findOrCreateWorkspace(directory: directory, context: context)
             let workspaceID = workspace.id ?? directory
             Self.replaceMessages(messages, sessionID: sessionID, context: context)
@@ -264,7 +264,7 @@ actor PersistenceRepository {
     func replaceTodos(directory: String, sessionID: String, todos: [SessionTodo], modelContextLimits: [ModelContextKey: Int]) async {
         await flushBufferedStreamMutationsIfNeeded()
         let context = persistence.newBackgroundContext()
-        await context.perform {
+        context.performAndWait {
             let workspace = Self.findOrCreateWorkspace(directory: directory, context: context)
             let workspaceID = workspace.id ?? directory
             Self.replaceTodos(todos, sessionID: sessionID, context: context)
@@ -276,7 +276,7 @@ actor PersistenceRepository {
     func applySessionLifecycle(directory: String, session: OpenCodeSession, lifecycle: SessionLifecycleEvent, modelContextLimits: [ModelContextKey: Int]) async {
         await flushBufferedStreamMutationsIfNeeded()
         let context = persistence.newBackgroundContext()
-        await context.perform {
+        context.performAndWait {
             let workspace = Self.findOrCreateWorkspace(directory: directory, context: context)
             let workspaceID = workspace.id ?? directory
 
@@ -299,7 +299,7 @@ actor PersistenceRepository {
     func applyStatus(directory: String, sessionID: String, status: SessionStatus?, modelContextLimits: [ModelContextKey: Int]) async {
         await flushBufferedStreamMutationsIfNeeded()
         let context = persistence.newBackgroundContext()
-        await context.perform {
+        context.performAndWait {
             let workspace = Self.findOrCreateWorkspace(directory: directory, context: context)
             let workspaceID = workspace.id ?? directory
             if let status {
@@ -315,7 +315,7 @@ actor PersistenceRepository {
     func replaceStatuses(directory: String, statuses: [String: SessionStatus], modelContextLimits: [ModelContextKey: Int]) async {
         await flushBufferedStreamMutationsIfNeeded()
         let context = persistence.newBackgroundContext()
-        await context.perform {
+        context.performAndWait {
             let workspace = Self.findOrCreateWorkspace(directory: directory, context: context)
             let workspaceID = workspace.id ?? directory
             Self.replaceStatuses(statuses, workspaceID: workspaceID, context: context)
@@ -327,7 +327,7 @@ actor PersistenceRepository {
     func replaceInteractions(directory: String, snapshot: InteractionSnapshot, modelContextLimits: [ModelContextKey: Int]) async {
         await flushBufferedStreamMutationsIfNeeded()
         let context = persistence.newBackgroundContext()
-        await context.perform {
+        context.performAndWait {
             let workspace = Self.findOrCreateWorkspace(directory: directory, context: context)
             let workspaceID = workspace.id ?? directory
             Self.replaceQuestions(snapshot.questions, workspaceID: workspaceID, context: context)
@@ -408,7 +408,7 @@ actor PersistenceRepository {
         let mutations = bufferedStreamMutations
         bufferedStreamMutations.removeAll(keepingCapacity: true)
         isFlushingBufferedStreamMutations = true
-        let saveSucceeded = await streamWriteContext.perform { [mutations, streamWriteContext] in
+        let saveSucceeded = streamWriteContext.performAndWait { [mutations, streamWriteContext] in
             var workspaceIDs: [String: String] = [:]
             var affectedSessionIDsByDirectory: [String: Set<String>] = [:]
             var latestModelContextLimitsByDirectory: [String: [ModelContextKey: Int]] = [:]
