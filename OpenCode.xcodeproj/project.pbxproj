@@ -1,0 +1,575 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		17FC30AF2252D7B6DA41C32D /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 562AF3A187EF417E7441A050 /* RootView.swift */; };
+		2D18941B3173A153D8B80D49 /* ChatBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99DDEA433EC2667A13E64465 /* ChatBoardView.swift */; };
+		3B65D549DDA7CB861FE7D143 /* WorkspaceSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9916DBB4131BBC03B70B8410 /* WorkspaceSyncCoordinator.swift */; };
+		3E8559ACC506357314E22BD9 /* PersistenceRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FDD51725396982353C62F06 /* PersistenceRepository.swift */; };
+		57A7E2BDD433D6E18AE4D239 /* LocalServerLaunchHandle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB92D03586816A5EA76C1056 /* LocalServerLaunchHandle.swift */; };
+		57F1B54ADE79B823689FC118 /* FocusedSessionTimelineKeyHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCA1F9B8C2DF46A5E5798462 /* FocusedSessionTimelineKeyHandler.swift */; };
+		5D24FEE5B189A27CA4CE68D1 /* OpenCodeAppModelFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70B3F81C3353D0F2407AC3F /* OpenCodeAppModelFactory.swift */; };
+		61AA5E1DDAD2F793845D1B6F /* WorkspaceLiveStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CD055A8CF30370EB27BC136 /* WorkspaceLiveStore.swift */; };
+		6D32AEC7DE830562045AB08E /* EventPayloadDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B5F441F6600EE62CD4A7904 /* EventPayloadDecoder.swift */; };
+		850624080A7A86DE940FE749 /* WorkspaceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B75C6A96DD4E6297F6EC77EC /* WorkspaceService.swift */; };
+		85C40CA1720FCB9368E7B2D3 /* PersistenceCoders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 409F8DF23EB26E76C9B024BB /* PersistenceCoders.swift */; };
+		888C91D1FF013A270CDC5CA8 /* SessionColumnView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778068AAF9758A3F61A1475A /* SessionColumnView.swift */; };
+		8AE08AE7F03B9D743B4ECF0A /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 948E6EB35491F76F49BF2C95 /* SharedModels.swift */; };
+		8FD62F37FBAEA962FBA34044 /* OpenCodeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99772D8985ED8E66530DBAC8 /* OpenCodeApp.swift */; };
+		9C590A87C2B582BF1DAE3907 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = BBCA70D196FB8361B60A90A4 /* Textual */; };
+		A7E7F228E5A323320EC9EE03 /* PromptTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15451F12CC1193E39223DDD /* PromptTextView.swift */; };
+		B4574ECD4B355EECF6EE4F55 /* ProjectSelectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60269834F2626A995F081968 /* ProjectSelectorView.swift */; };
+		B8CB8D66585A1797D11C7C42 /* SessionWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4AEA298CB2C2137AA867AF0 /* SessionWindowView.swift */; };
+		C18CEEF0FF1DCB26E0FFA9D5 /* OpenCodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9261222A02062CA80AF4B2A4 /* OpenCodeTests.swift */; };
+		D4BECB841CAAE60EB9EC7517 /* OpenCodeAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 602074E16D05E0CDBE97410D /* OpenCodeAPIClient.swift */; };
+		DDBE3B745792B795CDD246C7 /* PlatformModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5EB9CE9B86015966328BCE5 /* PlatformModels.swift */; };
+		E248B295358F1B2372D37822 /* OpenCodeAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14EC8AE42C80968027536CB3 /* OpenCodeAppState.swift */; };
+		E7CB6573DF3E6A80A09AA22C /* StringBackedTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9BC06B4419E9F0B86B33F7D /* StringBackedTypes.swift */; };
+		EE4BEED265A0DC1095574057 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = 932C6E88EE9638A057246E1A /* Textual */; };
+		F8C4E5E811BF4988A7FCDD80 /* Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 198F1C786C1E59FEBE85CFA3 /* Persistence.swift */; };
+		F946373AD2B3F582C582AE5A /* SessionStatusIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA69A9728F6E4EC784812E19 /* SessionStatusIcon.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		45FA29933911017DDADFF392 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = EB09B41A3B9991B614A932F9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 07A3A72637770A8A767E075C;
+			remoteInfo = OpenCode;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		14EC8AE42C80968027536CB3 /* OpenCodeAppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeAppState.swift; sourceTree = "<group>"; };
+		198F1C786C1E59FEBE85CFA3 /* Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence.swift; sourceTree = "<group>"; };
+		409F8DF23EB26E76C9B024BB /* PersistenceCoders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceCoders.swift; sourceTree = "<group>"; };
+		562AF3A187EF417E7441A050 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		5CD055A8CF30370EB27BC136 /* WorkspaceLiveStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceLiveStore.swift; sourceTree = "<group>"; };
+		602074E16D05E0CDBE97410D /* OpenCodeAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeAPIClient.swift; sourceTree = "<group>"; };
+		60269834F2626A995F081968 /* ProjectSelectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSelectorView.swift; sourceTree = "<group>"; };
+		6FDD51725396982353C62F06 /* PersistenceRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceRepository.swift; sourceTree = "<group>"; };
+		702F9A395F94B6B6BD022783 /* OpenCodeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenCodeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		77644C23F7F3E433E0101BEA /* OpenCode.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OpenCode.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		778068AAF9758A3F61A1475A /* SessionColumnView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionColumnView.swift; sourceTree = "<group>"; };
+		9261222A02062CA80AF4B2A4 /* OpenCodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeTests.swift; sourceTree = "<group>"; };
+		948E6EB35491F76F49BF2C95 /* SharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedModels.swift; sourceTree = "<group>"; };
+		9916DBB4131BBC03B70B8410 /* WorkspaceSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSyncCoordinator.swift; sourceTree = "<group>"; };
+		99772D8985ED8E66530DBAC8 /* OpenCodeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeApp.swift; sourceTree = "<group>"; };
+		99DDEA433EC2667A13E64465 /* ChatBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatBoardView.swift; sourceTree = "<group>"; };
+		9B5F441F6600EE62CD4A7904 /* EventPayloadDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventPayloadDecoder.swift; sourceTree = "<group>"; };
+		A9BC06B4419E9F0B86B33F7D /* StringBackedTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StringBackedTypes.swift; sourceTree = "<group>"; };
+		B75C6A96DD4E6297F6EC77EC /* WorkspaceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceService.swift; sourceTree = "<group>"; };
+		C70B3F81C3353D0F2407AC3F /* OpenCodeAppModelFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeAppModelFactory.swift; sourceTree = "<group>"; };
+		CCA1F9B8C2DF46A5E5798462 /* FocusedSessionTimelineKeyHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusedSessionTimelineKeyHandler.swift; sourceTree = "<group>"; };
+		D15451F12CC1193E39223DDD /* PromptTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptTextView.swift; sourceTree = "<group>"; };
+		DB92D03586816A5EA76C1056 /* LocalServerLaunchHandle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalServerLaunchHandle.swift; sourceTree = "<group>"; };
+		E18F32EE08F24614F358AAE7 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		E4AEA298CB2C2137AA867AF0 /* SessionWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionWindowView.swift; sourceTree = "<group>"; };
+		E5EB9CE9B86015966328BCE5 /* PlatformModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformModels.swift; sourceTree = "<group>"; };
+		EA69A9728F6E4EC784812E19 /* SessionStatusIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStatusIcon.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		3332BAC49081104D8F2E75F2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EE4BEED265A0DC1095574057 /* Textual in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DFE91CC203DF71598617E485 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9C590A87C2B582BF1DAE3907 /* Textual in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		14096835CC18161427D72DBA /* OpenCodeTests */ = {
+			isa = PBXGroup;
+			children = (
+				9261222A02062CA80AF4B2A4 /* OpenCodeTests.swift */,
+			);
+			path = OpenCodeTests;
+			sourceTree = "<group>";
+		};
+		28ABE0C6FEA5C236E652E999 /* OpenCodeKit */ = {
+			isa = PBXGroup;
+			children = (
+				9B5F441F6600EE62CD4A7904 /* EventPayloadDecoder.swift */,
+				602074E16D05E0CDBE97410D /* OpenCodeAPIClient.swift */,
+				409F8DF23EB26E76C9B024BB /* PersistenceCoders.swift */,
+				948E6EB35491F76F49BF2C95 /* SharedModels.swift */,
+				A9BC06B4419E9F0B86B33F7D /* StringBackedTypes.swift */,
+				B75C6A96DD4E6297F6EC77EC /* WorkspaceService.swift */,
+			);
+			path = OpenCodeKit;
+			sourceTree = "<group>";
+		};
+		325B466093A21208ACA46E52 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				77644C23F7F3E433E0101BEA /* OpenCode.app */,
+				702F9A395F94B6B6BD022783 /* OpenCodeTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		46DC7AC831CD9D97BF9B42E5 = {
+			isa = PBXGroup;
+			children = (
+				A281DB04AA6FC80E632C3AB6 /* OpenCodeFeature */,
+				28ABE0C6FEA5C236E652E999 /* OpenCodeKit */,
+				9EA9CEAC14CAEE78773E0A93 /* OpenCodeMac */,
+				AAE0D1D0C682E6A069B0326F /* OpenCodePersistence */,
+				14096835CC18161427D72DBA /* OpenCodeTests */,
+				325B466093A21208ACA46E52 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		9EA9CEAC14CAEE78773E0A93 /* OpenCodeMac */ = {
+			isa = PBXGroup;
+			children = (
+				E18F32EE08F24614F358AAE7 /* Info.plist */,
+				99772D8985ED8E66530DBAC8 /* OpenCodeApp.swift */,
+				C70B3F81C3353D0F2407AC3F /* OpenCodeAppModelFactory.swift */,
+				E5EB9CE9B86015966328BCE5 /* PlatformModels.swift */,
+				FDB36E7D2A606CAD3650DB4B /* Views */,
+			);
+			path = OpenCodeMac;
+			sourceTree = "<group>";
+		};
+		A281DB04AA6FC80E632C3AB6 /* OpenCodeFeature */ = {
+			isa = PBXGroup;
+			children = (
+				DB92D03586816A5EA76C1056 /* LocalServerLaunchHandle.swift */,
+				14EC8AE42C80968027536CB3 /* OpenCodeAppState.swift */,
+				5CD055A8CF30370EB27BC136 /* WorkspaceLiveStore.swift */,
+				9916DBB4131BBC03B70B8410 /* WorkspaceSyncCoordinator.swift */,
+			);
+			path = OpenCodeFeature;
+			sourceTree = "<group>";
+		};
+		AAE0D1D0C682E6A069B0326F /* OpenCodePersistence */ = {
+			isa = PBXGroup;
+			children = (
+				198F1C786C1E59FEBE85CFA3 /* Persistence.swift */,
+				6FDD51725396982353C62F06 /* PersistenceRepository.swift */,
+			);
+			path = OpenCodePersistence;
+			sourceTree = "<group>";
+		};
+		FDB36E7D2A606CAD3650DB4B /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				99DDEA433EC2667A13E64465 /* ChatBoardView.swift */,
+				CCA1F9B8C2DF46A5E5798462 /* FocusedSessionTimelineKeyHandler.swift */,
+				60269834F2626A995F081968 /* ProjectSelectorView.swift */,
+				D15451F12CC1193E39223DDD /* PromptTextView.swift */,
+				562AF3A187EF417E7441A050 /* RootView.swift */,
+				778068AAF9758A3F61A1475A /* SessionColumnView.swift */,
+				EA69A9728F6E4EC784812E19 /* SessionStatusIcon.swift */,
+				E4AEA298CB2C2137AA867AF0 /* SessionWindowView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		07A3A72637770A8A767E075C /* OpenCode */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9011E64DC2CEF8747D7E838A /* Build configuration list for PBXNativeTarget "OpenCode" */;
+			buildPhases = (
+				F96899CE76ED1FF720E98B63 /* Sources */,
+				DFE91CC203DF71598617E485 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = OpenCode;
+			packageProductDependencies = (
+				BBCA70D196FB8361B60A90A4 /* Textual */,
+			);
+			productName = OpenCode;
+			productReference = 77644C23F7F3E433E0101BEA /* OpenCode.app */;
+			productType = "com.apple.product-type.application";
+		};
+		482B6ACEE1F367000CFDC13F /* OpenCodeTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0DF839ACFD20ED12FF5D2588 /* Build configuration list for PBXNativeTarget "OpenCodeTests" */;
+			buildPhases = (
+				313F030A3A7C67601F358A39 /* Sources */,
+				3332BAC49081104D8F2E75F2 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F44445A41306C71B1DFD4402 /* PBXTargetDependency */,
+			);
+			name = OpenCodeTests;
+			packageProductDependencies = (
+				932C6E88EE9638A057246E1A /* Textual */,
+			);
+			productName = OpenCodeTests;
+			productReference = 702F9A395F94B6B6BD022783 /* OpenCodeTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		EB09B41A3B9991B614A932F9 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					07A3A72637770A8A767E075C = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 4B2A8CAFC86326A73DBB366E /* Build configuration list for PBXProject "OpenCode" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 46DC7AC831CD9D97BF9B42E5;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				3A5C381F922804A9DA4D9849 /* XCRemoteSwiftPackageReference "textual" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 325B466093A21208ACA46E52 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				07A3A72637770A8A767E075C /* OpenCode */,
+				482B6ACEE1F367000CFDC13F /* OpenCodeTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		313F030A3A7C67601F358A39 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C18CEEF0FF1DCB26E0FFA9D5 /* OpenCodeTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F96899CE76ED1FF720E98B63 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2D18941B3173A153D8B80D49 /* ChatBoardView.swift in Sources */,
+				6D32AEC7DE830562045AB08E /* EventPayloadDecoder.swift in Sources */,
+				57F1B54ADE79B823689FC118 /* FocusedSessionTimelineKeyHandler.swift in Sources */,
+				57A7E2BDD433D6E18AE4D239 /* LocalServerLaunchHandle.swift in Sources */,
+				D4BECB841CAAE60EB9EC7517 /* OpenCodeAPIClient.swift in Sources */,
+				8FD62F37FBAEA962FBA34044 /* OpenCodeApp.swift in Sources */,
+				5D24FEE5B189A27CA4CE68D1 /* OpenCodeAppModelFactory.swift in Sources */,
+				E248B295358F1B2372D37822 /* OpenCodeAppState.swift in Sources */,
+				F8C4E5E811BF4988A7FCDD80 /* Persistence.swift in Sources */,
+				85C40CA1720FCB9368E7B2D3 /* PersistenceCoders.swift in Sources */,
+				3E8559ACC506357314E22BD9 /* PersistenceRepository.swift in Sources */,
+				DDBE3B745792B795CDD246C7 /* PlatformModels.swift in Sources */,
+				B4574ECD4B355EECF6EE4F55 /* ProjectSelectorView.swift in Sources */,
+				A7E7F228E5A323320EC9EE03 /* PromptTextView.swift in Sources */,
+				17FC30AF2252D7B6DA41C32D /* RootView.swift in Sources */,
+				888C91D1FF013A270CDC5CA8 /* SessionColumnView.swift in Sources */,
+				F946373AD2B3F582C582AE5A /* SessionStatusIcon.swift in Sources */,
+				B8CB8D66585A1797D11C7C42 /* SessionWindowView.swift in Sources */,
+				8AE08AE7F03B9D743B4ECF0A /* SharedModels.swift in Sources */,
+				E7CB6573DF3E6A80A09AA22C /* StringBackedTypes.swift in Sources */,
+				61AA5E1DDAD2F793845D1B6F /* WorkspaceLiveStore.swift in Sources */,
+				850624080A7A86DE940FE749 /* WorkspaceService.swift in Sources */,
+				3B65D549DDA7CB861FE7D143 /* WorkspaceSyncCoordinator.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		F44445A41306C71B1DFD4402 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 07A3A72637770A8A767E075C /* OpenCode */;
+			targetProxy = 45FA29933911017DDADFF392 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		2B9F025F5669761B35FB5159 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = OpenCode;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright 2026";
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.opencode.mac;
+				PRODUCT_NAME = OpenCode;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		511C823A50AB9ECBB5A91EB3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = "";
+				INFOPLIST_FILE = OpenCodeMac/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		6F7019AB122602D4513F19EA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_MODULE_NAME = OpenCodeTests;
+				PRODUCT_NAME = OpenCodeTests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/OpenCode.app/Contents/MacOS/OpenCode";
+			};
+			name = Debug;
+		};
+		9DFBCA72F14F009AEA96AFA4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = "";
+				INFOPLIST_FILE = OpenCodeMac/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+		BE4C56C8805CD8176236AA32 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_MODULE_NAME = OpenCodeTests;
+				PRODUCT_NAME = OpenCodeTests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/OpenCode.app/Contents/MacOS/OpenCode";
+			};
+			name = Release;
+		};
+		D80BBE3F16C80F8DAA2ADE1F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = OpenCode;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright 2026";
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.opencode.mac;
+				PRODUCT_NAME = OpenCode;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0DF839ACFD20ED12FF5D2588 /* Build configuration list for PBXNativeTarget "OpenCodeTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6F7019AB122602D4513F19EA /* Debug */,
+				BE4C56C8805CD8176236AA32 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		4B2A8CAFC86326A73DBB366E /* Build configuration list for PBXProject "OpenCode" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D80BBE3F16C80F8DAA2ADE1F /* Debug */,
+				2B9F025F5669761B35FB5159 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		9011E64DC2CEF8747D7E838A /* Build configuration list for PBXNativeTarget "OpenCode" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				511C823A50AB9ECBB5A91EB3 /* Debug */,
+				9DFBCA72F14F009AEA96AFA4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		3A5C381F922804A9DA4D9849 /* XCRemoteSwiftPackageReference "textual" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/textual";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		932C6E88EE9638A057246E1A /* Textual */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3A5C381F922804A9DA4D9849 /* XCRemoteSwiftPackageReference "textual" */;
+			productName = Textual;
+		};
+		BBCA70D196FB8361B60A90A4 /* Textual */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3A5C381F922804A9DA4D9849 /* XCRemoteSwiftPackageReference "textual" */;
+			productName = Textual;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = EB09B41A3B9991B614A932F9 /* Project object */;
+}

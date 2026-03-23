@@ -1,30 +1,30 @@
 import Foundation
 
-protocol UnknownStringCodableEnum: Codable, Hashable, Sendable {
+public protocol UnknownStringCodableEnum: Codable, Hashable, Sendable {
     init(rawString: String)
     var rawString: String { get }
 }
 
 extension UnknownStringCodableEnum {
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         self = Self(rawString: try container.decode(String.self))
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         try container.encode(rawString)
     }
 }
 
-enum MessageRole: UnknownStringCodableEnum, Sendable {
+public enum MessageRole: UnknownStringCodableEnum, Sendable {
     case assistant
     case system
     case tool
     case user
     case unknown(String)
 
-    init(rawString: String) {
+    public init(rawString: String) {
         switch rawString {
         case "assistant":
             self = .assistant
@@ -39,7 +39,7 @@ enum MessageRole: UnknownStringCodableEnum, Sendable {
         }
     }
 
-    var rawString: String {
+    public var rawString: String {
         switch self {
         case .assistant:
             return "assistant"
@@ -54,7 +54,7 @@ enum MessageRole: UnknownStringCodableEnum, Sendable {
         }
     }
 
-    var title: String {
+    public var title: String {
         switch self {
         case .assistant:
             return "Assistant"
@@ -69,7 +69,7 @@ enum MessageRole: UnknownStringCodableEnum, Sendable {
         }
     }
 
-    var isAssistant: Bool {
+    public var isAssistant: Bool {
         if case .assistant = self {
             return true
         }
@@ -77,14 +77,14 @@ enum MessageRole: UnknownStringCodableEnum, Sendable {
     }
 }
 
-enum MessagePartKind: UnknownStringCodableEnum, Sendable {
+public enum MessagePartKind: UnknownStringCodableEnum, Sendable {
     case reasoning
     case stepFinish
     case text
     case tool
     case unknown(String)
 
-    init(rawString: String) {
+    public init(rawString: String) {
         switch rawString {
         case "reasoning":
             self = .reasoning
@@ -99,7 +99,7 @@ enum MessagePartKind: UnknownStringCodableEnum, Sendable {
         }
     }
 
-    var rawString: String {
+    public var rawString: String {
         switch self {
         case .reasoning:
             return "reasoning"
@@ -115,13 +115,13 @@ enum MessagePartKind: UnknownStringCodableEnum, Sendable {
     }
 }
 
-enum MessagePartDeltaField: UnknownStringCodableEnum, Sendable {
+public enum MessagePartDeltaField: UnknownStringCodableEnum, Sendable {
     case error
     case output
     case text
     case unknown(String)
 
-    init(rawString: String) {
+    public init(rawString: String) {
         switch rawString {
         case "error":
             self = .error
@@ -134,7 +134,7 @@ enum MessagePartDeltaField: UnknownStringCodableEnum, Sendable {
         }
     }
 
-    var rawString: String {
+    public var rawString: String {
         switch self {
         case .error:
             return "error"
@@ -148,14 +148,14 @@ enum MessagePartDeltaField: UnknownStringCodableEnum, Sendable {
     }
 }
 
-enum ToolExecutionStatus: UnknownStringCodableEnum, Sendable {
+public enum ToolExecutionStatus: UnknownStringCodableEnum, Sendable {
     case completed
     case error
     case pending
     case running
     case unknown(String)
 
-    init(rawString: String) {
+    public init(rawString: String) {
         switch rawString {
         case "completed":
             self = .completed
@@ -170,7 +170,7 @@ enum ToolExecutionStatus: UnknownStringCodableEnum, Sendable {
         }
     }
 
-    var rawString: String {
+    public var rawString: String {
         switch self {
         case .completed:
             return "completed"
@@ -185,18 +185,18 @@ enum ToolExecutionStatus: UnknownStringCodableEnum, Sendable {
         }
     }
 
-    var title: String {
+    public var title: String {
         rawString.capitalized
     }
 }
 
-enum PermissionReply: UnknownStringCodableEnum, Sendable {
+public enum PermissionReply: UnknownStringCodableEnum, Sendable {
     case always
     case once
     case reject
     case unknown(String)
 
-    init(rawString: String) {
+    public init(rawString: String) {
         switch rawString {
         case "always":
             self = .always
@@ -209,7 +209,7 @@ enum PermissionReply: UnknownStringCodableEnum, Sendable {
         }
     }
 
-    var rawString: String {
+    public var rawString: String {
         switch self {
         case .always:
             return "always"
@@ -223,14 +223,14 @@ enum PermissionReply: UnknownStringCodableEnum, Sendable {
     }
 }
 
-enum TodoStatus: UnknownStringCodableEnum, Sendable {
+public enum TodoStatus: UnknownStringCodableEnum, Sendable {
     case cancelled
     case completed
     case inProgress
     case pending
     case unknown(String)
 
-    init(rawString: String) {
+    public init(rawString: String) {
         switch rawString {
         case "cancelled":
             self = .cancelled
@@ -245,7 +245,7 @@ enum TodoStatus: UnknownStringCodableEnum, Sendable {
         }
     }
 
-    var rawString: String {
+    public var rawString: String {
         switch self {
         case .cancelled:
             return "cancelled"
@@ -261,13 +261,13 @@ enum TodoStatus: UnknownStringCodableEnum, Sendable {
     }
 }
 
-enum TodoPriority: UnknownStringCodableEnum, Sendable {
+public enum TodoPriority: UnknownStringCodableEnum, Sendable {
     case high
     case low
     case medium
     case unknown(String)
 
-    init(rawString: String) {
+    public init(rawString: String) {
         switch rawString {
         case "high":
             self = .high
@@ -280,7 +280,7 @@ enum TodoPriority: UnknownStringCodableEnum, Sendable {
         }
     }
 
-    var rawString: String {
+    public var rawString: String {
         switch self {
         case .high:
             return "high"
@@ -294,7 +294,7 @@ enum TodoPriority: UnknownStringCodableEnum, Sendable {
     }
 }
 
-enum SessionEventName: UnknownStringCodableEnum, Sendable {
+public enum SessionEventName: UnknownStringCodableEnum, Sendable {
     case messagePartDelta
     case messagePartRemoved
     case messagePartUpdated
@@ -314,7 +314,7 @@ enum SessionEventName: UnknownStringCodableEnum, Sendable {
     case todoUpdated
     case unknown(String)
 
-    init(rawString: String) {
+    public init(rawString: String) {
         switch rawString {
         case "message.part.delta":
             self = .messagePartDelta
@@ -355,7 +355,7 @@ enum SessionEventName: UnknownStringCodableEnum, Sendable {
         }
     }
 
-    var rawString: String {
+    public var rawString: String {
         switch self {
         case .messagePartDelta:
             return "message.part.delta"
@@ -397,13 +397,13 @@ enum SessionEventName: UnknownStringCodableEnum, Sendable {
     }
 }
 
-enum SessionLifecycleEvent: Hashable, Sendable {
+public enum SessionLifecycleEvent: Hashable, Sendable {
     case created
     case deleted
     case updated
 }
 
-enum EventPropertyKey: String, Sendable {
+public enum EventPropertyKey: String, Sendable {
     case delta
     case error
     case field
@@ -416,7 +416,7 @@ enum EventPropertyKey: String, Sendable {
 }
 
 extension SessionEventName {
-    var lifecycleEvent: SessionLifecycleEvent? {
+    public var lifecycleEvent: SessionLifecycleEvent? {
         switch self {
         case .sessionCreated:
             return .created

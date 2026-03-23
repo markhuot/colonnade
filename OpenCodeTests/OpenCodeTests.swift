@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import OpenCodeMac
+@testable import OpenCode
 
 final class TodoProgressTests: XCTestCase {
     func testFromCountsOnlyNonCancelledTodos() {
@@ -170,6 +170,27 @@ final class MessagePartToolPresentationTests: XCTestCase {
         XCTAssertEqual(detail.files[0].operation, .moved)
     }
 
+    func testToolDrawerTitleHidesDuplicateOutput() {
+        let repeated = "Success. Updated the following files:\nSources/Foo.swift"
+        let part = makeToolMessagePart(
+            tool: "functions.apply_patch",
+            output: repeated,
+            title: repeated
+        )
+
+        XCTAssertNil(part.toolDrawerTitle)
+    }
+
+    func testToolDrawerTitleKeepsDistinctTitle() {
+        let part = makeToolMessagePart(
+            tool: "functions.apply_patch",
+            output: "Success. Updated the following files:\nSources/Foo.swift",
+            title: "Applying patch"
+        )
+
+        XCTAssertEqual(part.toolDrawerTitle, "Applying patch")
+    }
+
     func testBashPresentationPrefersDescriptionAndExposesCommandDetails() {
         let part = makeToolMessagePart(
             tool: "functions.bash",
@@ -272,20 +293,19 @@ final class WorkspaceServiceTests: XCTestCase {
 }
 
 @MainActor
-final class OpenCodeAppStateTests: XCTestCase {
+final class OpenCodeAppModelTests: XCTestCase {
     func testCreateSessionUsesInjectedServiceAndCoordinatorRegistry() async throws {
         let directory = "/tmp/project"
-        let connection = WorkspaceConnection(serverURL: OpenCodeAppState.defaultServerURL, directory: directory)
+        let connection = WorkspaceConnection(serverURL: OpenCodeAppModel.defaultServerURL, directory: directory)
         let session = makeSession(id: "created-session", directory: directory)
         let repository = PersistenceRepository(persistence: PersistenceController(inMemory: true))
         let workspaceService = MockWorkspaceService(createSessionResult: session)
         let coordinator = MockWorkspaceSyncCoordinator()
         let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
 
-        let appState = OpenCodeAppState(
+        let appState = OpenCodeAppModel(
             workspaceService: workspaceService,
             repository: repository,
-            persistence: PersistenceController(inMemory: true),
             syncRegistry: registry,
             persistsWorkspacePaneState: false,
             initialDirectory: directory
@@ -296,6 +316,7 @@ final class OpenCodeAppStateTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(150))
 
         XCTAssertEqual(workspaceService.createSessionCalls, [.init(directory: directory, title: nil, parentID: nil)])
+        XCTAssertEqual(appState.promptFocusRequest?.sessionID, session.id)
         let resolvedCoordinator = await registry.coordinator(for: connection) as? MockWorkspaceSyncCoordinator
         XCTAssertTrue(resolvedCoordinator === coordinator)
         let refreshedTodos = await coordinator.refreshedTodosSessionIDsSnapshot()
@@ -305,7 +326,6 @@ final class OpenCodeAppStateTests: XCTestCase {
     func testSendMessageUsesInjectedServiceAndCoordinator() async throws {
         let directory = try makeTemporaryDirectory()
         let repository = PersistenceRepository(persistence: PersistenceController(inMemory: true))
-        let persistence = PersistenceController(inMemory: true)
         let session = makeSession(id: "session-1", directory: directory)
         let workspaceService = MockWorkspaceService(
             workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
@@ -314,10 +334,9 @@ final class OpenCodeAppStateTests: XCTestCase {
         let coordinator = MockWorkspaceSyncCoordinator()
         let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
 
-        let appState = OpenCodeAppState(
+        let appState = OpenCodeAppModel(
             workspaceService: workspaceService,
             repository: repository,
-            persistence: persistence,
             syncRegistry: registry,
             persistsWorkspacePaneState: false,
             initialDirectory: directory
@@ -340,7 +359,7 @@ final class OpenCodeAppStateTests: XCTestCase {
     }
 
     func testScrollFocusedSessionTimelineTargetsFocusedSession() {
-        let appState = OpenCodeAppState(persistsWorkspacePaneState: false)
+        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
         appState.focusedSessionID = "session-1"
 
         appState.scrollFocusedSessionTimeline(to: .top)
@@ -350,7 +369,7 @@ final class OpenCodeAppStateTests: XCTestCase {
     }
 
     func testScrollFocusedSessionTimelineGeneratesUniqueRequests() {
-        let appState = OpenCodeAppState(persistsWorkspacePaneState: false)
+        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
         appState.focusedSessionID = "session-1"
 
         appState.scrollFocusedSessionTimeline(to: .bottom)
@@ -363,7 +382,7 @@ final class OpenCodeAppStateTests: XCTestCase {
     }
 
     func testFocusPreviousPaneMovesFocusAndRequestsPromptFocus() {
-        let appState = OpenCodeAppState(persistsWorkspacePaneState: false)
+        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
         appState.openSessionIDs = ["session-1", "session-2", "session-3"]
         appState.focusedSessionID = "session-2"
 
@@ -374,7 +393,7 @@ final class OpenCodeAppStateTests: XCTestCase {
     }
 
     func testFocusNextPaneMovesFocusAndRequestsPromptFocus() {
-        let appState = OpenCodeAppState(persistsWorkspacePaneState: false)
+        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
         appState.openSessionIDs = ["session-1", "session-2", "session-3"]
         appState.focusedSessionID = "session-2"
 
@@ -385,7 +404,7 @@ final class OpenCodeAppStateTests: XCTestCase {
     }
 
     func testFocusAdjacentPaneIgnoresOutOfBoundsRequests() {
-        let appState = OpenCodeAppState(persistsWorkspacePaneState: false)
+        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
         appState.openSessionIDs = ["session-1", "session-2"]
         appState.focusedSessionID = "session-1"
 
@@ -393,6 +412,39 @@ final class OpenCodeAppStateTests: XCTestCase {
 
         XCTAssertEqual(appState.focusedSessionID, "session-1")
         XCTAssertNil(appState.promptFocusRequest)
+    }
+
+    func testWorkspaceCommandCenterTracksPaneFocusAfterBinding() {
+        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
+        let commandCenter = WorkspaceCommandCenter.shared
+
+        commandCenter.bind(appState: appState)
+        XCTAssertFalse(commandCenter.canFocusPreviousPane)
+        XCTAssertFalse(commandCenter.canFocusNextPane)
+
+        appState.openSessionIDs = ["session-1", "session-2"]
+        appState.focusedSessionID = "session-1"
+
+        XCTAssertTrue(commandCenter.canFocusPreviousPane)
+        XCTAssertTrue(commandCenter.canFocusNextPane)
+
+        appState.focusedSessionID = nil
+
+        XCTAssertFalse(commandCenter.canFocusPreviousPane)
+        XCTAssertFalse(commandCenter.canFocusNextPane)
+    }
+
+    func testWorkspaceCommandCenterEnablesPaneCommandsAtEdgesWhenPaneIsFocused() {
+        let commandCenter = WorkspaceCommandCenter.shared
+
+        commandCenter.updateAvailability(
+            selectedDirectory: "/tmp/project",
+            focusedSessionID: "session-1",
+            openSessionIDs: ["session-1"]
+        )
+
+        XCTAssertTrue(commandCenter.canFocusPreviousPane)
+        XCTAssertTrue(commandCenter.canFocusNextPane)
     }
 
     func testLoadRestoresPersistedPaneStateAndClampsPaneWidths() async throws {
@@ -421,10 +473,9 @@ final class OpenCodeAppStateTests: XCTestCase {
             ]
         )
 
-        let appState = OpenCodeAppState(
+        let appState = OpenCodeAppModel(
             workspaceService: workspaceService,
             repository: repository,
-            persistence: persistence,
             syncRegistry: registry,
             persistsWorkspacePaneState: true
         )
@@ -455,10 +506,9 @@ final class OpenCodeAppStateTests: XCTestCase {
         let coordinator = MockWorkspaceSyncCoordinator()
         let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
 
-        let appState = OpenCodeAppState(
+        let appState = OpenCodeAppModel(
             workspaceService: workspaceService,
             repository: repository,
-            persistence: persistence,
             syncRegistry: registry,
             persistsWorkspacePaneState: false
         )
@@ -485,10 +535,9 @@ final class OpenCodeAppStateTests: XCTestCase {
         let coordinator = MockWorkspaceSyncCoordinator()
         let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
 
-        let appState = OpenCodeAppState(
+        let appState = OpenCodeAppModel(
             workspaceService: workspaceService,
             repository: repository,
-            persistence: persistence,
             syncRegistry: registry,
             persistsWorkspacePaneState: false
         )
@@ -515,9 +564,8 @@ final class OpenCodeAppStateTests: XCTestCase {
             ]
         )
 
-        let appState = OpenCodeAppState(
+        let appState = OpenCodeAppModel(
             repository: PersistenceRepository(persistence: PersistenceController(inMemory: true)),
-            persistence: PersistenceController(inMemory: true),
             persistsWorkspacePaneState: false,
             apiClientProviderOverride: { _ in client }
         )
@@ -538,15 +586,14 @@ final class OpenCodeAppStateTests: XCTestCase {
         let client = MockOpenCodeAPIClient(health: .init(healthy: false, version: "1.0.0"))
         let probe = LocalServerProbe()
 
-        let appState = OpenCodeAppState(
+        let appState = OpenCodeAppModel(
             repository: PersistenceRepository(persistence: PersistenceController(inMemory: true)),
-            persistence: PersistenceController(inMemory: true),
             persistsWorkspacePaneState: false,
             localServerStarter: {
                 Task {
                     await probe.recordStart()
                 }
-                return Process()
+                return LocalServerLaunchHandle()
             },
             apiClientProviderOverride: { _ in client },
             directoryChooser: {
@@ -566,11 +613,46 @@ final class OpenCodeAppStateTests: XCTestCase {
         let snapshot = await probe.snapshot()
         XCTAssertEqual(snapshot.startedCount, 1)
         XCTAssertEqual(snapshot.chooserCount, 1)
-        XCTAssertEqual(snapshot.waitedURL, OpenCodeAppState.defaultServerURL)
+        XCTAssertEqual(snapshot.waitedURL, OpenCodeAppModel.defaultServerURL)
         XCTAssertEqual(snapshot.waitedTimeout, .seconds(10))
-        XCTAssertEqual(appState.serverURL, OpenCodeAppState.defaultServerURL)
+        XCTAssertEqual(appState.serverURL, OpenCodeAppModel.defaultServerURL)
         XCTAssertFalse(appState.isStartingLocalServer)
         XCTAssertNil(appState.errorMessage)
+    }
+
+    @MainActor
+    func testSetDirectoryChooserReplacesDefaultNoOpChooser() async throws {
+        let client = MockOpenCodeAPIClient(health: .init(healthy: false, version: "1.0.0"))
+        let probe = LocalServerProbe()
+
+        let appState = OpenCodeAppModel(
+            repository: PersistenceRepository(persistence: PersistenceController(inMemory: true)),
+            persistsWorkspacePaneState: false,
+            localServerStarter: {
+                Task {
+                    await probe.recordStart()
+                }
+                return LocalServerLaunchHandle()
+            },
+            apiClientProviderOverride: { _ in client },
+            serverWaiter: { url, timeout in
+                await probe.recordWait(url: url, timeout: timeout)
+                return true
+            }
+        )
+
+        appState.setDirectoryChooser {
+            Task {
+                await probe.recordChooser()
+            }
+        }
+
+        appState.openLocalDirectory()
+        try await waitForAsyncWork()
+
+        let snapshot = await probe.snapshot()
+        XCTAssertEqual(snapshot.startedCount, 1)
+        XCTAssertEqual(snapshot.chooserCount, 1)
     }
 
     func testArchiveSessionUsesInjectedServiceAndUpdatesOpenSessions() async throws {
@@ -587,10 +669,9 @@ final class OpenCodeAppStateTests: XCTestCase {
         let coordinator = MockWorkspaceSyncCoordinator()
         let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
 
-        let appState = OpenCodeAppState(
+        let appState = OpenCodeAppModel(
             workspaceService: workspaceService,
             repository: repository,
-            persistence: persistence,
             syncRegistry: registry,
             persistsWorkspacePaneState: false
         )
@@ -622,10 +703,9 @@ final class OpenCodeAppStateTests: XCTestCase {
         let coordinator = MockWorkspaceSyncCoordinator()
         let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
 
-        let appState = OpenCodeAppState(
+        let appState = OpenCodeAppModel(
             workspaceService: workspaceService,
             repository: repository,
-            persistence: persistence,
             syncRegistry: registry,
             persistsWorkspacePaneState: false
         )
@@ -645,7 +725,7 @@ final class OpenCodeAppStateTests: XCTestCase {
     }
 
     func testPermissionForSessionDeduplicatesEquivalentRequests() async {
-        let connection = WorkspaceConnection(serverURL: OpenCodeAppState.defaultServerURL, directory: "/tmp/project")
+        let connection = WorkspaceConnection(serverURL: OpenCodeAppModel.defaultServerURL, directory: "/tmp/project")
         let store = WorkspaceLiveStore(connection: connection)
         let session = makeSession(id: "session-1", directory: connection.directory)
         let permission = makePermission(id: "permission-1", sessionID: session.id)
@@ -654,7 +734,7 @@ final class OpenCodeAppStateTests: XCTestCase {
             WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [permission, permission])
         )
 
-        let appState = OpenCodeAppState(persistsWorkspacePaneState: false)
+        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
         appState.bindLiveStore(store)
 
         XCTAssertEqual(appState.permissionForSession(session.id).count, 1)
@@ -704,17 +784,16 @@ final class OpenCodeAppStateTests: XCTestCase {
             modelContextLimits: [:]
         )
 
-        let appState = OpenCodeAppState(
+        let appState = OpenCodeAppModel(
             workspaceService: workspaceService,
             repository: repository,
-            persistence: persistence,
             persistsWorkspacePaneState: false
         )
 
         await appState.load(directory: directory)
 
         XCTAssertEqual(appState.selectedModelOption(for: session.id)?.reference, ModelReference(providerID: "openai", modelID: "gpt-4.1"))
-        XCTAssertEqual(appState.selectedThinkingLevel(for: session.id), OpenCodeAppState.defaultThinkingLevel)
+        XCTAssertEqual(appState.selectedThinkingLevel(for: session.id), OpenCodeAppModel.defaultThinkingLevel)
         XCTAssertEqual(appState.modelOptions(for: session.id).first?.reference, ModelReference(providerID: "openai", modelID: "gpt-4.1"))
     }
 
@@ -730,10 +809,9 @@ final class OpenCodeAppStateTests: XCTestCase {
         let coordinator = MockWorkspaceSyncCoordinator()
         let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
 
-        let appState = OpenCodeAppState(
+        let appState = OpenCodeAppModel(
             workspaceService: workspaceService,
             repository: repository,
-            persistence: persistence,
             syncRegistry: registry,
             persistsWorkspacePaneState: false
         )

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct RootView: View {
-    @EnvironmentObject private var appState: OpenCodeAppState
+    @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
 
     var body: some View {
@@ -46,7 +46,7 @@ struct RootView: View {
 }
 
 private struct SidebarView: View {
-    @EnvironmentObject private var appState: OpenCodeAppState
+    @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
     @State private var sessionPendingArchive: SessionDisplay?
 
@@ -83,13 +83,19 @@ private struct SidebarView: View {
             }
 
             if appState.selectedDirectory != nil {
-                Section("Sessions") {
-                    if let liveStore = appState.liveStore {
-                        SessionListSection(
-                            liveStore: liveStore,
-                            onArchiveRequest: { sessionPendingArchive = $0 }
-                        )
-                    } else {
+                if let liveStore = appState.liveStore {
+                    SessionListSection(
+                        liveStore: liveStore,
+                        openSessionIDs: appState.openSessionIDs,
+                        onArchiveRequest: { sessionPendingArchive = $0 }
+                    )
+                } else {
+                    Section("Open Sessions") {
+                        Text("No open sessions")
+                            .foregroundStyle(theme.secondaryText)
+                    }
+
+                    Section("All Sessions") {
                         Text("No sessions yet")
                             .foregroundStyle(theme.secondaryText)
                     }
@@ -150,6 +156,7 @@ private struct SidebarView: View {
 
 private struct SessionListSection: View {
     @ObservedObject var liveStore: WorkspaceLiveStore
+    let openSessionIDs: [String]
     @Environment(\.openCodeTheme) private var theme
 
     let onArchiveRequest: (SessionDisplay) -> Void
@@ -158,25 +165,55 @@ private struct SessionListSection: View {
         liveStore.sessions.filter { !$0.isArchived && !$0.isSubagentSession }
     }
 
+    private var openSessionIDSet: Set<String> {
+        Set(openSessionIDs)
+    }
+
+    private var openSessions: [SessionDisplay] {
+        return visibleSessions.filter { openSessionIDSet.contains($0.id) }
+    }
+
+    private var remainingSessions: [SessionDisplay] {
+        return visibleSessions.filter { !openSessionIDSet.contains($0.id) }
+    }
+
     var body: some View {
-        if visibleSessions.isEmpty {
-            Text("No sessions yet")
-                .foregroundStyle(theme.secondaryText)
-        } else {
-            ForEach(visibleSessions) { session in
-                SessionRow(
-                    session: session,
-                    indicator: session.indicator,
-                    todoProgress: session.todoProgress
-                )
-                .contextMenu {
-                    Button("Archive Session...", role: .destructive) {
-                        onArchiveRequest(session)
-                    }
+        Section("Open Sessions") {
+            if openSessions.isEmpty {
+                Text("No open sessions")
+                    .foregroundStyle(theme.secondaryText)
+            } else {
+                ForEach(openSessions) { session in
+                    sessionRow(for: session)
                 }
-                .tag(session.id)
             }
         }
+
+        Section("All Sessions") {
+            if remainingSessions.isEmpty {
+                Text(visibleSessions.isEmpty ? "No sessions yet" : "No other sessions")
+                    .foregroundStyle(theme.secondaryText)
+            } else {
+                ForEach(remainingSessions) { session in
+                    sessionRow(for: session)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func sessionRow(for session: SessionDisplay) -> some View {
+        SessionRow(
+            session: session,
+            indicator: session.indicator,
+            todoProgress: session.todoProgress
+        )
+        .contextMenu {
+            Button("Archive Session...", role: .destructive) {
+                onArchiveRequest(session)
+            }
+        }
+        .tag(session.id)
     }
 }
 

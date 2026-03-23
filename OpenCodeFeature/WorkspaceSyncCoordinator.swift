@@ -43,7 +43,7 @@ actor WorkspaceSyncRegistry: WorkspaceSyncRegistryProtocol {
 }
 
 actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
-    private let logger = Logger(subsystem: "ai.opencode.mac", category: "workspace-sync")
+    private let logger = Logger(subsystem: "ai.opencode.app", category: "workspace-sync")
     private let client: any OpenCodeAPIClientProtocol
     private let workspaceService: any WorkspaceServiceProtocol
     private let payloadDecoder = EventPayloadDecoder()

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SessionWindowView: View {
-    @EnvironmentObject private var appState: OpenCodeAppState
+    @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
 
     let sessionID: String

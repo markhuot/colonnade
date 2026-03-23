@@ -9,12 +9,12 @@
 
 ## Current Problems
 
-- `OpenCodeAppState` publishes one large `PersistenceSnapshot` value.
-- SSE events in `OpenCodeMac/WorkspaceSyncCoordinator.swift` often fan out into broad refreshes:
+- `OpenCodeAppModel` publishes one large `PersistenceSnapshot` value.
+- SSE events in `OpenCodeFeature/WorkspaceSyncCoordinator.swift` often fan out into broad refreshes:
   - `message.updated` -> session message refresh + session refresh + status refresh
   - `message.part.*` -> full session message refresh
   - interaction events -> full interaction refresh
-- `OpenCodeAppState` currently observes Core Data merges and reloads the whole snapshot after writes.
+- `OpenCodeAppModel` currently observes Core Data merges and reloads the whole snapshot after writes.
 - `PersistenceRepository.loadSnapshot(...)` fetches all visible sessions, all messages for those sessions, all parts, all questions, all permissions, and pane state.
 - Instrumentation shows that full snapshot reloads cost roughly `1.3s`-`1.6s` normally, with worse spikes, while publication cost is small.
 
@@ -148,7 +148,7 @@ Those paths are the source of current cross-pane invalidation.
 
 ### App State
 
-`OpenCodeAppState` should stop being a wrapper around `PersistenceSnapshot` for live session rendering.
+`OpenCodeAppModel` should stop being a wrapper around `PersistenceSnapshot` for live session rendering.
 
 Instead it should own or consume a session-scoped store with operations like:
 

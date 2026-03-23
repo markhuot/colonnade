@@ -2,44 +2,6 @@ import CoreData
 import Foundation
 import OSLog
 
-struct SessionDisplay: Identifiable, Hashable {
-    let id: String
-    let title: String
-    let updatedAtMS: Double
-    let parentID: String?
-    let status: SessionStatus?
-    let hasPendingPermission: Bool
-    let todoProgress: TodoProgress?
-    let contextUsageText: String?
-    let isArchived: Bool
-
-    var isSubagentSession: Bool {
-        parentID != nil
-    }
-
-    var indicator: SessionIndicator {
-        SessionIndicator.resolve(status: status, hasPendingPermission: hasPendingPermission)
-    }
-}
-
-struct PersistenceSnapshot: Equatable {
-    let sessions: [SessionDisplay]
-    let messagesBySession: [String: [MessageEnvelope]]
-    let questionsBySession: [String: [QuestionRequest]]
-    let permissionsBySession: [String: [PermissionRequest]]
-    let selectedDirectory: String?
-    let paneStates: [String: SessionPaneState]
-
-    static let empty = PersistenceSnapshot(
-        sessions: [],
-        messagesBySession: [:],
-        questionsBySession: [:],
-        permissionsBySession: [:],
-        selectedDirectory: nil,
-        paneStates: [:]
-    )
-}
-
 actor PersistenceRepository {
     static let shared = PersistenceRepository()
 
@@ -100,7 +62,7 @@ actor PersistenceRepository {
     }
 
     private let persistence: PersistenceController
-    private let logger = Logger(subsystem: "ai.opencode.mac", category: "persistence")
+    private let logger = Logger(subsystem: "ai.opencode.app", category: "persistence")
     private let streamWriteContext: NSManagedObjectContext
     private let streamFlushInterval = Duration.milliseconds(500)
 
@@ -113,7 +75,7 @@ actor PersistenceRepository {
         streamWriteContext = persistence.newBackgroundContext()
     }
 
-    nonisolated private static let logger = Logger(subsystem: "ai.opencode.mac", category: "persistence")
+    nonisolated private static let logger = Logger(subsystem: "ai.opencode.app", category: "persistence")
 
     func loadSnapshot(directory: String?) async -> PersistenceSnapshot {
         await flushBufferedStreamMutationsIfNeeded()
@@ -175,7 +137,7 @@ actor PersistenceRepository {
             }
 
             for pane in panes {
-                let entity = SessionPaneEntity(context: context)
+                let entity: SessionPaneEntity = Self.insertEntity(in: context)
                 entity.id = "\(workspaceID)::\(pane.sessionID)"
                 entity.workspaceID = workspaceID
                 entity.sessionID = pane.sessionID
@@ -730,7 +692,7 @@ actor PersistenceRepository {
             return existing
         }
 
-        let workspace = WorkspaceEntity(context: context)
+        let workspace: WorkspaceEntity = insertEntity(in: context)
         workspace.id = directory
         workspace.directory = directory
         workspace.projectName = (directory as NSString).lastPathComponent
@@ -741,7 +703,7 @@ actor PersistenceRepository {
     private static func upsertSessions(_ sessions: [OpenCodeSession], workspaceID: String, context: NSManagedObjectContext) {
         let existing = fetchByID(SessionEntity.self, ids: sessions.map(\.id), context: context)
         for session in sessions {
-            let entity = existing[session.id] ?? SessionEntity(context: context)
+            let entity = existing[session.id] ?? insertEntity(in: context)
             entity.id = session.id
             entity.workspaceID = workspaceID
             entity.payloadJSON = PersistenceCoders.encode(session)
@@ -808,7 +770,7 @@ actor PersistenceRepository {
         existingParts.forEach(context.delete)
 
         for message in messages {
-            let messageEntity = MessageEntity(context: context)
+            let messageEntity: MessageEntity = insertEntity(in: context)
             messageEntity.id = message.info.id
             messageEntity.sessionID = message.info.sessionID
             messageEntity.payloadJSON = PersistenceCoders.encode(message)
@@ -834,7 +796,7 @@ actor PersistenceRepository {
             messageEntity.errorJSON = PersistenceCoders.encode(message.info.error)
 
             for part in message.parts {
-                let partEntity = MessagePartEntity(context: context)
+                let partEntity: MessagePartEntity = insertEntity(in: context)
                 partEntity.id = part.id
                 partEntity.sessionID = sessionID
                 partEntity.messageID = message.info.id
@@ -893,7 +855,7 @@ actor PersistenceRepository {
         let request = MessagePartEntity.fetchRequest()
         request.fetchLimit = 1
         request.predicate = NSPredicate(format: "id == %@", part.id)
-        let partEntity = (try? context.fetch(request).first) ?? MessagePartEntity(context: context)
+        let partEntity = (try? context.fetch(request).first) ?? insertEntity(in: context)
         partEntity.id = part.id
         partEntity.sessionID = sessionID
         partEntity.messageID = part.messageID
@@ -946,7 +908,7 @@ actor PersistenceRepository {
         let request = MessageEntity.fetchRequest()
         request.fetchLimit = 1
         request.predicate = NSPredicate(format: "id == %@", info.id)
-        let entity = (try? context.fetch(request).first) ?? MessageEntity(context: context)
+        let entity = (try? context.fetch(request).first) ?? insertEntity(in: context)
         apply(info: info, to: entity, sessionID: sessionID)
     }
 
@@ -974,7 +936,7 @@ actor PersistenceRepository {
             summary: nil,
             error: nil
         )
-        let entity = MessageEntity(context: context)
+        let entity: MessageEntity = insertEntity(in: context)
         apply(info: info, to: entity, sessionID: sessionID)
     }
 
@@ -1057,7 +1019,7 @@ actor PersistenceRepository {
         existing.forEach(context.delete)
 
         for todo in todos {
-            let entity = TodoEntity(context: context)
+            let entity: TodoEntity = insertEntity(in: context)
             entity.id = "\(sessionID)::\(todo.content)"
             entity.sessionID = sessionID
             entity.payloadJSON = PersistenceCoders.encode(todo)
@@ -1074,7 +1036,7 @@ actor PersistenceRepository {
         existing.forEach(context.delete)
 
         for question in questions {
-            let entity = QuestionEntity(context: context)
+            let entity: QuestionEntity = insertEntity(in: context)
             entity.id = question.id
             entity.sessionID = question.sessionID
             entity.workspaceID = workspaceID
@@ -1090,7 +1052,7 @@ actor PersistenceRepository {
         existing.forEach(context.delete)
 
         for permission in permissions {
-            let entity = PermissionEntity(context: context)
+            let entity: PermissionEntity = insertEntity(in: context)
             entity.id = permission.id
             entity.sessionID = permission.sessionID
             entity.workspaceID = workspaceID
@@ -1228,6 +1190,17 @@ actor PersistenceRepository {
             }
         }
     }
+
+    private static func insertEntity<T: NSManagedObject>(in context: NSManagedObjectContext) -> T {
+        guard
+            let entityName = String(describing: T.self).split(separator: ".").last.map(String.init),
+            let entity = NSEntityDescription.entity(forEntityName: entityName, in: context)
+        else {
+            fatalError("Missing entity description for \(T.self)")
+        }
+
+        return T(entity: entity, insertInto: context)
+    }
 }
 
 private extension Duration {
@@ -1236,9 +1209,6 @@ private extension Duration {
         return components.seconds * 1_000 + Int64(components.attoseconds / 1_000_000_000_000_000)
     }
 }
-
-extension SessionDisplay: @unchecked Sendable {}
-extension PersistenceSnapshot: @unchecked Sendable {}
 
 extension WorkspaceEntity {
     @nonobjc class func fetchRequest() -> NSFetchRequest<WorkspaceEntity> {

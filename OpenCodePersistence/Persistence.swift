@@ -3,7 +3,7 @@ import Foundation
 import OSLog
 
 enum PersistenceModel {
-    static let name = "OpenCodeMac"
+    static let name = "OpenCode"
 }
 
 final class PersistenceController: @unchecked Sendable {
@@ -11,7 +11,7 @@ final class PersistenceController: @unchecked Sendable {
 
     let container: NSPersistentContainer
 
-    private let logger = Logger(subsystem: "ai.opencode.mac", category: "persistence")
+    private let logger = Logger(subsystem: "ai.opencode.app", category: "persistence")
 
     init(inMemory: Bool = false) {
         let model = Self.makeModel()
@@ -79,7 +79,7 @@ final class PersistenceController: @unchecked Sendable {
             fatalError("Failed to prepare Application Support directory: \(error.localizedDescription)")
         }
 
-        return supportDirectory.appendingPathComponent("OpenCodeMac.sqlite")
+        return supportDirectory.appendingPathComponent("OpenCode.sqlite")
     }
 
     private static func makeModel() -> NSManagedObjectModel {
@@ -277,6 +277,8 @@ final class PersistenceController: @unchecked Sendable {
             for case let attribute as NSAttributeDescription in entity.properties {
                 attribute.isOptional = true
             }
+
+            entity.indexes = fetchIndexes(for: entity)
         }
 
         workspace.uniquenessConstraints = [["id"], ["directory"]]
@@ -297,10 +299,26 @@ private func attribute(_ name: String, _ type: NSAttributeType, indexed: Bool = 
     let attribute = NSAttributeDescription()
     attribute.name = name
     attribute.attributeType = type
-    if #available(macOS 10.13, *) {
-        attribute.isIndexed = indexed
+    if indexed {
+        attribute.userInfo = ["indexed": true]
     }
     return attribute
+}
+
+private func fetchIndexes(for entity: NSEntityDescription) -> [NSFetchIndexDescription] {
+    entity.properties.compactMap { property in
+        guard
+            let attribute = property as? NSAttributeDescription,
+            let isIndexed = attribute.userInfo?["indexed"] as? Bool,
+            isIndexed,
+            let entityName = entity.name
+        else {
+            return nil
+        }
+
+        let element = NSFetchIndexElementDescription(property: attribute, collationType: .binary)
+        return NSFetchIndexDescription(name: "\(entityName)_\(attribute.name)_index", elements: [element])
+    }
 }
 
 @objc(WorkspaceEntity)

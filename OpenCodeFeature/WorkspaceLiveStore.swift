@@ -9,7 +9,7 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
         let delta: String
     }
 
-    private let logger = Logger(subsystem: "ai.opencode.mac", category: "workspace-sync")
+    private let logger = Logger(subsystem: "ai.opencode.app", category: "workspace-sync")
 
     let id: String
 

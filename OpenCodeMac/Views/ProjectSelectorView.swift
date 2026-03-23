@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ProjectSelectorView: View {
-    @EnvironmentObject private var appState: OpenCodeAppState
+    @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
 
     var body: some View {
@@ -27,11 +27,11 @@ struct ProjectSelectorView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 620)
 
-            HStack(spacing: 24) {
+            HStack(alignment: .top, spacing: 24) {
                 launcherCard(
                     title: "Open Local Directory",
                     subtitle: "Use the native macOS folder picker after checking or starting your local server.",
-                    systemImage: "internaldrive.fill.badge.plus",
+                    systemImage: "externaldrive.badge.plus",
                     isLoading: appState.isStartingLocalServer,
                     action: appState.openLocalDirectory
                 )
@@ -49,7 +49,7 @@ struct ProjectSelectorView: View {
             .frame(maxWidth: 920)
         }
         .padding(48)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
     private var detailLayout: some View {
@@ -180,7 +180,7 @@ struct ProjectSelectorView: View {
     private var metadataText: String {
         switch appState.launchStage {
         case .checkingLocalServer, .chooseServerMode, .localFolderSelection:
-            return "Server: `\(OpenCodeAppState.defaultServerURL.absoluteString)`\nTransport: HTTP + SSE"
+            return "Server: `\(OpenCodeAppModel.defaultServerURL.absoluteString)`\nTransport: HTTP + SSE"
         case .remoteServerEntry, .remoteDirectoryEntry:
             return "Server: `\(appState.serverDisplayText)`\nProject selection: typed path"
         }
@@ -213,10 +213,8 @@ struct ProjectSelectorView: View {
                     .font(.system(size: 15, weight: .medium, design: .rounded))
                     .foregroundStyle(theme.secondaryText)
                     .multilineTextAlignment(.leading)
-
-                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, minHeight: 220, maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: 220, alignment: .topLeading)
             .padding(28)
             .background(theme.surfaceBackground)
             .overlay {

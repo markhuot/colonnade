@@ -10,7 +10,7 @@
 
 ## Current Problems
 
-- `OpenCodeAppState` and `SessionStore` are both main-actor owned, so event fan-out, sorting, and large in-memory merges happen on the UI thread.
+- `OpenCodeAppModel` and `SessionStore` are both main-actor owned, so event fan-out, sorting, and large in-memory merges happen on the UI thread.
 - SSE events trigger overlapping refreshes for sessions, statuses, messages, and todos.
 - Streaming message deltas still schedule full message reloads.
 - Activity polling re-fetches many resources every second.
@@ -66,7 +66,7 @@ Likely types:
 
 ### UI Layer
 
-- `OpenCodeAppState` becomes a thin view-model/controller for selection, drafts, commands, and window concerns.
+- `OpenCodeAppModel` becomes a thin view-model/controller for selection, drafts, commands, and window concerns.
 - Views read sessions/messages/todos from Core Data fetch requests instead of `SessionStore` dictionaries.
 - Multi-window support shares the same persistent container and sync coordinator.
 - Manual `objectWillChange.send()` calls should largely disappear.

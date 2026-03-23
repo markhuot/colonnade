@@ -1,12 +1,10 @@
-import AppKit
 import Combine
-import CoreData
 import CoreGraphics
 import Foundation
 import OSLog
 
 @MainActor
-final class OpenCodeAppState: ObservableObject {
+final class OpenCodeAppModel: ObservableObject {
     static let defaultThinkingLevel = "__default__"
     static let defaultServerURL = URL(string: "http://127.0.0.1:4096")!
 
@@ -40,18 +38,17 @@ final class OpenCodeAppState: ObservableObject {
     @Published private(set) var liveStore: WorkspaceLiveStore?
     @Published private(set) var snapshot: PersistenceSnapshot = .empty
 
-    private let logger = Logger(subsystem: "ai.opencode.mac", category: "workspace")
-    private let uiSyncLogger = Logger(subsystem: "ai.opencode.mac", category: "ui-sync")
+    private let logger = Logger(subsystem: "ai.opencode.app", category: "workspace")
+    private let uiSyncLogger = Logger(subsystem: "ai.opencode.app", category: "ui-sync")
     private let repository: PersistenceRepository
-    private let persistence: PersistenceController
     private let syncRegistry: any WorkspaceSyncRegistryProtocol
     private let storeRegistry: WorkspaceLiveStoreRegistry
     private let persistsWorkspacePaneState: Bool
     private let restoresLastSelectedDirectory: Bool
     private let apiClientProvider: @Sendable (URL) -> any OpenCodeAPIClientProtocol
     private let workspaceServiceProvider: @Sendable (URL) -> any WorkspaceServiceProtocol
-    private let localServerStarter: @Sendable () throws -> Process
-    private let directoryChooserOverride: (@MainActor () -> Void)?
+    private let localServerStarter: @Sendable () throws -> LocalServerLaunchHandle
+    var directoryChooser: @MainActor () -> Void
     private let serverWaiterOverride: (@Sendable (URL, Duration) async -> Bool)?
 
     private let initialServerURL: URL
@@ -59,7 +56,7 @@ final class OpenCodeAppState: ObservableObject {
     private let initialOpenSessionIDs: [String]
     private var hasBootstrapped = false
     private var modelContextLimits: [ModelContextKey: Int] = [:]
-    private var localServerProcess: Process?
+    private var localServerHandle: LocalServerLaunchHandle?
 
     let defaultPaneWidth: CGFloat = 720
     let minPaneWidth: CGFloat = 360
@@ -69,22 +66,20 @@ final class OpenCodeAppState: ObservableObject {
         client: (any OpenCodeAPIClientProtocol)? = nil,
         workspaceService: (any WorkspaceServiceProtocol)? = nil,
         repository: PersistenceRepository = .shared,
-        persistence: PersistenceController = .shared,
         syncRegistry: any WorkspaceSyncRegistryProtocol = WorkspaceSyncRegistry.shared,
         storeRegistry: WorkspaceLiveStoreRegistry = .shared,
         persistsWorkspacePaneState: Bool = true,
         restoresLastSelectedDirectory: Bool = false,
-        initialServerURL: URL = OpenCodeAppState.defaultServerURL,
+        initialServerURL: URL = OpenCodeAppModel.defaultServerURL,
         initialDirectory: String? = nil,
         initialOpenSessionIDs: [String] = [],
-        localServerStarter: (@Sendable () throws -> Process)? = nil,
+        localServerStarter: (@Sendable () throws -> LocalServerLaunchHandle)? = nil,
         apiClientProviderOverride: (@Sendable (URL) -> any OpenCodeAPIClientProtocol)? = nil,
         workspaceServiceProviderOverride: (@Sendable (URL) -> any WorkspaceServiceProtocol)? = nil,
-        directoryChooser: (@MainActor () -> Void)? = nil,
+        directoryChooser: @escaping @MainActor () -> Void = {},
         serverWaiter: (@Sendable (URL, Duration) async -> Bool)? = nil
     ) {
         self.repository = repository
-        self.persistence = persistence
         self.syncRegistry = syncRegistry
         self.storeRegistry = storeRegistry
         self.persistsWorkspacePaneState = persistsWorkspacePaneState
@@ -114,15 +109,9 @@ final class OpenCodeAppState: ObservableObject {
         }
 
         self.localServerStarter = localServerStarter ?? {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["opencode", "serve"]
-            process.standardOutput = Pipe()
-            process.standardError = Pipe()
-            try process.run()
-            return process
+            LocalServerLaunchHandle()
         }
-        directoryChooserOverride = directoryChooser
+        self.directoryChooser = directoryChooser
         serverWaiterOverride = serverWaiter
     }
 
@@ -168,11 +157,6 @@ final class OpenCodeAppState: ObservableObject {
         if !initialOpenSessionIDs.isEmpty {
             openSessionIDs = initialOpenSessionIDs
             focusedSessionID = initialOpenSessionIDs.first
-            WorkspaceCommandCenter.shared.updateAvailability(
-                selectedDirectory: selectedDirectory,
-                focusedSessionID: focusedSessionID,
-                openSessionIDs: openSessionIDs
-            )
         }
 
         let bootstrapDirectory = initialDirectory ?? selectedDirectory
@@ -187,18 +171,11 @@ final class OpenCodeAppState: ObservableObject {
     }
 
     func chooseDirectory() {
-        let panel = NSOpenPanel()
-        panel.message = "Choose a project folder for opencode sessions"
-        panel.prompt = "Open Project"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = false
-        panel.allowsMultipleSelection = false
+        directoryChooser()
+    }
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task {
-            await load(directory: url.path)
-        }
+    func setDirectoryChooser(_ chooser: @escaping @MainActor () -> Void) {
+        directoryChooser = chooser
     }
 
     func showRemoteServerEntry() {
@@ -217,7 +194,7 @@ final class OpenCodeAppState: ObservableObject {
             do {
                 let isReachable = await isServerReachable(at: Self.defaultServerURL)
                 if !isReachable {
-                    localServerProcess = try localServerStarter()
+                    localServerHandle = try localServerStarter()
                     let becameReachable = if let serverWaiterOverride {
                         await serverWaiterOverride(Self.defaultServerURL, .seconds(10))
                     } else {
@@ -229,11 +206,7 @@ final class OpenCodeAppState: ObservableObject {
                 }
 
                 serverURL = Self.defaultServerURL
-                if let directoryChooserOverride {
-                    directoryChooserOverride()
-                } else {
-                    chooseDirectory()
-                }
+                chooseDirectory()
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -315,7 +288,6 @@ final class OpenCodeAppState: ObservableObject {
         selectedDirectory = trimmedDirectory
         isLoading = true
         errorMessage = nil
-        WorkspaceCommandCenter.shared.bind(appState: self)
 
         let liveStore = await storeRegistry.store(for: connection)
         bindLiveStore(liveStore)
@@ -372,11 +344,6 @@ final class OpenCodeAppState: ObservableObject {
                 self.focusedSessionID = openSessionIDs.first
             }
 
-            WorkspaceCommandCenter.shared.updateAvailability(
-                selectedDirectory: selectedDirectory,
-                focusedSessionID: focusedSessionID,
-                openSessionIDs: openSessionIDs
-            )
 
             reconcileModelSelections()
 
@@ -396,11 +363,6 @@ final class OpenCodeAppState: ObservableObject {
             selectedDirectory = previousDirectory
             snapshot = previousSnapshot
             self.liveStore = previousLiveStore
-            WorkspaceCommandCenter.shared.updateAvailability(
-                selectedDirectory: selectedDirectory,
-                focusedSessionID: focusedSessionID,
-                openSessionIDs: openSessionIDs
-            )
         }
 
         isLoading = false
@@ -408,28 +370,21 @@ final class OpenCodeAppState: ObservableObject {
 
     func refreshAll() {
         guard let selectedDirectory else { return }
-        WorkspaceCommandCenter.shared.updateAvailability(
-            selectedDirectory: selectedDirectory,
-            focusedSessionID: focusedSessionID,
-            openSessionIDs: openSessionIDs
-        )
         Task {
             await load(directory: selectedDirectory)
         }
     }
 
-    func openSession(_ sessionID: String) {
+    func openSession(_ sessionID: String, focusPrompt: Bool = false) {
         if !openSessionIDs.contains(sessionID) {
             openSessionIDs.append(sessionID)
             persistPaneStateIfPossible()
         }
         focusedSessionID = sessionID
-        WorkspaceCommandCenter.shared.updateAvailability(
-            selectedDirectory: selectedDirectory,
-            focusedSessionID: focusedSessionID,
-            openSessionIDs: openSessionIDs
-        )
         reconcileModelSelection(for: sessionID)
+        if focusPrompt {
+            requestPromptFocus(for: sessionID)
+        }
 
         Task {
             await syncOpenSessions()
@@ -451,11 +406,6 @@ final class OpenCodeAppState: ObservableObject {
         if focusPrompt {
             requestPromptFocus(for: sessionID)
         }
-        WorkspaceCommandCenter.shared.updateAvailability(
-            selectedDirectory: selectedDirectory,
-            focusedSessionID: focusedSessionID,
-            openSessionIDs: openSessionIDs
-        )
     }
 
     func focusPreviousPane() {
@@ -473,11 +423,6 @@ final class OpenCodeAppState: ObservableObject {
         if closingFocusedSession {
             focusedSessionID = openSessionIDs.last
         }
-        WorkspaceCommandCenter.shared.updateAvailability(
-            selectedDirectory: selectedDirectory,
-            focusedSessionID: focusedSessionID,
-            openSessionIDs: openSessionIDs
-        )
         persistPaneStateIfPossible()
 
         Task {
@@ -524,7 +469,7 @@ final class OpenCodeAppState: ObservableObject {
                 )
                 liveStore?.applySessionLifecycle(session: session, lifecycle: .created)
                 await coordinator.refreshTodos(sessionID: session.id)
-                openSession(session.id)
+                openSession(session.id, focusPrompt: true)
             } catch {
                 logger.error("Create session failed: \(error.localizedDescription, privacy: .public)")
                 errorMessage = error.localizedDescription
@@ -665,7 +610,7 @@ final class OpenCodeAppState: ObservableObject {
             ? nil
             : selectedThinkingLevel(for: sessionID)
 
-        drafts[sessionID] = ""
+        setDraft("", for: sessionID)
 
         Task {
             do {
@@ -681,11 +626,17 @@ final class OpenCodeAppState: ObservableObject {
                 let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
                 await coordinator.refreshMessages(sessionID: sessionID)
             } catch {
-                drafts[sessionID] = draft
+                setDraft(draft, for: sessionID)
                 logger.error("Send failed for \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    func setDraft(_ draft: String, for sessionID: String) {
+        var updatedDrafts = drafts
+        updatedDrafts[sessionID] = draft
+        drafts = updatedDrafts
     }
 
     func answerPermission(_ request: PermissionRequest, reply: PermissionReply) {
@@ -885,11 +836,6 @@ final class OpenCodeAppState: ObservableObject {
         if !visiblePanes.isEmpty {
             openSessionIDs = visiblePanes.map(\.sessionID)
             focusedSessionID = openSessionIDs.first
-            WorkspaceCommandCenter.shared.updateAvailability(
-                selectedDirectory: selectedDirectory,
-                focusedSessionID: focusedSessionID,
-                openSessionIDs: openSessionIDs
-            )
         }
 
         paneWidths = visiblePanes.reduce(into: [String: CGFloat]()) { result, pane in
@@ -938,11 +884,6 @@ final class OpenCodeAppState: ObservableObject {
         modelCatalog = ModelCatalog(providers: [], defaultModels: [:], connectedProviderIDs: [])
         selectedModelBySession = [:]
         selectedThinkingLevelBySession = [:]
-        WorkspaceCommandCenter.shared.updateAvailability(
-            selectedDirectory: nil,
-            focusedSessionID: nil,
-            openSessionIDs: []
-        )
     }
 
     private func normalizedServerURL(from text: String) throws -> URL {

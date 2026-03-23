@@ -82,7 +82,7 @@ struct PromptTextView: NSViewRepresentable {
         textView.insertionPointColor = insertionPointColor
         textView.placeholderColor = placeholderColor
         if textView.string != text {
-            textView.string = text
+            context.coordinator.applyText(text, to: textView)
         }
         context.coordinator.applyFocusRequestIfNeeded(focusRequestID, to: textView)
         context.coordinator.updateHeight(for: nsView)
@@ -159,6 +159,21 @@ struct PromptTextView: NSViewRepresentable {
             )
             if scrollView.hasVerticalScroller != shouldScroll {
                 scrollView.hasVerticalScroller = shouldScroll
+            }
+        }
+
+        func applyText(_ newValue: String, to textView: NSTextView) {
+            textView.string = newValue
+            textView.setSelectedRange(NSRange(location: newValue.utf16.count, length: 0))
+            if let textContainer = textView.textContainer {
+                textView.layoutManager?.ensureLayout(for: textContainer)
+            }
+            textView.needsDisplay = true
+
+            if let scrollView = textView.enclosingScrollView {
+                scrollView.contentView.scroll(to: .zero)
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+                updateHeight(for: scrollView)
             }
         }
 

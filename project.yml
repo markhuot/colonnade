@@ -1,4 +1,4 @@
-name: OpenCodeMac
+name: OpenCode
 options:
   bundleIdPrefix: ai.opencode
 settings:
@@ -7,10 +7,10 @@ settings:
     SWIFT_VERSION: 6.0
     GENERATE_INFOPLIST_FILE: YES
     PRODUCT_BUNDLE_IDENTIFIER: ai.opencode.mac
-    PRODUCT_NAME: OpenCodeMac
+    PRODUCT_NAME: OpenCode
     CURRENT_PROJECT_VERSION: 1
     MARKETING_VERSION: 0.1.0
-    INFOPLIST_KEY_CFBundleDisplayName: OpenCodeMac
+    INFOPLIST_KEY_CFBundleDisplayName: OpenCode
     INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
     INFOPLIST_KEY_NSHumanReadableCopyright: Copyright 2026
 packages:
@@ -18,18 +18,21 @@ packages:
     url: https://github.com/gonzalezreal/textual
     from: 0.1.0
 targets:
-  OpenCodeMac:
+  OpenCode:
     type: application
     platform: macOS
     info:
       path: OpenCodeMac/Info.plist
       properties:
-        CFBundleDisplayName: OpenCodeMac
+        CFBundleDisplayName: OpenCode
         LSApplicationCategoryType: public.app-category.developer-tools
         NSHumanReadableCopyright: Copyright 2026
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
     sources:
+      - path: OpenCodeKit
+      - path: OpenCodePersistence
+      - path: OpenCodeFeature
       - path: OpenCodeMac
         excludes:
           - PanePersistenceStore.swift
@@ -43,16 +46,16 @@ targets:
         SWIFT_EMIT_LOC_STRINGS: NO
     scheme:
       testTargets:
-        - OpenCodeMacTests
-  OpenCodeMacTests:
+        - OpenCodeTests
+  OpenCodeTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - path: OpenCodeMacTests
+      - path: OpenCodeTests
     dependencies:
-      - target: OpenCodeMac
+      - target: OpenCode
       - package: Textual
     settings:
       base:
-        PRODUCT_NAME: OpenCodeMacTests
-        PRODUCT_MODULE_NAME: OpenCodeMacTests
+        PRODUCT_NAME: OpenCodeTests
+        PRODUCT_MODULE_NAME: OpenCodeTests

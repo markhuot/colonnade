@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct ChatBoardView: View {
-    @EnvironmentObject private var appState: OpenCodeAppState
+    @EnvironmentObject private var appState: OpenCodeAppModel
     @State private var transientPaneWidths: [String: CGFloat] = [:]
 
     let sessionIDs: [String]

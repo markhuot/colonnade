@@ -1,8 +1,9 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @main
-struct OpenCodeMacApp: App {
+struct OpenCodeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var themeController = ThemeController()
 
@@ -16,10 +17,14 @@ struct OpenCodeMacApp: App {
         .defaultSize(width: 1440, height: 920)
 
         WindowGroup("Session", id: "session-window", for: SessionWindowContext.self) { $context in
-            SessionWindowContainer(context: context)
-                .environmentObject(themeController)
-                .environment(\.openCodeTheme, themeController.selectedTheme)
-                .preferredColorScheme(themeController.selectedTheme.preferredColorScheme)
+            if let context {
+                SessionWindowContainer(context: context)
+                    .environmentObject(themeController)
+                    .environment(\.openCodeTheme, themeController.selectedTheme)
+                    .preferredColorScheme(themeController.selectedTheme.preferredColorScheme)
+            } else {
+                InvalidSessionWindowView()
+            }
         }
         .defaultSize(width: 760, height: 920)
 
@@ -67,13 +72,11 @@ private struct PreferencesView: View {
 }
 
 private struct WorkspaceRootContainer: View {
-    @StateObject private var appState: OpenCodeAppState
+    @StateObject private var appState: OpenCodeAppModel
 
     init() {
         _appState = StateObject(
-            wrappedValue: OpenCodeAppState(
-                restoresLastSelectedDirectory: false
-            )
+            wrappedValue: OpenCodeAppModelFactory.makeRootAppModel()
         )
     }
 
@@ -89,6 +92,7 @@ private struct WorkspaceRootContainer: View {
 
 private struct WorkspaceCommands: Commands {
     @Environment(\.openWindow) private var openWindow
+    @ObservedObject private var commandCenter = WorkspaceCommandCenter.shared
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -96,6 +100,12 @@ private struct WorkspaceCommands: Commands {
                 openWindow(id: "workspace-root")
             }
             .keyboardShortcut("n")
+
+            Button("New Session") {
+                commandCenter.createSession()
+            }
+            .keyboardShortcut("t")
+            .disabled(!commandCenter.canCreateSession)
         }
     }
 }
@@ -112,6 +122,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         static let resyncMenuItemTag = 9_011
         static let messagesMenuTag = 9_020
         static let refreshMessagesMenuItemTag = 9_021
+        static let fileNewWindowMenuItemTag = 9_030
+        static let fileNewSessionMenuItemTag = 9_031
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -147,8 +159,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         WorkspaceCommandCenter.shared.refreshAll()
     }
 
+    @objc private func createSessionFromMenu() {
+        WorkspaceCommandCenter.shared.createSession()
+    }
+
     @objc func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.tag {
+        case Constants.fileNewSessionMenuItemTag:
+            return WorkspaceCommandCenter.shared.canCreateSession
         case Constants.thinkingMenuItemTag:
             menuItem.title = thinkingMenuItemTitle
             return true
@@ -166,9 +184,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func installCustomMenus() {
+        installFileMenuItems()
         installViewMenuItems()
         installWorkspaceMenuItems()
         installMessagesMenuItems()
+    }
+
+    private func installFileMenuItems() {
+        guard let fileMenu = NSApp.mainMenu?.items.first(where: { $0.title == "File" })?.submenu else { return }
+        fileMenu.delegate = self
+
+        if let windowItem = fileMenu.item(withTag: Constants.fileNewWindowMenuItemTag),
+           let sessionItem = fileMenu.item(withTag: Constants.fileNewSessionMenuItemTag) {
+            windowItem.title = "New Window"
+            windowItem.keyEquivalent = "n"
+            windowItem.keyEquivalentModifierMask = [.command]
+
+            sessionItem.title = "New Session"
+            sessionItem.action = #selector(createSessionFromMenu)
+            sessionItem.target = self
+            sessionItem.keyEquivalent = "t"
+            sessionItem.keyEquivalentModifierMask = [.command]
+
+            if let newMenuIndex = fileMenu.items.firstIndex(where: { $0.title == "New" && $0.submenu != nil }) {
+                fileMenu.removeItem(at: newMenuIndex)
+            }
+            return
+        }
+
+        guard let newMenuIndex = fileMenu.items.firstIndex(where: { $0.title == "New" && $0.submenu != nil }),
+              let newSubmenu = fileMenu.items[newMenuIndex].submenu else {
+            return
+        }
+
+        let newMenuItems = newSubmenu.items.filter { !$0.isSeparatorItem }
+        guard !newMenuItems.isEmpty else { return }
+
+        let windowTemplate = newMenuItems.first(where: { $0.title.localizedCaseInsensitiveContains("window") })
+            ?? newMenuItems.first(where: { !$0.title.localizedCaseInsensitiveContains("session") })
+            ?? newMenuItems[0]
+
+        if windowTemplate.menu === newSubmenu {
+            newSubmenu.removeItem(windowTemplate)
+        }
+
+        fileMenu.removeItem(at: newMenuIndex)
+
+        windowTemplate.title = "New Window"
+        windowTemplate.tag = Constants.fileNewWindowMenuItemTag
+        windowTemplate.keyEquivalent = "n"
+        windowTemplate.keyEquivalentModifierMask = [.command]
+        fileMenu.insertItem(windowTemplate, at: newMenuIndex)
+
+        let sessionItem = NSMenuItem(title: "New Session", action: #selector(createSessionFromMenu), keyEquivalent: "t")
+        sessionItem.target = self
+        sessionItem.tag = Constants.fileNewSessionMenuItemTag
+        sessionItem.keyEquivalentModifierMask = [.command]
+        fileMenu.insertItem(sessionItem, at: newMenuIndex + 1)
     }
 
     private func installViewMenuItems() {
@@ -211,6 +283,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         switch menu.title {
+        case "File":
+            installFileMenuItems()
         case "View":
             installViewMenuItems()
         case "Workspace":
@@ -297,23 +371,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 
 private struct SessionWindowContainer: View {
-    let context: SessionWindowContext?
-    @StateObject private var appState: OpenCodeAppState
+    let context: SessionWindowContext
+    @StateObject private var appState: OpenCodeAppModel
 
-    init(context: SessionWindowContext?) {
+    init(context: SessionWindowContext) {
         self.context = context
         _appState = StateObject(
-            wrappedValue: OpenCodeAppState(
-                persistsWorkspacePaneState: false,
-                initialServerURL: context?.connection.serverURL ?? OpenCodeAppState.defaultServerURL,
-                initialDirectory: context?.connection.directory,
-                initialOpenSessionIDs: context.map { [$0.sessionID] } ?? []
-            )
+            wrappedValue: OpenCodeAppModelFactory.makeSessionWindowAppModel(context: context)
         )
     }
 
     var body: some View {
-        SessionWindowView(sessionID: context?.sessionID ?? "")
+        SessionWindowView(sessionID: context.sessionID)
             .environmentObject(appState)
             .task {
                 await appState.bootstrapIfNeeded()
@@ -321,25 +390,60 @@ private struct SessionWindowContainer: View {
     }
 }
 
+private struct InvalidSessionWindowView: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        closeWindow(for: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        closeWindow(for: nsView)
+    }
+
+    private func closeWindow(for view: NSView) {
+        DispatchQueue.main.async {
+            view.window?.close()
+        }
+    }
+}
+
 @MainActor
 final class WorkspaceCommandCenter: ObservableObject {
     static let shared = WorkspaceCommandCenter()
 
+    @Published private(set) var canCreateSession = false
     @Published private(set) var canRefresh = false
     @Published private(set) var canRefreshFocusedSession = false
     @Published private(set) var canFocusPreviousPane = false
     @Published private(set) var canFocusNextPane = false
 
-    private weak var appState: OpenCodeAppState?
+    private weak var appState: OpenCodeAppModel?
+    private var availabilityCancellables: Set<AnyCancellable> = []
 
     private init() {}
 
-    func bind(appState: OpenCodeAppState) {
+    func bind(appState: OpenCodeAppModel) {
         self.appState = appState
+        availabilityCancellables.removeAll()
+
+        Publishers.CombineLatest3(appState.$selectedDirectory, appState.$focusedSessionID, appState.$openSessionIDs)
+            .sink { [weak self] selectedDirectory, focusedSessionID, openSessionIDs in
+                self?.updateAvailability(
+                    selectedDirectory: selectedDirectory,
+                    focusedSessionID: focusedSessionID,
+                    openSessionIDs: openSessionIDs
+                )
+            }
+            .store(in: &availabilityCancellables)
+    }
+
+    func createSession() {
+        appState?.createSession()
         updateAvailability(
-            selectedDirectory: appState.selectedDirectory,
-            focusedSessionID: appState.focusedSessionID,
-            openSessionIDs: appState.openSessionIDs
+            selectedDirectory: appState?.selectedDirectory,
+            focusedSessionID: appState?.focusedSessionID,
+            openSessionIDs: appState?.openSessionIDs ?? []
         )
     }
 
@@ -380,14 +484,11 @@ final class WorkspaceCommandCenter: ObservableObject {
     }
 
     func updateAvailability(selectedDirectory: String?, focusedSessionID: String?, openSessionIDs: [String]) {
+        canCreateSession = selectedDirectory != nil
         canRefresh = selectedDirectory != nil
         canRefreshFocusedSession = selectedDirectory != nil && focusedSessionID != nil
-        if let focusedSessionID, let focusedIndex = openSessionIDs.firstIndex(of: focusedSessionID) {
-            canFocusPreviousPane = openSessionIDs.indices.contains(focusedIndex - 1)
-            canFocusNextPane = openSessionIDs.indices.contains(focusedIndex + 1)
-        } else {
-            canFocusPreviousPane = false
-            canFocusNextPane = false
-        }
+        let hasFocusedPane = focusedSessionID.map(openSessionIDs.contains) ?? false
+        canFocusPreviousPane = hasFocusedPane
+        canFocusNextPane = hasFocusedPane
     }
 }

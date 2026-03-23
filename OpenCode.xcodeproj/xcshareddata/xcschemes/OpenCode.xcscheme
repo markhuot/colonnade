@@ -15,10 +15,10 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "905AAB87CD1EBB87A3E52343"
-               BuildableName = "OpenCodeMac.app"
-               BlueprintName = "OpenCodeMac"
-               ReferencedContainer = "container:OpenCodeMac.xcodeproj">
+               BlueprintIdentifier = "07A3A72637770A8A767E075C"
+               BuildableName = "OpenCode.app"
+               BlueprintName = "OpenCode"
+               ReferencedContainer = "container:OpenCode.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -32,10 +32,10 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "905AAB87CD1EBB87A3E52343"
-            BuildableName = "OpenCodeMac.app"
-            BlueprintName = "OpenCodeMac"
-            ReferencedContainer = "container:OpenCodeMac.xcodeproj">
+            BlueprintIdentifier = "07A3A72637770A8A767E075C"
+            BuildableName = "OpenCode.app"
+            BlueprintName = "OpenCode"
+            ReferencedContainer = "container:OpenCode.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
       <Testables>
@@ -44,10 +44,10 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "F5E32F7138B12364D9233E61"
-               BuildableName = "OpenCodeMacTests.xctest"
-               BlueprintName = "OpenCodeMacTests"
-               ReferencedContainer = "container:OpenCodeMac.xcodeproj">
+               BlueprintIdentifier = "482B6ACEE1F367000CFDC13F"
+               BuildableName = "OpenCodeTests.xctest"
+               BlueprintName = "OpenCodeTests"
+               ReferencedContainer = "container:OpenCode.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -68,10 +68,10 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "905AAB87CD1EBB87A3E52343"
-            BuildableName = "OpenCodeMac.app"
-            BlueprintName = "OpenCodeMac"
-            ReferencedContainer = "container:OpenCodeMac.xcodeproj">
+            BlueprintIdentifier = "07A3A72637770A8A767E075C"
+            BuildableName = "OpenCode.app"
+            BlueprintName = "OpenCode"
+            ReferencedContainer = "container:OpenCode.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
       <CommandLineArguments>
@@ -87,10 +87,10 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "905AAB87CD1EBB87A3E52343"
-            BuildableName = "OpenCodeMac.app"
-            BlueprintName = "OpenCodeMac"
-            ReferencedContainer = "container:OpenCodeMac.xcodeproj">
+            BlueprintIdentifier = "07A3A72637770A8A767E075C"
+            BuildableName = "OpenCode.app"
+            BlueprintName = "OpenCode"
+            ReferencedContainer = "container:OpenCode.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
       <CommandLineArguments>

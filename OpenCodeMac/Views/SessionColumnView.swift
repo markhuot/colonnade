@@ -66,11 +66,11 @@ private extension View {
 }
 
 struct SessionColumnView: View {
-    @EnvironmentObject private var appState: OpenCodeAppState
+    @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
     @ObservedObject var sessionState: SessionLiveState
 
-    private let logger = Logger(subsystem: "ai.opencode.mac", category: "ui-sync")
+    private let logger = Logger(subsystem: "ai.opencode.app", category: "ui-sync")
 
     let sessionID: String
 
@@ -136,7 +136,7 @@ struct SessionColumnView: View {
 
 private struct SessionHeaderView: View {
     @Environment(\.openWindow) private var openWindow
-    @EnvironmentObject private var appState: OpenCodeAppState
+    @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
 
     let sessionID: String
@@ -205,7 +205,7 @@ private struct SessionHeaderView: View {
 }
 
 private struct SessionTimelineView: View {
-    @EnvironmentObject private var appState: OpenCodeAppState
+    @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
 
     @State private var scrollMetrics = TimelineScrollMetrics.zero
@@ -246,20 +246,16 @@ private struct SessionTimelineView: View {
                 }
                 .padding(18)
                 .background(
-                    TimelineScrollObserver { metrics in
-                        handleScrollMetricsChange(metrics)
+                    TimelineScrollObserver { change in
+                        handleScrollMetricsChange(change)
                     }
                 )
             }
+            .defaultScrollAnchor(.bottom)
             .background(theme.mutedSurfaceBackground.opacity(0.8))
-            .onAppear {
-                requestScroll(to: .bottom, with: proxy, animated: false)
-            }
             .onChange(of: contentSignature) { oldValue, newValue in
                 guard shouldAutoFollow(for: oldValue, newValue) else { return }
-                let animated = oldValue.messageCount < newValue.messageCount
-                    || oldValue.questionCount < newValue.questionCount
-                scheduleAutoFollow(with: proxy, animated: animated)
+                scheduleAutoFollow(with: proxy)
             }
             .onChange(of: appState.focusedSessionScrollRequest) { _, request in
                 guard let request, request.sessionID == sessionID else { return }
@@ -291,15 +287,15 @@ private struct SessionTimelineView: View {
         return isPinnedToBottom
     }
 
-    private func scheduleAutoFollow(with proxy: ScrollViewProxy, animated: Bool) {
+    private func scheduleAutoFollow(with proxy: ScrollViewProxy) {
         autoScrollTask?.cancel()
         autoScrollTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(animated ? 30 : 80))
-            requestScroll(to: .bottom, with: proxy, animated: animated)
+            try? await Task.sleep(for: .milliseconds(16))
+            requestScroll(to: .bottom, with: proxy, animated: false)
         }
     }
 
-    private func requestScroll(to target: TimelineScrollTarget, with proxy: ScrollViewProxy, animated: Bool) {
+    private func requestScroll(to target: TimelineScrollTarget, with proxy: ScrollViewProxy, animated: Bool, attempt: Int = 0) {
         let request = ProgrammaticTimelineScroll(target: target)
         programmaticScroll = request
 
@@ -327,20 +323,32 @@ private struct SessionTimelineView: View {
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(250))
             if programmaticScroll == request {
+                let nearBottom = scrollMetrics.distanceToBottom <= autoFollowThreshold
+
+                if target == .bottom, !nearBottom, isPinnedToBottom, attempt == 0 {
+                    requestScroll(to: .bottom, with: proxy, animated: false, attempt: 1)
+                    return
+                }
+
                 programmaticScroll = nil
-                isPinnedToBottom = scrollMetrics.distanceToBottom <= autoFollowThreshold
+                isPinnedToBottom = nearBottom || scrollMetrics.contentHeight <= scrollMetrics.viewportHeight + 1
             }
         }
     }
 
-    private func handleScrollMetricsChange(_ metrics: TimelineScrollMetrics) {
+    private func handleScrollMetricsChange(_ change: TimelineScrollChange) {
         let previous = scrollMetrics
+        let metrics = change.metrics
         scrollMetrics = metrics
 
+        if metrics.contentHeight <= metrics.viewportHeight + 1 {
+            isPinnedToBottom = true
+
+            return
+        }
+
         let nearBottom = metrics.distanceToBottom <= autoFollowThreshold
-        let contentHeightChanged = abs(metrics.contentHeight - previous.contentHeight) > 1
         let viewportHeightChanged = abs(metrics.viewportHeight - previous.viewportHeight) > 1
-        let userDrivenOffsetChange = abs(metrics.verticalOffset - previous.verticalOffset) > 1 && !contentHeightChanged
 
         if let request = programmaticScroll {
             if request.target == .bottom, nearBottom {
@@ -350,16 +358,10 @@ private struct SessionTimelineView: View {
             return
         }
 
-        if userDrivenOffsetChange || viewportHeightChanged {
+        if change.source == .user || viewportHeightChanged {
             isPinnedToBottom = nearBottom
             return
         }
-
-        if contentHeightChanged, isPinnedToBottom {
-            return
-        }
-
-        isPinnedToBottom = nearBottom
     }
 
     private func shouldShowTimestamp(for index: Int) -> Bool {
@@ -406,8 +408,19 @@ private struct TimelineScrollMetrics: Equatable {
     static let zero = TimelineScrollMetrics(verticalOffset: 0, viewportHeight: 0, contentHeight: 0, distanceToBottom: 0)
 }
 
+private struct TimelineScrollChange: Equatable {
+    let metrics: TimelineScrollMetrics
+    let source: TimelineScrollChangeSource
+}
+
+private enum TimelineScrollChangeSource: Equatable {
+    case user
+    case content
+    case layout
+}
+
 private struct TimelineScrollObserver: NSViewRepresentable {
-    let onChange: @MainActor (TimelineScrollMetrics) -> Void
+    let onChange: @MainActor (TimelineScrollChange) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onChange: onChange)
@@ -434,14 +447,14 @@ private struct TimelineScrollObserver: NSViewRepresentable {
 
     @MainActor
     final class Coordinator: NSObject {
-        var onChange: (TimelineScrollMetrics) -> Void
+        var onChange: (TimelineScrollChange) -> Void
 
         private weak var observedView: NSView?
         private weak var scrollView: NSScrollView?
         private weak var clipView: NSClipView?
         private weak var documentView: NSView?
 
-        init(onChange: @escaping @MainActor (TimelineScrollMetrics) -> Void) {
+        init(onChange: @escaping @MainActor (TimelineScrollChange) -> Void) {
             self.onChange = onChange
             super.init()
         }
@@ -471,7 +484,7 @@ private struct TimelineScrollObserver: NSViewRepresentable {
             else { return }
 
             if self.scrollView === scrollView, self.documentView === documentView {
-                publishMetrics()
+                publishMetrics(source: .layout)
                 return
             }
 
@@ -499,18 +512,29 @@ private struct TimelineScrollObserver: NSViewRepresentable {
                 object: documentView
             )
 
-            publishMetrics()
+            publishMetrics(source: .layout)
         }
 
         @objc private func handleBoundsChanged() {
-            publishMetrics()
+            publishMetrics(source: boundsChangeSource())
         }
 
         @objc private func handleFrameChanged() {
-            publishMetrics()
+            publishMetrics(source: .content)
         }
 
-        private func publishMetrics() {
+        private func boundsChangeSource() -> TimelineScrollChangeSource {
+            guard let event = NSApp.currentEvent else { return .layout }
+
+            switch event.type {
+            case .scrollWheel, .swipe, .keyDown, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
+                return .user
+            default:
+                return .layout
+            }
+        }
+
+        private func publishMetrics(source: TimelineScrollChangeSource) {
             guard let clipView, let documentView else { return }
 
             let visibleRect = clipView.documentVisibleRect
@@ -526,11 +550,14 @@ private struct TimelineScrollObserver: NSViewRepresentable {
             }
 
             onChange(
-                TimelineScrollMetrics(
-                    verticalOffset: verticalOffset,
-                    viewportHeight: viewportHeight,
-                    contentHeight: contentHeight,
-                    distanceToBottom: distanceToBottom
+                TimelineScrollChange(
+                    metrics: TimelineScrollMetrics(
+                        verticalOffset: verticalOffset,
+                        viewportHeight: viewportHeight,
+                        contentHeight: contentHeight,
+                        distanceToBottom: distanceToBottom
+                    ),
+                    source: source
                 )
             )
         }
@@ -538,7 +565,7 @@ private struct TimelineScrollObserver: NSViewRepresentable {
 }
 
 private struct SessionComposerView: View {
-    @EnvironmentObject private var appState: OpenCodeAppState
+    @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
 
     private static let placeholderOptions = [
@@ -570,7 +597,7 @@ private struct SessionComposerView: View {
     }
 
     private var thinkingLevels: [String] {
-        [OpenCodeAppState.defaultThinkingLevel] + (appState.selectedModelOption(for: sessionID)?.thinkingLevels ?? [])
+        [OpenCodeAppModel.defaultThinkingLevel] + (appState.selectedModelOption(for: sessionID)?.thinkingLevels ?? [])
     }
 
     private var selectedThinkingLevel: Binding<String> {
@@ -587,7 +614,7 @@ private struct SessionComposerView: View {
                     PromptTextView(
                         text: Binding(
                             get: { appState.drafts[sessionID, default: ""] },
-                            set: { appState.drafts[sessionID] = $0 }
+                            set: { appState.setDraft($0, for: sessionID) }
                         ),
                         measuredHeight: $promptHeight,
                         placeholder: placeholderText,
@@ -619,7 +646,7 @@ private struct SessionComposerView: View {
                             if let selectedModel = appState.selectedModelOption(for: sessionID), selectedModel.supportsReasoning {
                                 Picker("Thinking", selection: selectedThinkingLevel) {
                                     ForEach(thinkingLevels, id: \.self) { level in
-                                        Text(level == OpenCodeAppState.defaultThinkingLevel ? "Default" : level.capitalized).tag(level)
+                                        Text(level == OpenCodeAppModel.defaultThinkingLevel ? "Default" : level.capitalized).tag(level)
                                     }
                                 }
                                 .labelsHidden()
@@ -884,8 +911,7 @@ private struct PatchToolSummaryView: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
-            Image(systemName: "wand.and.stars")
-                .foregroundStyle(Color.accentColor)
+            ToolSummaryIcon(systemName: "pencil")
 
             Text("Patch")
                 .fontWeight(.semibold)
@@ -919,10 +945,21 @@ private struct PatchToolSummaryView: View {
     }
 }
 
+private struct ToolSummaryIcon: View {
+    @Environment(\.openCodeTheme) private var theme
+    let systemName: String
+
+    var body: some View {
+        Image(systemName: systemName)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(theme.secondaryText)
+            .frame(width: 14, alignment: .center)
+    }
+}
+
 private struct ReadToolSummaryView: View {
     @Environment(\.openCodeTheme) private var theme
     let summary: ToolReadSummary
-    @State private var phase: CGFloat = 0
 
     private var text: String {
         summary.fileName ?? summary.path ?? "Read"
@@ -930,39 +967,19 @@ private struct ReadToolSummaryView: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
-            Image(systemName: "cat")
-                .symbolEffect(.variableColor.iterative, options: .repeating, value: phase)
+            ToolSummaryIcon(systemName: "eyeglasses")
 
             Text("Read")
                 .fontWeight(.semibold)
 
-            TimelineView(.animation(minimumInterval: 0.12, paused: false)) { timeline in
-                let tick = timeline.date.timeIntervalSinceReferenceDate
-                Text(scrollingLabel(at: tick))
-                    .font(.caption.monospaced())
-                    .foregroundStyle(theme.secondaryText)
-                    .lineLimit(1)
-            }
+            Text(verbatim: "`\(text)`")
+                .font(.caption.monospaced())
+                .foregroundStyle(theme.secondaryText)
+                .lineLimit(1)
             .frame(maxWidth: 220, alignment: .leading)
             .clipped()
         }
         .font(.caption)
-        .onAppear {
-            phase += 1
-        }
-    }
-
-    private func scrollingLabel(at tick: TimeInterval) -> String {
-        let padding = "     "
-        let base = text.isEmpty ? "Read" : text
-        let marquee = base + padding + base
-        let characters = Array(marquee)
-        guard !characters.isEmpty else { return "" }
-
-        let window = min(24, characters.count)
-        let offset = Int((tick * 8).rounded(.down)) % characters.count
-        let rotated = Array(characters[offset...] + characters[..<offset])
-        return String(rotated.prefix(window))
     }
 }
 
@@ -974,7 +991,7 @@ private struct ToolPartDrawerView: View {
         let presentation = part.toolPresentation
 
         VStack(alignment: .leading, spacing: 10) {
-            if let title = part.state?.title, !title.isEmpty {
+            if let title = part.toolDrawerTitle {
                 Text(title)
                     .font(.caption)
                     .foregroundStyle(theme.secondaryText)
@@ -1180,7 +1197,7 @@ private struct ToolPartDetailSection: View {
 }
 
 private struct PermissionPromptView: View {
-    @EnvironmentObject private var appState: OpenCodeAppState
+    @EnvironmentObject private var appState: OpenCodeAppModel
 
     let request: PermissionRequest
 
@@ -1221,7 +1238,7 @@ private struct PermissionPromptView: View {
 }
 
 private struct QuestionCard: View {
-    @EnvironmentObject private var appState: OpenCodeAppState
+    @EnvironmentObject private var appState: OpenCodeAppModel
 
     let request: QuestionRequest
     @State private var selections: [String: Set<String>] = [:]

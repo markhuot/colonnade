@@ -27,11 +27,11 @@ So the implementation has to be entirely client-side, using the existing Swift a
 
 The current app already has enough hooks for a meaningful client-only guardian:
 
-- the app receives `question.asked` and related interaction updates through `WorkspaceSyncCoordinator` in `OpenCodeMac/WorkspaceSyncCoordinator.swift:436`
-- the app can already answer questions through `replyToQuestion(...)` in `OpenCodeMac/OpenCodeAPIClient.swift:155`
-- the app can already send follow-up prompts through `sendMessage(...)` in `OpenCodeMac/OpenCodeAPIClient.swift:98`
-- the live store already exposes messages, todos, questions, and permissions per session in `OpenCodeMac/WorkspaceLiveStore.swift:16`
-- stop-like completion signals already exist in visible message state through `MessageEnvelope.stepFinish` in `OpenCodeMac/Models.swift:697` and are surfaced in the timeline UI in `OpenCodeMac/Views/SessionColumnView.swift:702`
+- the app receives `question.asked` and related interaction updates through `WorkspaceSyncCoordinator` in `OpenCodeFeature/WorkspaceSyncCoordinator.swift:436`
+- the app can already answer questions through `replyToQuestion(...)` in `OpenCodeKit/OpenCodeAPIClient.swift:155`
+- the app can already send follow-up prompts through `sendMessage(...)` in `OpenCodeKit/OpenCodeAPIClient.swift:98`
+- the live store already exposes messages, todos, questions, and permissions per session in `OpenCodeFeature/WorkspaceLiveStore.swift:16`
+- stop-like completion signals already exist in visible message state through `MessageEnvelope.stepFinish` in `OpenCodeKit/SharedModels.swift:697` and are surfaced in the timeline UI in `OpenCodeMac/Views/SessionColumnView.swift:702`
 
 That gives us a clear client-only path:
 
@@ -414,7 +414,7 @@ Add repository helpers such as:
 
 ## App State Changes
 
-`OpenCodeAppState` should expose guardian config in a way the session UI can bind to.
+`OpenCodeAppModel` should expose guardian config in a way the session UI can bind to.
 
 Suggested additions:
 
@@ -467,7 +467,7 @@ Since we cannot create real server-side guardian child sessions, we need local a
 
 Recommended V1:
 
-- log guardian decisions with `Logger(subsystem: "ai.opencode.mac", category: "guardian")`
+- log guardian decisions with `Logger(subsystem: "ai.opencode.app", category: "guardian")`
 - optionally persist a lightweight local decision log
 
 Suggested log fields:
@@ -515,7 +515,7 @@ If a model-backed engine is added later, it must be hidden behind `GuardianDecid
 
 - add guardian config Core Data entity
 - add repository load/save APIs
-- expose guardian config through `OpenCodeAppState`
+- expose guardian config through `OpenCodeAppModel`
 - add session UI controls
 
 ### Phase 2: Guardian Question Handling
