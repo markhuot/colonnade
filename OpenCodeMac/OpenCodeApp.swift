@@ -6,11 +6,15 @@ import SwiftUI
 struct OpenCodeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var themeController = ThemeController()
+    @StateObject private var modelPreferencesController = ModelPreferencesController()
+    @StateObject private var localServerPreferencesController = OpenCodeAppModelFactory.localServerPreferencesController
 
     var body: some Scene {
         WindowGroup("OpenCode", id: "workspace-root") {
             WorkspaceRootContainer()
                 .environmentObject(themeController)
+                .environmentObject(modelPreferencesController)
+                .environmentObject(localServerPreferencesController)
                 .environment(\.openCodeTheme, themeController.selectedTheme)
                 .preferredColorScheme(themeController.selectedTheme.preferredColorScheme)
         }
@@ -20,6 +24,8 @@ struct OpenCodeApp: App {
             if let context {
                 SessionWindowContainer(context: context)
                     .environmentObject(themeController)
+                    .environmentObject(modelPreferencesController)
+                    .environmentObject(localServerPreferencesController)
                     .environment(\.openCodeTheme, themeController.selectedTheme)
                     .preferredColorScheme(themeController.selectedTheme.preferredColorScheme)
             } else {
@@ -31,6 +37,8 @@ struct OpenCodeApp: App {
         Settings {
             PreferencesView()
                 .environmentObject(themeController)
+                .environmentObject(modelPreferencesController)
+                .environmentObject(localServerPreferencesController)
                 .environment(\.openCodeTheme, themeController.selectedTheme)
                 .preferredColorScheme(themeController.selectedTheme.preferredColorScheme)
         }
@@ -43,9 +51,24 @@ struct OpenCodeApp: App {
 
 private struct PreferencesView: View {
     @EnvironmentObject private var themeController: ThemeController
+    @EnvironmentObject private var modelPreferencesController: ModelPreferencesController
+    @EnvironmentObject private var localServerPreferencesController: LocalServerPreferencesController
+    @StateObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
 
+    init() {
+        _appState = StateObject(wrappedValue: OpenCodeAppModelFactory.makePreferencesAppModel())
+    }
+
+    private var defaultModelSelectionKey: String {
+        let options = appState.availableModelOptions()
+        guard let reference = modelPreferencesController.preferredDefaultModelReference else { return "" }
+        return options.contains(where: { $0.reference == reference }) ? reference.key : ""
+    }
+
     var body: some View {
+        let modelOptions = appState.availableModelOptions()
+
         Form {
             Picker("Theme", selection: Binding(
                 get: { themeController.selectedThemeID },
@@ -62,17 +85,73 @@ private struct PreferencesView: View {
                 .font(.callout)
                 .foregroundStyle(theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
+
+            Picker("Default Model", selection: Binding(
+                get: { defaultModelSelectionKey },
+                set: { newValue in
+                    let reference = ModelReference(key: newValue)
+                    modelPreferencesController.setPreferredDefaultModelReference(reference)
+                    appState.setPreferredDefaultModel(reference)
+                }
+            )) {
+                Text("Use Server Default")
+                    .tag("")
+
+                ForEach(modelOptions) { option in
+                    Text(option.preferenceLabel)
+                        .tag(option.reference.key)
+                }
+            }
+            .pickerStyle(.menu)
+
+            if modelOptions.isEmpty {
+                Text("No models are available yet. Open a workspace or wait for the provider catalog to load.")
+                    .font(.callout)
+                    .foregroundStyle(theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text("New sessions prefer your local default model when there is no recent model for that session. Hold Option while choosing a model in a session to update this preference at the same time.")
+                .font(.callout)
+                .foregroundStyle(theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            TextField("Opencode Path", text: Binding(
+                get: { localServerPreferencesController.opencodeExecutablePath },
+                set: { localServerPreferencesController.setOpencodeExecutablePath($0) }
+            ))
+            .textFieldStyle(.roundedBorder)
+
+            Text("Used to start the local headless server when you open a local directory. Defaults to ~/.bun/bin/opencode.")
+                .font(.callout)
+                .foregroundStyle(theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .formStyle(.grouped)
         .padding(24)
         .frame(width: 460)
         .background(theme.windowBackground)
         .themedWindow(theme)
+        .task {
+            appState.configurePreferredDefaultModelPersistence(
+                provider: { modelPreferencesController.preferredDefaultModelReference },
+                setter: { modelPreferencesController.setPreferredDefaultModelReference($0) }
+            )
+            await appState.bootstrapIfNeeded()
+        }
+        .onReceive(WorkspaceCommandCenter.shared.$currentConnection.compactMap { $0 }) { connection in
+            Task {
+                await appState.updatePreferencesConnection(connection)
+            }
+        }
     }
 }
 
 private struct WorkspaceRootContainer: View {
+    @EnvironmentObject private var modelPreferencesController: ModelPreferencesController
     @StateObject private var appState: OpenCodeAppModel
+    @SceneStorage("workspace-root-restored-server-url") private var restoredServerURLText = ""
+    @SceneStorage("workspace-root-restored-directory") private var restoredDirectory = ""
 
     init() {
         _appState = StateObject(
@@ -84,14 +163,37 @@ private struct WorkspaceRootContainer: View {
         RootView()
             .environmentObject(appState)
             .task {
+                let restoredConnection = restoredWorkspaceConnection
+                appState.configureBootstrapRestoredConnection(restoredConnection)
+                if let restoredConnection {
+                    restoredServerURLText = restoredConnection.serverURL.absoluteString
+                    restoredDirectory = restoredConnection.directory
+                }
+                appState.configurePreferredDefaultModelPersistence(
+                    provider: { modelPreferencesController.preferredDefaultModelReference },
+                    setter: { modelPreferencesController.setPreferredDefaultModelReference($0) }
+                )
                 WorkspaceCommandCenter.shared.bind(appState: appState)
                 await appState.bootstrapIfNeeded()
+            }
+            .onChange(of: appState.workspaceConnection) { _, newConnection in
+                restoredServerURLText = newConnection?.serverURL.absoluteString ?? ""
+                restoredDirectory = newConnection?.directory ?? ""
             }
             .background(
                 WindowObserver { window in
                     WorkspaceCommandCenter.shared.registerWorkspaceWindow(window)
                 }
             )
+    }
+
+    private var restoredWorkspaceConnection: WorkspaceConnection? {
+        let trimmedDirectory = restoredDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDirectory.isEmpty else { return nil }
+
+        let trimmedServerURLText = restoredServerURLText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let serverURL = URL(string: trimmedServerURLText) ?? OpenCodeAppModel.defaultServerURL
+        return WorkspaceConnection(serverURL: serverURL, directory: trimmedDirectory)
     }
 }
 
@@ -142,6 +244,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.main.async { [weak self] in
             self?.installCustomMenus()
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        LocalServerLauncher.shutdownAll()
     }
 
     @objc private func toggleThinkingVisibility() {
@@ -405,8 +511,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 
 private struct SessionWindowContainer: View {
+    @EnvironmentObject private var modelPreferencesController: ModelPreferencesController
     let context: SessionWindowContext
     @StateObject private var appState: OpenCodeAppModel
+    @State private var toolbarController = SessionWindowToolbarController()
 
     private static let toolbarIdentifier = NSToolbar.Identifier("ai.opencode.session-window-toolbar")
 
@@ -421,6 +529,10 @@ private struct SessionWindowContainer: View {
         SessionWindowView(sessionID: context.sessionID)
             .environmentObject(appState)
             .task {
+                appState.configurePreferredDefaultModelPersistence(
+                    provider: { modelPreferencesController.preferredDefaultModelReference },
+                    setter: { modelPreferencesController.setPreferredDefaultModelReference($0) }
+                )
                 WorkspaceCommandCenter.shared.bindSessionWindow(appState: appState, sessionID: context.sessionID)
                 await appState.bootstrapIfNeeded()
             }
@@ -439,18 +551,98 @@ private struct SessionWindowContainer: View {
     private func configureWindow(_ window: NSWindow?, session: SessionDisplay?) {
         guard let window else { return }
 
-        if window.toolbar?.identifier != Self.toolbarIdentifier {
-            let toolbar = NSToolbar(identifier: Self.toolbarIdentifier)
-            toolbar.displayMode = .iconOnly
-            window.toolbar = toolbar
-        }
+        toolbarController.attach(to: window, identifier: Self.toolbarIdentifier)
+        toolbarController.update(title: session?.title ?? context.sessionID, contextUsageText: session?.contextUsageText)
 
         window.title = session?.title ?? context.sessionID
-        window.subtitle = session?.contextUsageText ?? ""
-        window.titleVisibility = .visible
-        window.titlebarAppearsTransparent = true
+        window.subtitle = ""
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = false
         window.toolbarStyle = .unified
         window.isMovableByWindowBackground = true
+    }
+}
+
+private struct SessionWindowToolbarContent: View {
+    let title: String
+    let contextUsageText: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+                .font(.headline.weight(.semibold))
+                .lineLimit(1)
+
+            Text(contextUsageText ?? "No context usage yet")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .multilineTextAlignment(.leading)
+        .frame(minWidth: 220, maxWidth: 360)
+        .padding(.vertical, 2)
+    }
+}
+
+@MainActor
+private final class SessionWindowToolbarController: NSObject, NSToolbarDelegate {
+    private static let infoItemIdentifier = NSToolbarItem.Identifier("ai.opencode.session-window-toolbar.info")
+
+    private let hostingView = NSHostingView(rootView: SessionWindowToolbarContent(title: "", contextUsageText: nil))
+    private let infoItem = NSToolbarItem(itemIdentifier: infoItemIdentifier)
+    private lazy var widthConstraint = hostingView.widthAnchor.constraint(equalToConstant: 220)
+    private lazy var heightConstraint = hostingView.heightAnchor.constraint(equalToConstant: 30)
+    private var toolbar: NSToolbar?
+
+    override init() {
+        super.init()
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([widthConstraint, heightConstraint])
+        infoItem.view = hostingView
+    }
+
+    func attach(to window: NSWindow, identifier: NSToolbar.Identifier) {
+        if let toolbar, window.toolbar === toolbar {
+            return
+        }
+
+        let toolbar = NSToolbar(identifier: identifier)
+        toolbar.delegate = self
+        toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = false
+        toolbar.autosavesConfiguration = false
+
+        self.toolbar = toolbar
+        window.toolbar = toolbar
+    }
+
+    func update(title: String, contextUsageText: String?) {
+        hostingView.rootView = SessionWindowToolbarContent(title: title, contextUsageText: contextUsageText)
+        hostingView.layoutSubtreeIfNeeded()
+
+        let fittingSize = hostingView.fittingSize
+        let width = min(max(fittingSize.width, 220), 360)
+        let height = max(fittingSize.height, 30)
+
+        widthConstraint.constant = width
+        heightConstraint.constant = height
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [Self.infoItemIdentifier]
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [Self.infoItemIdentifier]
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar,
+        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        guard itemIdentifier == Self.infoItemIdentifier else { return nil }
+        return infoItem
     }
 }
 
@@ -519,6 +711,8 @@ final class WorkspaceCommandCenter: ObservableObject {
     @Published private(set) var canFocusNextPane = false
     @Published private(set) var canCloseFocusedSession = false
 
+    @Published private(set) var currentConnection: WorkspaceConnection?
+
     private weak var appState: OpenCodeAppModel?
     private weak var workspaceWindow: NSWindow?
     private var sessionWindowStates: [String: OpenCodeAppModel] = [:]
@@ -531,8 +725,9 @@ final class WorkspaceCommandCenter: ObservableObject {
         self.appState = appState
         availabilityCancellables.removeAll()
 
-        Publishers.CombineLatest3(appState.$selectedDirectory, appState.$focusedSessionID, appState.$openSessionIDs)
-            .sink { [weak self] selectedDirectory, focusedSessionID, openSessionIDs in
+        Publishers.CombineLatest4(appState.$selectedDirectory, appState.$focusedSessionID, appState.$openSessionIDs, appState.$serverURL)
+            .sink { [weak self] selectedDirectory, focusedSessionID, openSessionIDs, serverURL in
+                self?.currentConnection = selectedDirectory.map { WorkspaceConnection(serverURL: serverURL, directory: $0) }
                 self?.updateAvailability(
                     selectedDirectory: selectedDirectory,
                     focusedSessionID: focusedSessionID,

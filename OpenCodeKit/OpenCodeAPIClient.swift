@@ -3,13 +3,14 @@ import Foundation
 protocol OpenCodeAPIClientProtocol: Sendable {
     func health() async throws -> OpenCodeServerHealth
     func projects() async throws -> [OpenCodeProject]
+    func agentCatalog() async throws -> AgentCatalog
     func sessions(directory: String) async throws -> [OpenCodeSession]
     func sessionStatus(directory: String) async throws -> [String: SessionStatus]
     func messages(directory: String, sessionID: String) async throws -> [MessageEnvelope]
     func todos(directory: String, sessionID: String) async throws -> [SessionTodo]
     func createSession(directory: String, title: String?, parentID: String?) async throws -> OpenCodeSession
     func archiveSession(directory: String, sessionID: String, archivedAtMS: Double) async throws -> OpenCodeSession
-    func sendMessage(directory: String, sessionID: String, text: String, model: ModelReference?, variant: String?) async throws
+    func sendMessage(directory: String, sessionID: String, text: String, agent: String?, model: ModelReference?, variant: String?) async throws
     func modelCatalog() async throws -> ModelCatalog
     func questions(directory: String) async throws -> [QuestionRequest]
     func permissions(directory: String) async throws -> [PermissionRequest]
@@ -25,7 +26,6 @@ struct OpenCodeAPIClient: @unchecked Sendable {
     private let session: URLSession
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
-
     struct EventStreamConnection {
         let bytes: URLSession.AsyncBytes
         let response: HTTPURLResponse
@@ -48,6 +48,21 @@ struct OpenCodeAPIClient: @unchecked Sendable {
 
     func projects() async throws -> [OpenCodeProject] {
         try await globalGet("/project")
+    }
+
+    func agentCatalog() async throws -> AgentCatalog {
+        let candidatePaths = ["/agent", "/global/agent"]
+        var lastError: Error?
+
+        for path in candidatePaths {
+            do {
+                return try await globalGet(path)
+            } catch {
+                lastError = error
+            }
+        }
+
+        throw lastError ?? APIError.invalidResponse
     }
 
     func sessionStatus(directory: String) async throws -> [String: SessionStatus] {
@@ -95,7 +110,7 @@ struct OpenCodeAPIClient: @unchecked Sendable {
         )
     }
 
-    func sendMessage(directory: String, sessionID: String, text: String, model: ModelReference?, variant: String?) async throws {
+    func sendMessage(directory: String, sessionID: String, text: String, agent: String?, model: ModelReference?, variant: String?) async throws {
         struct TextPartInput: Encodable {
             let type: MessagePartKind = .text
             let text: String
@@ -103,6 +118,7 @@ struct OpenCodeAPIClient: @unchecked Sendable {
 
         struct Body: Encodable {
             let parts: [TextPartInput]
+            let agent: String?
             let model: ModelReference?
             let variant: String?
         }
@@ -111,7 +127,7 @@ struct OpenCodeAPIClient: @unchecked Sendable {
             path: "/session/\(sessionID)/prompt_async",
             method: "POST",
             directory: directory,
-            body: Body(parts: [TextPartInput(text: text)], model: model, variant: variant),
+            body: Body(parts: [TextPartInput(text: text)], agent: agent, model: model, variant: variant),
             responseType: EmptyResponse.self,
             acceptEmptyResponse: true
         )

@@ -26,10 +26,5 @@ struct SessionWindowView: View {
         .foregroundStyle(theme.primaryText)
         .background(theme.windowBackground)
         .themedWindow(theme)
-        .background(
-            FocusedSessionTimelineKeyHandler { direction in
-                appState.scrollFocusedSessionTimeline(to: direction)
-            }
-        )
     }
 }

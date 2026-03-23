@@ -2,9 +2,20 @@ import AppKit
 
 @MainActor
 enum OpenCodeAppModelFactory {
+    static let localServerPreferencesController = LocalServerPreferencesController()
+
+    private nonisolated static func resolvedLocalServerExecutablePath() -> String {
+        NSString(string: LocalServerPreferencesController.loadOpencodeExecutablePath()).expandingTildeInPath
+    }
+
     static func makeRootAppModel(
         build: @MainActor () -> OpenCodeAppModel = {
-            OpenCodeAppModel(restoresLastSelectedDirectory: false)
+            OpenCodeAppModel(
+                restoresLastSelectedDirectory: false,
+                localServerExecutablePathProvider: {
+                    resolvedLocalServerExecutablePath()
+                }
+            )
         },
         directoryChooserFactory: @escaping @MainActor (OpenCodeAppModel) -> (@MainActor () -> Void) = makeDirectoryChooser(for:)
     ) -> OpenCodeAppModel {
@@ -25,6 +36,18 @@ enum OpenCodeAppModelFactory {
         )
         appState.setDirectoryChooser(directoryChooserFactory(appState))
         return appState
+    }
+
+    static func makePreferencesAppModel(connection: WorkspaceConnection? = WorkspaceCommandCenter.shared.currentConnection) -> OpenCodeAppModel {
+        OpenCodeAppModel(
+            restoresLastSelectedDirectory: connection == nil,
+            initialServerURL: connection?.serverURL ?? OpenCodeAppModel.defaultServerURL,
+            initialDirectory: connection?.directory,
+            localServerExecutablePathProvider: {
+                resolvedLocalServerExecutablePath()
+            },
+            directoryChooser: {}
+        )
     }
 
     static func makeDirectoryChooser(for appState: OpenCodeAppModel) -> @MainActor () -> Void {

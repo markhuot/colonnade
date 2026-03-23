@@ -349,16 +349,15 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
                 let info = infoObject.decoded(MessageInfo.self)
             else { return }
 
-            await repository.flushBufferedStreamMutations()
+            await withStore { store in
+                store.upsertMessageInfo(info)
+            }
             await repository.upsertMessageInfo(
                 directory: directory,
                 sessionID: info.sessionID,
                 info: info,
                 modelContextLimits: modelContextLimits
             )
-            await withStore { store in
-                store.upsertMessageInfo(info)
-            }
 
         case .messageRemoved:
             guard let sessionID = payload.string(.sessionID) else { return }
@@ -368,7 +367,6 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
                 }
                 if removed {
                     await repository.removeMessage(directory: directory, sessionID: sessionID, messageID: messageID, modelContextLimits: modelContextLimits)
-                    await repository.flushBufferedStreamMutations()
                     return
                 }
             }
@@ -380,10 +378,6 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
             switch payload.type {
             case .messagePartUpdated:
                 if let partObject = payload.object(.part), let part = partObject.decoded(MessagePart.self) {
-                    if part.type == .stepFinish {
-                        await repository.flushBufferedStreamMutations()
-                    }
-                    await repository.flushBufferedStreamMutations()
                     let appliedPart = await withStore { store in
                         store.applyMessagePart(part)
                     }
@@ -416,13 +410,11 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
                     await scheduleMessageRefresh(for: sessionID, reason: .partRemovedMiss(partID: nil))
                     return
                 }
-                await repository.flushBufferedStreamMutations()
                 let removed = await withStore { store in
                     store.removeMessagePart(sessionID: sessionID, partID: partID)
                 }
                 if removed {
                     await repository.removeMessagePart(directory: directory, sessionID: sessionID, partID: partID, modelContextLimits: modelContextLimits)
-                    await repository.flushBufferedStreamMutations()
                 } else {
                     await scheduleMessageRefresh(for: sessionID, reason: .partRemovedMiss(partID: partID))
                 }

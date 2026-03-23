@@ -21,6 +21,9 @@ targets:
   OpenCode:
     type: application
     platform: macOS
+    resources:
+      - path: OpenCodeMac/ShikiThemes
+      - path: OpenCodeMac/Assets.xcassets
     info:
       path: OpenCodeMac/Info.plist
       properties:

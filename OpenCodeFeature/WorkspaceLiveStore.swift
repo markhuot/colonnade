@@ -20,6 +20,7 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
     @Published private(set) var permissions: [PermissionRequest] = []
 
     private var sessionModel: OpenCodeSession?
+    private var persistedSession: SessionDisplay?
     private var status: SessionStatus?
     private var pendingPartDeltas: [String: [BufferedPartDelta]] = [:]
 
@@ -29,6 +30,11 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
 
     func applySessionModel(_ session: OpenCodeSession) {
         sessionModel = session
+        persistedSession = nil
+    }
+
+    func applyPersistedSession(_ session: SessionDisplay) {
+        persistedSession = session
     }
 
     func applyStatus(_ status: SessionStatus?) {
@@ -174,7 +180,7 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
 
     func recomputeDisplay(modelContextLimits: [ModelContextKey: Int]) {
         guard let sessionModel else {
-            session = nil
+            session = persistedSession
             return
         }
 
@@ -296,6 +302,11 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
 
     func applyPersistenceSnapshot(_ snapshot: PersistenceSnapshot) {
         paneStates = snapshot.paneStates
+        let incomingSessionIDs = Set(snapshot.sessions.map(\.id))
+
+        for session in snapshot.sessions {
+            sessionState(for: session.id).applyPersistedSession(session)
+        }
 
         for (sessionID, messages) in snapshot.messagesBySession {
             sessionState(for: sessionID).replaceMessages(messages)
@@ -307,6 +318,11 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
 
         for (sessionID, permissions) in snapshot.permissionsBySession {
             sessionState(for: sessionID).replacePermissions(permissions)
+        }
+
+        for sessionID in sessionStates.keys where !incomingSessionIDs.contains(sessionID) {
+            sessionStates.removeValue(forKey: sessionID)
+            paneStates.removeValue(forKey: sessionID)
         }
 
         refreshSessionsList()

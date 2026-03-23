@@ -1,34 +1,43 @@
 import AppKit
 import SwiftUI
+import Textual
 
-enum OpenCodeThemeID: String, CaseIterable, Identifiable, Codable {
-    case native
-    case githubLight = "github-light"
-    case githubDark = "github-dark"
-    case nord
-    case oneDarkPro = "one-dark-pro"
+struct OpenCodeThemeID: RawRepresentable, Hashable, Codable, Identifiable, CaseIterable, Sendable {
+    static let native = Self(rawValue: "native")
+    static let githubLight = Self(rawValue: "github-light")
+    static let githubDark = Self(rawValue: "github-dark")
+    static let nord = Self(rawValue: "nord")
+    static let oneDarkPro = Self(rawValue: "one-dark-pro")
+
+    let rawValue: String
+
+    init(rawValue: String) {
+        self.rawValue = rawValue
+    }
 
     var id: String { rawValue }
 
+    static var allCases: [OpenCodeThemeID] {
+        [.native] + ShikiThemeCatalog.shared.themeIDs
+    }
+
     var displayName: String {
-        switch self {
-        case .native:
+        if self == .native {
             return "Native"
-        case .githubLight:
-            return "GitHub Light"
-        case .githubDark:
-            return "GitHub Dark"
-        case .nord:
-            return "Nord"
-        case .oneDarkPro:
-            return "One Dark Pro"
         }
+
+        return ShikiThemeCatalog.shared.displayName(for: self) ?? rawValue.humanizedThemeName
+    }
+
+    var isSupported: Bool {
+        self == .native || ShikiThemeCatalog.shared.contains(self)
     }
 }
 
 struct OpenCodeTheme: Equatable {
     let id: OpenCodeThemeID
     let preferredColorScheme: ColorScheme?
+    let highlighterTheme: StructuredText.HighlighterTheme
     let windowBackgroundColor: NSColor
     let surfaceBackgroundColor: NSColor
     let mutedSurfaceBackgroundColor: NSColor
@@ -36,117 +45,59 @@ struct OpenCodeTheme: Equatable {
     let primaryTextColor: NSColor
     let secondaryTextColor: NSColor
     let borderColor: NSColor
+    let accentColor: NSColor
+    let accentSubtleBackgroundColor: NSColor
     let assistantBubbleColor: NSColor
+    let userBubbleColor: NSColor
     let codeBlockBackgroundColor: NSColor
     let toolCardBackgroundColor: NSColor
     let diffAdditionColor: NSColor
     let diffAdditionBackgroundColor: NSColor
     let diffDeletionColor: NSColor
     let diffDeletionBackgroundColor: NSColor
+    let warningColor: NSColor
+    let errorColor: NSColor
+    let errorBackgroundColor: NSColor
+    let positiveColor: NSColor
 
     static func == (lhs: OpenCodeTheme, rhs: OpenCodeTheme) -> Bool {
         lhs.id == rhs.id
     }
 
     static func resolve(_ id: OpenCodeThemeID) -> OpenCodeTheme {
-        switch id {
-        case .native:
-            return OpenCodeTheme(
-                id: .native,
-                preferredColorScheme: nil,
-                windowBackgroundColor: .windowBackgroundColor,
-                surfaceBackgroundColor: .windowBackgroundColor,
-                mutedSurfaceBackgroundColor: .controlBackgroundColor,
-                inputBackgroundColor: .textBackgroundColor,
-                primaryTextColor: .labelColor,
-                secondaryTextColor: .secondaryLabelColor,
-                borderColor: .separatorColor.withAlphaComponent(0.7),
-                assistantBubbleColor: .controlBackgroundColor,
-                codeBlockBackgroundColor: .controlBackgroundColor,
-                toolCardBackgroundColor: .underPageBackgroundColor,
-                diffAdditionColor: .systemGreen,
-                diffAdditionBackgroundColor: .systemGreen.withAlphaComponent(0.16),
-                diffDeletionColor: .systemRed,
-                diffDeletionBackgroundColor: .systemRed.withAlphaComponent(0.16)
-            )
-        case .githubLight:
-            return OpenCodeTheme(
-                id: .githubLight,
-                preferredColorScheme: .light,
-                windowBackgroundColor: NSColor(hex: 0xFFFFFF),
-                surfaceBackgroundColor: NSColor(hex: 0xF6F8FA),
-                mutedSurfaceBackgroundColor: NSColor(hex: 0xEFF2F5),
-                inputBackgroundColor: NSColor(hex: 0xFFFFFF),
-                primaryTextColor: NSColor(hex: 0x1F2328),
-                secondaryTextColor: NSColor(hex: 0x656D76),
-                borderColor: NSColor(hex: 0xD0D7DE),
-                assistantBubbleColor: NSColor(hex: 0xF6F8FA),
-                codeBlockBackgroundColor: NSColor(hex: 0xEFF2F5),
-                toolCardBackgroundColor: NSColor(hex: 0xE7ECF2),
-                diffAdditionColor: NSColor(hex: 0x1A7F37),
-                diffAdditionBackgroundColor: NSColor(hex: 0xDFF3E4),
-                diffDeletionColor: NSColor(hex: 0xCF222E),
-                diffDeletionBackgroundColor: NSColor(hex: 0xFFEBE9)
-            )
-        case .githubDark:
-            return OpenCodeTheme(
-                id: .githubDark,
-                preferredColorScheme: .dark,
-                windowBackgroundColor: NSColor(hex: 0x0D1117),
-                surfaceBackgroundColor: NSColor(hex: 0x161B22),
-                mutedSurfaceBackgroundColor: NSColor(hex: 0x1F2630),
-                inputBackgroundColor: NSColor(hex: 0x0D1117),
-                primaryTextColor: NSColor(hex: 0xE6EDF3),
-                secondaryTextColor: NSColor(hex: 0x8B949E),
-                borderColor: NSColor(hex: 0x30363D),
-                assistantBubbleColor: NSColor(hex: 0x161B22),
-                codeBlockBackgroundColor: NSColor(hex: 0x11161D),
-                toolCardBackgroundColor: NSColor(hex: 0x11161D),
-                diffAdditionColor: NSColor(hex: 0x3FB950),
-                diffAdditionBackgroundColor: NSColor(hex: 0x0F381A),
-                diffDeletionColor: NSColor(hex: 0xF85149),
-                diffDeletionBackgroundColor: NSColor(hex: 0x3F1518)
-            )
-        case .nord:
-            return OpenCodeTheme(
-                id: .nord,
-                preferredColorScheme: .dark,
-                windowBackgroundColor: NSColor(hex: 0x2E3440),
-                surfaceBackgroundColor: NSColor(hex: 0x3B4252),
-                mutedSurfaceBackgroundColor: NSColor(hex: 0x434C5E),
-                inputBackgroundColor: NSColor(hex: 0x2A303B),
-                primaryTextColor: NSColor(hex: 0xECEFF4),
-                secondaryTextColor: NSColor(hex: 0xD8DEE9),
-                borderColor: NSColor(hex: 0x4C566A),
-                assistantBubbleColor: NSColor(hex: 0x434C5E),
-                codeBlockBackgroundColor: NSColor(hex: 0x2A303B),
-                toolCardBackgroundColor: NSColor(hex: 0x2A303B),
-                diffAdditionColor: NSColor(hex: 0xA3BE8C),
-                diffAdditionBackgroundColor: NSColor(hex: 0x3E4C41),
-                diffDeletionColor: NSColor(hex: 0xBF616A),
-                diffDeletionBackgroundColor: NSColor(hex: 0x4D3841)
-            )
-        case .oneDarkPro:
-            return OpenCodeTheme(
-                id: .oneDarkPro,
-                preferredColorScheme: .dark,
-                windowBackgroundColor: NSColor(hex: 0x282C34),
-                surfaceBackgroundColor: NSColor(hex: 0x31353F),
-                mutedSurfaceBackgroundColor: NSColor(hex: 0x3A3F4B),
-                inputBackgroundColor: NSColor(hex: 0x21252B),
-                primaryTextColor: NSColor(hex: 0xABB2BF),
-                secondaryTextColor: NSColor(hex: 0x7F848E),
-                borderColor: NSColor(hex: 0x4B5263),
-                assistantBubbleColor: NSColor(hex: 0x31353F),
-                codeBlockBackgroundColor: NSColor(hex: 0x21252B),
-                toolCardBackgroundColor: NSColor(hex: 0x21252B),
-                diffAdditionColor: NSColor(hex: 0x98C379),
-                diffAdditionBackgroundColor: NSColor(hex: 0x253126),
-                diffDeletionColor: NSColor(hex: 0xE06C75),
-                diffDeletionBackgroundColor: NSColor(hex: 0x3B2228)
-            )
+        if id == .native {
+            return nativeTheme
         }
+
+        return ShikiThemeCatalog.shared.theme(for: id) ?? nativeTheme
     }
+
+    private static let nativeTheme = OpenCodeTheme(
+        id: .native,
+        preferredColorScheme: nil,
+        highlighterTheme: .default,
+        windowBackgroundColor: .windowBackgroundColor,
+        surfaceBackgroundColor: .windowBackgroundColor,
+        mutedSurfaceBackgroundColor: .controlBackgroundColor,
+        inputBackgroundColor: .textBackgroundColor,
+        primaryTextColor: .labelColor,
+        secondaryTextColor: .secondaryLabelColor,
+        borderColor: .separatorColor.withAlphaComponent(0.7),
+        accentColor: .controlAccentColor,
+        accentSubtleBackgroundColor: .controlAccentColor.withAlphaComponent(0.14),
+        assistantBubbleColor: .controlBackgroundColor,
+        userBubbleColor: .controlAccentColor.withAlphaComponent(0.14),
+        codeBlockBackgroundColor: .controlBackgroundColor,
+        toolCardBackgroundColor: .underPageBackgroundColor,
+        diffAdditionColor: .systemGreen,
+        diffAdditionBackgroundColor: .systemGreen.withAlphaComponent(0.16),
+        diffDeletionColor: .systemRed,
+        diffDeletionBackgroundColor: .systemRed.withAlphaComponent(0.16),
+        warningColor: .systemOrange,
+        errorColor: .systemRed,
+        errorBackgroundColor: .systemRed.withAlphaComponent(0.08),
+        positiveColor: .systemGreen
+    )
 
     var displayName: String { id.displayName }
     var windowBackground: Color { Color(nsColor: windowBackgroundColor) }
@@ -156,13 +107,21 @@ struct OpenCodeTheme: Equatable {
     var primaryText: Color { Color(nsColor: primaryTextColor) }
     var secondaryText: Color { Color(nsColor: secondaryTextColor) }
     var border: Color { Color(nsColor: borderColor) }
+    var accent: Color { Color(nsColor: accentColor) }
+    var accentSubtleBackground: Color { Color(nsColor: accentSubtleBackgroundColor) }
     var assistantBubble: Color { Color(nsColor: assistantBubbleColor) }
+    var userBubble: Color { Color(nsColor: userBubbleColor) }
     var codeBlockBackground: Color { Color(nsColor: codeBlockBackgroundColor) }
     var toolCardBackground: Color { Color(nsColor: toolCardBackgroundColor) }
     var diffAddition: Color { Color(nsColor: diffAdditionColor) }
     var diffAdditionBackground: Color { Color(nsColor: diffAdditionBackgroundColor) }
     var diffDeletion: Color { Color(nsColor: diffDeletionColor) }
     var diffDeletionBackground: Color { Color(nsColor: diffDeletionBackgroundColor) }
+    var warning: Color { Color(nsColor: warningColor) }
+    var error: Color { Color(nsColor: errorColor) }
+    var errorBackground: Color { Color(nsColor: errorBackgroundColor) }
+    var positive: Color { Color(nsColor: positiveColor) }
+
 }
 
 @MainActor
@@ -178,9 +137,9 @@ final class ThemeController: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
 
-        if let rawValue = defaults.string(forKey: Constants.selectedThemeKey),
-           let storedTheme = OpenCodeThemeID(rawValue: rawValue) {
-            selectedThemeID = storedTheme
+        if let rawValue = defaults.string(forKey: Constants.selectedThemeKey) {
+            let storedTheme = OpenCodeThemeID(rawValue: rawValue)
+            selectedThemeID = storedTheme.isSupported ? storedTheme : .native
         } else {
             selectedThemeID = .native
         }
@@ -191,9 +150,77 @@ final class ThemeController: ObservableObject {
     }
 
     func selectTheme(_ themeID: OpenCodeThemeID) {
-        guard selectedThemeID != themeID else { return }
+        guard themeID.isSupported, selectedThemeID != themeID else { return }
         selectedThemeID = themeID
         defaults.set(themeID.rawValue, forKey: Constants.selectedThemeKey)
+    }
+}
+
+@MainActor
+final class ModelPreferencesController: ObservableObject {
+    enum Constants {
+        static let preferredDefaultModelKey = "preferredDefaultModel"
+    }
+
+    @Published private(set) var preferredDefaultModelReference: ModelReference?
+
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        preferredDefaultModelReference = Self.loadPreferredDefaultModelReference(from: defaults)
+    }
+
+    func setPreferredDefaultModelReference(_ reference: ModelReference?) {
+        guard preferredDefaultModelReference != reference else { return }
+        preferredDefaultModelReference = reference
+
+        if let reference {
+            defaults.set(reference.key, forKey: Constants.preferredDefaultModelKey)
+        } else {
+            defaults.removeObject(forKey: Constants.preferredDefaultModelKey)
+        }
+    }
+
+    private static func loadPreferredDefaultModelReference(from defaults: UserDefaults) -> ModelReference? {
+        guard let key = defaults.string(forKey: Constants.preferredDefaultModelKey) else { return nil }
+        return ModelReference(key: key)
+    }
+}
+
+@MainActor
+final class LocalServerPreferencesController: ObservableObject {
+    enum Constants {
+        static let opencodeExecutablePathKey = "opencodeExecutablePath"
+        static let defaultOpencodeExecutablePath = "~/.bun/bin/opencode"
+    }
+
+    @Published private(set) var opencodeExecutablePath: String
+
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        opencodeExecutablePath = Self.loadOpencodeExecutablePath(from: defaults)
+    }
+
+    func setOpencodeExecutablePath(_ path: String) {
+        let trimmedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedPath = trimmedPath.isEmpty ? Constants.defaultOpencodeExecutablePath : trimmedPath
+        guard opencodeExecutablePath != normalizedPath else { return }
+
+        opencodeExecutablePath = normalizedPath
+
+        if normalizedPath == Constants.defaultOpencodeExecutablePath {
+            defaults.removeObject(forKey: Constants.opencodeExecutablePathKey)
+        } else {
+            defaults.set(normalizedPath, forKey: Constants.opencodeExecutablePathKey)
+        }
+    }
+
+    nonisolated static func loadOpencodeExecutablePath(from defaults: UserDefaults = .standard) -> String {
+        let storedPath = defaults.string(forKey: Constants.opencodeExecutablePathKey)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return storedPath?.isEmpty == false ? storedPath! : Constants.defaultOpencodeExecutablePath
     }
 }
 
@@ -229,7 +256,7 @@ struct WindowThemeView: NSViewRepresentable {
     }
 }
 
-private extension NSColor {
+extension NSColor {
     convenience init(hex: UInt32) {
         self.init(
             srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
@@ -246,16 +273,14 @@ struct SessionWindowContext: Codable, Hashable {
 }
 
 extension SessionIndicator {
-    var color: Color {
+    func color() -> Color {
         switch tint {
         case .idle:
-            return Color(nsColor: .systemGreen)
-        case .busy:
-            return Color(nsColor: .systemOrange)
-        case .retry:
-            return Color(nsColor: .systemYellow)
+            return .green
+        case .busy, .retry:
+            return .yellow
         case .permission:
-            return Color(nsColor: .systemRed)
+            return .red
         }
     }
 }

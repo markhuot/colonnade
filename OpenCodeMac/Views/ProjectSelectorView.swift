@@ -192,7 +192,7 @@ struct ProjectSelectorView: View {
                 HStack(alignment: .center, spacing: 14) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(Color.accentColor.opacity(0.12))
+                            .fill(theme.accentSubtleBackground)
                             .frame(width: 56, height: 56)
 
                         if isLoading {
@@ -201,7 +201,7 @@ struct ProjectSelectorView: View {
                         } else {
                             Image(systemName: systemImage)
                                 .font(.system(size: 24, weight: .semibold))
-                                .foregroundStyle(Color.accentColor)
+                                .foregroundStyle(theme.primaryText)
                         }
                     }
 

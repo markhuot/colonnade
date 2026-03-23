@@ -9,9 +9,10 @@ protocol WorkspaceServiceProtocol: Sendable {
     func loadMessages(directory: String, sessionID: String) async throws -> [MessageEnvelope]
     func loadTodos(directory: String, sessionID: String) async throws -> [SessionTodo]
     func loadStatuses(directory: String) async throws -> [String: SessionStatus]
+    func loadAgentCatalog() async throws -> AgentCatalog
     func loadModelContextLimits() async throws -> [ModelContextKey: Int]
     func loadModelCatalog() async throws -> ModelCatalog
-    func sendMessage(directory: String, sessionID: String, text: String, model: ModelReference?, variant: String?) async throws
+    func sendMessage(directory: String, sessionID: String, text: String, agent: String?, model: ModelReference?, variant: String?) async throws
     func replyToPermission(directory: String, requestID: String, reply: PermissionReply) async throws
     func replyToQuestion(directory: String, requestID: String, answers: [[String]]) async throws
     func rejectQuestion(directory: String, requestID: String) async throws
@@ -80,6 +81,10 @@ struct WorkspaceService: WorkspaceServiceProtocol {
         try await client.sessionStatus(directory: directory)
     }
 
+    func loadAgentCatalog() async throws -> AgentCatalog {
+        try await client.agentCatalog()
+    }
+
     func loadModelContextLimits() async throws -> [ModelContextKey: Int] {
         try await client.modelContextLimits()
     }
@@ -88,8 +93,8 @@ struct WorkspaceService: WorkspaceServiceProtocol {
         try await client.modelCatalog()
     }
 
-    func sendMessage(directory: String, sessionID: String, text: String, model: ModelReference?, variant: String?) async throws {
-        try await client.sendMessage(directory: directory, sessionID: sessionID, text: text, model: model, variant: variant)
+    func sendMessage(directory: String, sessionID: String, text: String, agent: String?, model: ModelReference?, variant: String?) async throws {
+        try await client.sendMessage(directory: directory, sessionID: sessionID, text: text, agent: agent, model: model, variant: variant)
     }
 
     func replyToPermission(directory: String, requestID: String, reply: PermissionReply) async throws {

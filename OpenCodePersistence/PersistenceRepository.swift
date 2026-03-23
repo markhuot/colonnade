@@ -6,6 +6,7 @@ actor PersistenceRepository {
     static let shared = PersistenceRepository()
 
     private enum BufferedStreamMutation {
+        case upsertMessageInfo(directory: String, sessionID: String, info: MessageInfo, modelContextLimits: [ModelContextKey: Int])
         case upsertMessagePart(directory: String, sessionID: String, part: MessagePart, modelContextLimits: [ModelContextKey: Int])
         case applyMessagePartDelta(directory: String, sessionID: String, partID: String, field: MessagePartDeltaField, delta: String, modelContextLimits: [ModelContextKey: Int])
         case removeMessagePart(directory: String, sessionID: String, partID: String, modelContextLimits: [ModelContextKey: Int])
@@ -13,7 +14,8 @@ actor PersistenceRepository {
 
         var directory: String {
             switch self {
-            case let .upsertMessagePart(directory, _, _, _),
+            case let .upsertMessageInfo(directory, _, _, _),
+                 let .upsertMessagePart(directory, _, _, _),
                  let .applyMessagePartDelta(directory, _, _, _, _, _),
                  let .removeMessagePart(directory, _, _, _),
                  let .removeMessage(directory, _, _, _):
@@ -23,7 +25,8 @@ actor PersistenceRepository {
 
         var sessionID: String {
             switch self {
-            case let .upsertMessagePart(_, sessionID, _, _),
+            case let .upsertMessageInfo(_, sessionID, _, _),
+                 let .upsertMessagePart(_, sessionID, _, _),
                  let .applyMessagePartDelta(_, sessionID, _, _, _, _),
                  let .removeMessagePart(_, sessionID, _, _),
                  let .removeMessage(_, sessionID, _, _):
@@ -33,7 +36,8 @@ actor PersistenceRepository {
 
         var modelContextLimits: [ModelContextKey: Int] {
             switch self {
-            case let .upsertMessagePart(_, _, _, modelContextLimits),
+            case let .upsertMessageInfo(_, _, _, modelContextLimits),
+                 let .upsertMessagePart(_, _, _, modelContextLimits),
                  let .applyMessagePartDelta(_, _, _, _, _, modelContextLimits),
                  let .removeMessagePart(_, _, _, modelContextLimits),
                  let .removeMessage(_, _, _, modelContextLimits):
@@ -41,8 +45,43 @@ actor PersistenceRepository {
             }
         }
 
+        var messageID: String? {
+            switch self {
+            case let .upsertMessageInfo(_, _, info, _):
+                return info.id
+            case let .upsertMessagePart(_, _, part, _):
+                return part.messageID
+            case .applyMessagePartDelta, .removeMessagePart:
+                return nil
+            case let .removeMessage(_, _, messageID, _):
+                return messageID
+            }
+        }
+
+        var partID: String? {
+            switch self {
+            case .upsertMessageInfo, .removeMessage:
+                return nil
+            case let .upsertMessagePart(_, _, part, _):
+                return part.id
+            case let .applyMessagePartDelta(_, _, partID, _, _, _),
+                 let .removeMessagePart(_, _, partID, _):
+                return partID
+            }
+        }
+
         func merged(with next: BufferedStreamMutation) -> BufferedStreamMutation? {
             switch (self, next) {
+            case let (
+                .upsertMessageInfo(directory: lhsDirectory, sessionID: lhsSessionID, info: lhsInfo, modelContextLimits: _),
+                .upsertMessageInfo(directory: rhsDirectory, sessionID: rhsSessionID, info: rhsInfo, modelContextLimits: rhsLimits)
+            ) where lhsDirectory == rhsDirectory && lhsSessionID == rhsSessionID && lhsInfo.id == rhsInfo.id:
+                return .upsertMessageInfo(
+                    directory: lhsDirectory,
+                    sessionID: lhsSessionID,
+                    info: rhsInfo,
+                    modelContextLimits: rhsLimits
+                )
             case let (
                 .applyMessagePartDelta(directory: lhsDirectory, sessionID: lhsSessionID, partID: lhsPartID, field: lhsField, delta: lhsDelta, modelContextLimits: _),
                 .applyMessagePartDelta(directory: rhsDirectory, sessionID: rhsSessionID, partID: rhsPartID, field: rhsField, delta: rhsDelta, modelContextLimits: rhsLimits)
@@ -79,7 +118,7 @@ actor PersistenceRepository {
 
     func loadSnapshot(directory: String?) async -> PersistenceSnapshot {
         await flushBufferedStreamMutationsIfNeeded()
-        let context = persistence.container.viewContext
+        let context = persistence.newBackgroundContext()
         let startedAt = ContinuousClock.now
         let snapshot = await context.perform {
             Self.makeSnapshot(context: context, directory: directory)
@@ -95,7 +134,7 @@ actor PersistenceRepository {
 
     func loadLastSelectedDirectory() async -> String? {
         await flushBufferedStreamMutationsIfNeeded()
-        let context = persistence.container.viewContext
+        let context = persistence.newBackgroundContext()
         return await context.perform {
             let request = WorkspaceEntity.fetchRequest()
             request.fetchLimit = 1
@@ -310,15 +349,14 @@ actor PersistenceRepository {
     }
 
     func upsertMessageInfo(directory: String, sessionID: String, info: MessageInfo, modelContextLimits: [ModelContextKey: Int]) async {
-        await flushBufferedStreamMutationsIfNeeded()
-        let context = persistence.newBackgroundContext()
-        await context.perform {
-            let workspace = Self.findOrCreateWorkspace(directory: directory, context: context)
-            let workspaceID = workspace.id ?? directory
-            Self.upsertMessageInfo(info, sessionID: sessionID, context: context)
-            Self.recomputeSessionDerivedState(workspaceID: workspaceID, modelContextLimits: modelContextLimits, context: context, sessionIDs: [sessionID])
-            try? context.save()
-        }
+        await enqueueBufferedStreamMutation(
+            .upsertMessageInfo(
+                directory: directory,
+                sessionID: sessionID,
+                info: info,
+                modelContextLimits: modelContextLimits
+            )
+        )
     }
 
     func applyMessagePartDelta(directory: String, sessionID: String, partID: String, field: MessagePartDeltaField, delta: String, modelContextLimits: [ModelContextKey: Int]) async {
@@ -385,6 +423,8 @@ actor PersistenceRepository {
                 latestModelContextLimitsByDirectory[directory] = mutation.modelContextLimits
 
                 switch mutation {
+                case let .upsertMessageInfo(_, sessionID, info, _):
+                    Self.upsertMessageInfo(info, sessionID: sessionID, context: streamWriteContext)
                 case let .upsertMessagePart(_, sessionID, part, _):
                     Self.upsertMessagePart(part, sessionID: sessionID, context: streamWriteContext)
                 case let .applyMessagePartDelta(_, _, partID, field, delta, _):
@@ -433,11 +473,86 @@ actor PersistenceRepository {
     }
 
     private func enqueueBufferedStreamMutation(_ mutation: BufferedStreamMutation) {
-        if let lastMutation = bufferedStreamMutations.last, let mergedMutation = lastMutation.merged(with: mutation) {
-            bufferedStreamMutations[bufferedStreamMutations.count - 1] = mergedMutation
-        } else {
-            bufferedStreamMutations.append(mutation)
+        var mutation = mutation
+        var index = bufferedStreamMutations.count - 1
+
+        while index >= 0 {
+            let existing = bufferedStreamMutations[index]
+
+            guard existing.directory == mutation.directory, existing.sessionID == mutation.sessionID else {
+                index -= 1
+                continue
+            }
+
+            if let mergedMutation = existing.merged(with: mutation) {
+                bufferedStreamMutations[index] = mergedMutation
+                scheduleBufferedStreamFlush()
+                return
+            }
+
+            switch (existing, mutation) {
+            case let (.upsertMessagePart(directory, sessionID, part, _), .applyMessagePartDelta(_, _, partID, field, delta, modelContextLimits))
+                where part.id == partID:
+                var updatedPart = part
+                updatedPart.apply(delta: delta, to: field)
+                mutation = .upsertMessagePart(
+                    directory: directory,
+                    sessionID: sessionID,
+                    part: updatedPart,
+                    modelContextLimits: modelContextLimits
+                )
+                bufferedStreamMutations[index] = mutation
+                scheduleBufferedStreamFlush()
+                return
+
+            case let (.applyMessagePartDelta(_, _, partID, field, delta, _), .upsertMessagePart(directory, sessionID, part, modelContextLimits))
+                where part.id == partID:
+                var updatedPart = part
+                updatedPart.apply(delta: delta, to: field)
+                mutation = .upsertMessagePart(
+                    directory: directory,
+                    sessionID: sessionID,
+                    part: updatedPart,
+                    modelContextLimits: modelContextLimits
+                )
+                bufferedStreamMutations.remove(at: index)
+
+            case let (.upsertMessagePart(_, _, part, _), .upsertMessagePart(directory, sessionID, newPart, modelContextLimits))
+                where part.id == newPart.id:
+                mutation = .upsertMessagePart(
+                    directory: directory,
+                    sessionID: sessionID,
+                    part: newPart,
+                    modelContextLimits: modelContextLimits
+                )
+                bufferedStreamMutations[index] = mutation
+                scheduleBufferedStreamFlush()
+                return
+
+            case let (.upsertMessageInfo(_, _, info, _), .upsertMessageInfo(directory, sessionID, newInfo, modelContextLimits))
+                where info.id == newInfo.id:
+                mutation = .upsertMessageInfo(
+                    directory: directory,
+                    sessionID: sessionID,
+                    info: newInfo,
+                    modelContextLimits: modelContextLimits
+                )
+                bufferedStreamMutations[index] = mutation
+                scheduleBufferedStreamFlush()
+                return
+
+            case let (_, .removeMessagePart(_, _, partID, _))
+                where existing.partID == partID:
+                bufferedStreamMutations.remove(at: index)
+
+            default:
+                break
+            }
+
+            index -= 1
         }
+
+        bufferedStreamMutations.append(mutation)
 
         scheduleBufferedStreamFlush()
     }
@@ -581,18 +696,11 @@ actor PersistenceRepository {
     }
 
     private static func decodeMessage(_ entity: MessageEntity, partsByMessageID: [String: [MessagePartEntity]]) -> MessageEnvelope? {
-        if let decoded = PersistenceCoders.decode(MessageEnvelope.self, from: entity.payloadJSON) {
-            let parts = (partsByMessageID[decoded.id] ?? []).compactMap(decodePart).sorted {
-                ($0.time?.start ?? 0) < ($1.time?.start ?? 0)
-            }
-            return MessageEnvelope(info: decoded.info, parts: parts.isEmpty ? decoded.parts : parts)
-        }
-
         guard let id = entity.id,
               let sessionID = entity.sessionID,
               let roleRaw = entity.roleRaw else { return nil }
 
-        let info = MessageInfo(
+        let fallbackInfo = MessageInfo(
             id: id,
             sessionID: sessionID,
             role: MessageRole(rawString: roleRaw),
@@ -617,11 +725,45 @@ actor PersistenceRepository {
             error: PersistenceCoders.decode(JSONValue.self, from: entity.errorJSON)
         )
 
+        let info: MessageInfo
+        let decodedParts: [MessagePart]
+
+        if let decoded = PersistenceCoders.decode(MessageEnvelope.self, from: entity.payloadJSON) {
+            var decodedInfo = decoded.info
+
+            if decodedInfo.model == nil, let model = fallbackInfo.model {
+                decodedInfo = MessageInfo(
+                    id: decodedInfo.id,
+                    sessionID: decodedInfo.sessionID,
+                    role: decodedInfo.role,
+                    time: decodedInfo.time,
+                    parentID: decodedInfo.parentID,
+                    agent: decodedInfo.agent,
+                    model: model,
+                    modelID: fallbackInfo.modelID,
+                    providerID: fallbackInfo.providerID,
+                    mode: decodedInfo.mode,
+                    path: decodedInfo.path,
+                    cost: decodedInfo.cost,
+                    tokens: decodedInfo.tokens,
+                    finish: decodedInfo.finish,
+                    summary: decodedInfo.summary,
+                    error: decodedInfo.error
+                )
+            }
+
+            info = decodedInfo
+            decodedParts = decoded.parts
+        } else {
+            info = fallbackInfo
+            decodedParts = []
+        }
+
         let parts = (partsByMessageID[id] ?? []).compactMap(decodePart).sorted {
             ($0.time?.start ?? 0) < ($1.time?.start ?? 0)
         }
 
-        return MessageEnvelope(info: info, parts: parts)
+        return MessageEnvelope(info: info, parts: parts.isEmpty ? decodedParts : parts)
     }
 
     private static func decodePart(_ entity: MessagePartEntity) -> MessagePart? {

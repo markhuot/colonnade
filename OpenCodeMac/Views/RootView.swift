@@ -37,11 +37,6 @@ struct RootView: View {
         }
         .background(theme.windowBackground)
         .themedWindow(theme)
-        .background(
-            FocusedSessionTimelineKeyHandler { direction in
-                appState.scrollFocusedSessionTimeline(to: direction)
-            }
-        )
     }
 }
 
@@ -103,7 +98,7 @@ private struct SidebarView: View {
             }
         }
         .overlay {
-            if appState.isLoading {
+            if appState.isLoading && appState.selectedDirectory != nil && appState.sessions.isEmpty {
                 ProgressView()
                     .controlSize(.large)
             }
@@ -225,7 +220,7 @@ private struct SessionRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            SessionStatusIcon(color: indicator.color)
+            SessionStatusIcon(color: indicator.color())
                 .padding(.top, 5)
 
             VStack(alignment: .leading, spacing: 4) {

@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import XCTest
 @testable import OpenCode
 
@@ -52,6 +53,120 @@ final class MessageInfoTests: XCTestCase {
 
         XCTAssertEqual(info.modelContextKey, ModelContextKey(providerID: "anthropic", modelID: "claude-sonnet"))
     }
+
+    func testLatestReasoningTitlePrefersStructuredMetadata() {
+        let message = MessageEnvelope(
+            info: MessageInfo(
+                id: "message-1",
+                sessionID: "session-1",
+                role: .assistant,
+                time: .init(created: 1_234, completed: nil),
+                parentID: nil,
+                agent: nil,
+                model: nil,
+                modelID: nil,
+                providerID: nil,
+                mode: nil,
+                path: nil,
+                cost: nil,
+                tokens: nil,
+                finish: nil,
+                summary: nil,
+                error: nil
+            ),
+            parts: [
+                MessagePart(
+                    id: "reasoning-1",
+                    sessionID: "session-1",
+                    messageID: "message-1",
+                    type: .reasoning,
+                    text: "Longer body that should not be used as the title.",
+                    synthetic: nil,
+                    ignored: nil,
+                    time: nil,
+                    metadata: ["title": .string("Inspecting prompt UI")],
+                    callID: nil,
+                    tool: nil,
+                    state: nil,
+                    mime: nil,
+                    filename: nil,
+                    url: nil,
+                    reason: nil,
+                    cost: nil,
+                    tokens: nil,
+                    prompt: nil,
+                    description: nil,
+                    agent: nil,
+                    model: nil,
+                    command: nil,
+                    name: nil,
+                    source: nil,
+                    hash: nil,
+                    files: nil,
+                    snapshot: nil
+                )
+            ]
+        )
+
+        XCTAssertEqual(message.latestReasoningTitle, "Inspecting prompt UI")
+    }
+
+    func testLatestReasoningTitleFallsBackToFirstShortLine() {
+        let message = MessageEnvelope(
+            info: MessageInfo(
+                id: "message-1",
+                sessionID: "session-1",
+                role: .assistant,
+                time: .init(created: 1_234, completed: nil),
+                parentID: nil,
+                agent: nil,
+                model: nil,
+                modelID: nil,
+                providerID: nil,
+                mode: nil,
+                path: nil,
+                cost: nil,
+                tokens: nil,
+                finish: nil,
+                summary: nil,
+                error: nil
+            ),
+            parts: [
+                MessagePart(
+                    id: "reasoning-1",
+                    sessionID: "session-1",
+                    messageID: "message-1",
+                    type: .reasoning,
+                    text: "# Inspecting thinking blocks\n\nWorking through the longer explanation.",
+                    synthetic: nil,
+                    ignored: nil,
+                    time: nil,
+                    metadata: nil,
+                    callID: nil,
+                    tool: nil,
+                    state: nil,
+                    mime: nil,
+                    filename: nil,
+                    url: nil,
+                    reason: nil,
+                    cost: nil,
+                    tokens: nil,
+                    prompt: nil,
+                    description: nil,
+                    agent: nil,
+                    model: nil,
+                    command: nil,
+                    name: nil,
+                    source: nil,
+                    hash: nil,
+                    files: nil,
+                    snapshot: nil
+                )
+            ]
+        )
+
+        XCTAssertEqual(message.latestReasoningTitle, "Inspecting thinking blocks")
+    }
 }
 
 final class ThemeControllerTests: XCTestCase {
@@ -79,6 +194,89 @@ final class ThemeControllerTests: XCTestCase {
 
         XCTAssertEqual(controller.selectedThemeID, .nord)
         XCTAssertEqual(defaults.string(forKey: ThemeController.Constants.selectedThemeKey), OpenCodeThemeID.nord.rawValue)
+    }
+}
+
+final class LocalServerPreferencesControllerTests: XCTestCase {
+    @MainActor
+    func testLocalServerPreferencesDefaultsToBunInstallPath() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+
+        let controller = LocalServerPreferencesController(defaults: defaults)
+
+        XCTAssertEqual(controller.opencodeExecutablePath, "~/.bun/bin/opencode")
+        XCTAssertNil(defaults.string(forKey: LocalServerPreferencesController.Constants.opencodeExecutablePathKey))
+    }
+
+    @MainActor
+    func testLocalServerPreferencesPersistsCustomPath() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+
+        let controller = LocalServerPreferencesController(defaults: defaults)
+        controller.setOpencodeExecutablePath("/opt/homebrew/bin/opencode")
+
+        XCTAssertEqual(controller.opencodeExecutablePath, "/opt/homebrew/bin/opencode")
+        XCTAssertEqual(defaults.string(forKey: LocalServerPreferencesController.Constants.opencodeExecutablePathKey), "/opt/homebrew/bin/opencode")
+    }
+
+    @MainActor
+    func testLocalServerPreferencesResetBlankPathToDefault() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        defaults.set("/tmp/opencode", forKey: LocalServerPreferencesController.Constants.opencodeExecutablePathKey)
+
+        let controller = LocalServerPreferencesController(defaults: defaults)
+        controller.setOpencodeExecutablePath("   ")
+
+        XCTAssertEqual(controller.opencodeExecutablePath, "~/.bun/bin/opencode")
+        XCTAssertNil(defaults.string(forKey: LocalServerPreferencesController.Constants.opencodeExecutablePathKey))
+    }
+}
+
+final class LocalServerLifecycleTests: XCTestCase {
+    func testShutdownAllStopsRegisteredProcesses() throws {
+        let logger = Logger(subsystem: "ai.opencode.app", category: "test")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "sleep 30"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        let source = DispatchSource.makeReadSource(fileDescriptor: pipe.fileHandleForReading.fileDescriptor, queue: .global())
+        source.setEventHandler {
+            _ = pipe.fileHandleForReading.availableData
+        }
+        source.setCancelHandler {
+            try? pipe.fileHandleForReading.close()
+        }
+        source.resume()
+
+        try process.run()
+
+        let storage = LocalServerProcessStorage(process: process, outputSource: source, logger: logger, onShutdown: nil)
+        LocalServerLifecycle.shared.register(storage)
+        LocalServerLauncher.shutdownAll()
+
+        let expectation = XCTestExpectation(description: "process exits")
+        DispatchQueue.global().async {
+            process.waitUntilExit()
+            expectation.fulfill()
+        }
+
+        wait(for: [expectation], timeout: 5)
+        XCTAssertFalse(process.isRunning)
+    }
+}
+
+final class SessionStatusTests: XCTestCase {
+    func testBusyStatesAreThinkingActive() {
+        XCTAssertTrue(SessionStatus.busy.isThinkingActive)
+        XCTAssertTrue(SessionStatus.retry(attempt: 1, message: "Retrying", next: 0).isThinkingActive)
+        XCTAssertFalse(SessionStatus.idle.isThinkingActive)
+        XCTAssertFalse(SessionStatus.unknown("paused").isThinkingActive)
     }
 }
 
@@ -209,9 +407,81 @@ final class MessagePartToolPresentationTests: XCTestCase {
 
         XCTAssertEqual(summary.action, "Shows working tree status")
         XCTAssertNil(summary.target)
+        XCTAssertEqual(summary.iconSystemName, "terminal")
         XCTAssertEqual(presentation.detailFields, [ToolDetailField(title: "Command", value: "git status --short")])
         XCTAssertEqual(presentation.statusLabel, "Running")
         XCTAssertNil(presentation.fallbackDetail)
+    }
+
+    func testSearchPresentationUsesMagnifyingGlassIcon() {
+        let part = makeToolMessagePart(
+            tool: "functions.grep",
+            input: [
+                "pattern": .string("todo")
+            ]
+        )
+
+        let presentation = part.toolPresentation
+
+        guard case let .standard(summary) = presentation.summaryStyle else {
+            return XCTFail("Expected standard summary style")
+        }
+
+        XCTAssertEqual(summary.action, "Search")
+        XCTAssertEqual(summary.target, "todo")
+        XCTAssertEqual(summary.iconSystemName, "magnifyingglass")
+    }
+
+    func testWritePresentationUsesGenericIcon() {
+        let part = makeToolMessagePart(
+            tool: "functions.write",
+            input: [
+                "filePath": .string("/tmp/Notes.swift")
+            ]
+        )
+
+        let presentation = part.toolPresentation
+
+        guard case let .standard(summary) = presentation.summaryStyle else {
+            return XCTFail("Expected standard summary style")
+        }
+
+        XCTAssertEqual(summary.action, "Write")
+        XCTAssertEqual(summary.target, "Notes.swift")
+        XCTAssertEqual(summary.iconSystemName, ToolCallSummary.genericIconSystemName)
+    }
+
+    func testTodoPresentationUsesPinIcon() {
+        let part = makeToolMessagePart(tool: "functions.todowrite")
+
+        let presentation = part.toolPresentation
+
+        guard case let .standard(summary) = presentation.summaryStyle else {
+            return XCTFail("Expected standard summary style")
+        }
+
+        XCTAssertEqual(summary.action, "Todo")
+        XCTAssertNil(summary.target)
+        XCTAssertEqual(summary.iconSystemName, "pin")
+    }
+
+    func testWebFetchPresentationUsesGlobeIcon() {
+        let part = makeToolMessagePart(
+            tool: "functions.webfetch",
+            input: [
+                "url": .string("https://example.com")
+            ]
+        )
+
+        let presentation = part.toolPresentation
+
+        guard case let .standard(summary) = presentation.summaryStyle else {
+            return XCTFail("Expected standard summary style")
+        }
+
+        XCTAssertEqual(summary.action, "Fetch")
+        XCTAssertEqual(summary.target, "https://example.com")
+        XCTAssertEqual(summary.iconSystemName, "globe")
     }
 
     func testReadPresentationUsesDedicatedSummaryStyle() {
@@ -242,6 +512,7 @@ final class MessagePartToolPresentationTests: XCTestCase {
         }
 
         XCTAssertEqual(summary.action, "Custom Tool")
+        XCTAssertEqual(summary.iconSystemName, ToolCallSummary.genericIconSystemName)
         XCTAssertEqual(presentation.statusLabel, "Pending")
         XCTAssertEqual(presentation.fallbackDetail, "Pending")
         XCTAssertTrue(presentation.detailFields.isEmpty)
@@ -356,29 +627,6 @@ final class OpenCodeAppModelTests: XCTestCase {
         XCTAssertEqual(workspaceService.sendMessageCalls.first?.model, ModelReference(providerID: "anthropic", modelID: "claude-sonnet"))
         let refreshedMessages = await coordinator.refreshedMessageSessionIDsSnapshot()
         XCTAssertEqual(refreshedMessages.suffix(1), [session.id])
-    }
-
-    func testScrollFocusedSessionTimelineTargetsFocusedSession() {
-        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
-        appState.focusedSessionID = "session-1"
-
-        appState.scrollFocusedSessionTimeline(to: .top)
-
-        XCTAssertEqual(appState.focusedSessionScrollRequest?.sessionID, "session-1")
-        XCTAssertEqual(appState.focusedSessionScrollRequest?.direction, .top)
-    }
-
-    func testScrollFocusedSessionTimelineGeneratesUniqueRequests() {
-        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
-        appState.focusedSessionID = "session-1"
-
-        appState.scrollFocusedSessionTimeline(to: .bottom)
-        let firstRequest = appState.focusedSessionScrollRequest
-        appState.scrollFocusedSessionTimeline(to: .bottom)
-
-        XCTAssertEqual(appState.focusedSessionScrollRequest?.sessionID, "session-1")
-        XCTAssertEqual(appState.focusedSessionScrollRequest?.direction, .bottom)
-        XCTAssertNotEqual(appState.focusedSessionScrollRequest?.id, firstRequest?.id)
     }
 
     func testFocusPreviousPaneMovesFocusAndRequestsPromptFocus() {
@@ -579,6 +827,201 @@ final class OpenCodeAppModelTests: XCTestCase {
         XCTAssertEqual(appState.focusedSessionID, visibleSession.id)
     }
 
+    func testLoadUsesPersistedSessionsImmediatelyAndRefreshesInBackground() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let cachedSession = makeSession(id: "session-cached", directory: directory, updatedAt: 1_000)
+        let freshSession = makeSession(id: "session-fresh", directory: directory, updatedAt: 3_000)
+
+        await repository.applyWorkspaceSnapshot(
+            directory: directory,
+            snapshot: WorkspaceSnapshot(sessions: [cachedSession], statuses: [:], questions: [], permissions: []),
+            modelContextLimits: [:],
+            openSessionIDs: [cachedSession.id]
+        )
+        await repository.savePanes(
+            directory: directory,
+            panes: [
+                SessionPaneState(sessionID: cachedSession.id, position: 0, width: 640, isHidden: false)
+            ]
+        )
+
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [freshSession, cachedSession], statuses: [:], questions: [], permissions: [])
+        )
+        workspaceService.loadWorkspaceDelay = .milliseconds(300)
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: true
+        )
+
+        let clock = ContinuousClock()
+        let start = clock.now
+        await appState.load(directory: directory)
+        let elapsed = start.duration(to: clock.now)
+
+        XCTAssertLessThan(durationMilliseconds(elapsed), 250)
+        XCTAssertFalse(appState.isLoading)
+        XCTAssertEqual(appState.sessions.map(\.id), [cachedSession.id])
+        XCTAssertEqual(appState.openSessionIDs, [cachedSession.id])
+        XCTAssertEqual(appState.focusedSessionID, cachedSession.id)
+
+        try await waitForAsyncWork(milliseconds: 450)
+
+        XCTAssertEqual(appState.sessions.map(\.id), [freshSession.id, cachedSession.id])
+        let refreshedMessages = await coordinator.refreshedMessageSessionIDsSnapshot()
+        XCTAssertEqual(refreshedMessages, [cachedSession.id])
+    }
+
+    func testLoadWithCachedDataSurfacesBackgroundRefreshErrorsWithoutDroppingCache() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let cachedSession = makeSession(id: "session-cached", directory: directory, updatedAt: 1_000)
+
+        await repository.applyWorkspaceSnapshot(
+            directory: directory,
+            snapshot: WorkspaceSnapshot(sessions: [cachedSession], statuses: [:], questions: [], permissions: []),
+            modelContextLimits: [:],
+            openSessionIDs: [cachedSession.id]
+        )
+
+        let workspaceService = MockWorkspaceService()
+        workspaceService.loadWorkspaceDelay = .milliseconds(200)
+        workspaceService.loadWorkspaceError = URLError(.cannotConnectToHost)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+
+        XCTAssertFalse(appState.isLoading)
+        XCTAssertEqual(appState.sessions.map(\.id), [cachedSession.id])
+        XCTAssertNil(appState.errorMessage)
+
+        try await waitForAsyncWork(milliseconds: 350)
+
+        XCTAssertEqual(appState.sessions.map(\.id), [cachedSession.id])
+        XCTAssertNotNil(appState.errorMessage)
+    }
+
+    func testBootstrapRestoresLastSelectedDirectoryIntoBackgroundLoad() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let cachedSession = makeSession(id: "session-cached", directory: directory, updatedAt: 1_000)
+
+        await repository.applyWorkspaceSnapshot(
+            directory: directory,
+            snapshot: WorkspaceSnapshot(sessions: [cachedSession], statuses: [:], questions: [], permissions: []),
+            modelContextLimits: [:],
+            openSessionIDs: [cachedSession.id]
+        )
+        await repository.savePanes(
+            directory: directory,
+            panes: [
+                SessionPaneState(sessionID: cachedSession.id, position: 0, width: 640, isHidden: false)
+            ]
+        )
+        await repository.selectWorkspace(directory: directory)
+
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [cachedSession], statuses: [:], questions: [], permissions: [])
+        )
+        workspaceService.loadWorkspaceDelay = .milliseconds(250)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            persistsWorkspacePaneState: true,
+            restoresLastSelectedDirectory: true
+        )
+
+        await appState.bootstrapIfNeeded()
+
+        try await waitForAsyncWork(milliseconds: 100)
+
+        XCTAssertEqual(appState.selectedDirectory, directory)
+        XCTAssertEqual(appState.openSessionIDs, [cachedSession.id])
+        XCTAssertEqual(appState.focusedSessionID, cachedSession.id)
+        XCTAssertFalse(appState.isLoading)
+
+        try await waitForAsyncWork(milliseconds: 350)
+
+        XCTAssertEqual(appState.sessions.map(\.id), [cachedSession.id])
+        XCTAssertEqual(workspaceService.loadWorkspaceDirectories, [directory])
+    }
+
+    func testBootstrapUsesConfiguredRestoredConnectionBeforePersistenceFallback() async throws {
+        let directory = "/remote/project"
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let cachedSession = makeSession(id: "session-remote", directory: directory, updatedAt: 1_000)
+
+        await repository.applyWorkspaceSnapshot(
+            directory: directory,
+            snapshot: WorkspaceSnapshot(sessions: [cachedSession], statuses: [:], questions: [], permissions: []),
+            modelContextLimits: [:],
+            openSessionIDs: [cachedSession.id]
+        )
+
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [cachedSession], statuses: [:], questions: [], permissions: [])
+        )
+        workspaceService.loadWorkspaceDelay = .milliseconds(250)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            persistsWorkspacePaneState: true,
+            restoresLastSelectedDirectory: false,
+            initialServerURL: URL(string: "https://example.com")!
+        )
+        appState.configureBootstrapRestoredConnection(
+            WorkspaceConnection(serverURL: URL(string: "https://example.com")!, directory: directory)
+        )
+
+        await appState.bootstrapIfNeeded()
+
+        try await waitForAsyncWork(milliseconds: 100)
+
+        XCTAssertEqual(appState.serverURL.absoluteString, "https://example.com")
+        XCTAssertEqual(appState.selectedDirectory, directory)
+        XCTAssertEqual(appState.openSessionIDs, [cachedSession.id])
+        XCTAssertEqual(appState.focusedSessionID, cachedSession.id)
+        XCTAssertFalse(appState.isLoading)
+
+        try await waitForAsyncWork(milliseconds: 350)
+
+        XCTAssertEqual(appState.sessions.map(\.id), [cachedSession.id])
+        XCTAssertEqual(workspaceService.loadWorkspaceDirectories, [directory])
+    }
+
+    func testBootstrapIgnoresMissingConfiguredLocalRestorationAndShowsChooser() async throws {
+        let appState = OpenCodeAppModel(
+            repository: PersistenceRepository(persistence: PersistenceController(inMemory: true)),
+            persistsWorkspacePaneState: false,
+            restoresLastSelectedDirectory: false
+        )
+        appState.configureBootstrapRestoredConnection(
+            WorkspaceConnection(serverURL: OpenCodeAppModel.defaultServerURL, directory: "/definitely/missing/directory")
+        )
+
+        await appState.bootstrapIfNeeded()
+
+        XCTAssertNil(appState.selectedDirectory)
+        XCTAssertEqual(appState.launchStage, .chooseServerMode)
+    }
+
     func testLoadFailureRestoresPreviousWorkspaceState() async throws {
         let firstDirectory = try makeTemporaryDirectory()
         let secondDirectory = try makeTemporaryDirectory()
@@ -649,7 +1092,7 @@ final class OpenCodeAppModelTests: XCTestCase {
         let appState = OpenCodeAppModel(
             repository: PersistenceRepository(persistence: PersistenceController(inMemory: true)),
             persistsWorkspacePaneState: false,
-            localServerStarter: {
+            localServerStarter: { _ in
                 Task {
                     await probe.recordStart()
                 }
@@ -663,7 +1106,7 @@ final class OpenCodeAppModelTests: XCTestCase {
             },
             serverWaiter: { url, timeout in
                 await probe.recordWait(url: url, timeout: timeout)
-                return true
+                return .reached
             }
         )
 
@@ -688,7 +1131,7 @@ final class OpenCodeAppModelTests: XCTestCase {
         let appState = OpenCodeAppModel(
             repository: PersistenceRepository(persistence: PersistenceController(inMemory: true)),
             persistsWorkspacePaneState: false,
-            localServerStarter: {
+            localServerStarter: { _ in
                 Task {
                     await probe.recordStart()
                 }
@@ -697,7 +1140,7 @@ final class OpenCodeAppModelTests: XCTestCase {
             apiClientProviderOverride: { _ in client },
             serverWaiter: { url, timeout in
                 await probe.recordWait(url: url, timeout: timeout)
-                return true
+                return .reached
             }
         )
 
@@ -713,6 +1156,63 @@ final class OpenCodeAppModelTests: XCTestCase {
         let snapshot = await probe.snapshot()
         XCTAssertEqual(snapshot.startedCount, 1)
         XCTAssertEqual(snapshot.chooserCount, 1)
+    }
+
+    func testOpenLocalDirectoryTimeoutSurfacesLastHealthCheckFailure() async throws {
+        let client = MockOpenCodeAPIClient(health: .init(healthy: false, version: "1.0.0"))
+
+        let appState = OpenCodeAppModel(
+            repository: PersistenceRepository(persistence: PersistenceController(inMemory: true)),
+            persistsWorkspacePaneState: false,
+            localServerStarter: { _ in
+                LocalServerLaunchHandle()
+            },
+            apiClientProviderOverride: { _ in client },
+            serverWaiter: { _, _ in
+                .timedOut(lastFailureDescription: "Health check at http://127.0.0.1:4096/global/health failed: The operation couldn't be completed. (NSURLErrorDomain error -1004.)")
+            }
+        )
+
+        appState.openLocalDirectory()
+        try await waitForAsyncWork()
+
+        XCTAssertEqual(
+            appState.errorMessage,
+            "The local opencode server did not start on :4096 in time.\n\nLast health check: Health check at http://127.0.0.1:4096/global/health failed: The operation couldn't be completed. (NSURLErrorDomain error -1004.)"
+        )
+        XCTAssertFalse(appState.isStartingLocalServer)
+    }
+
+    func testOpenLocalDirectoryPassesConfiguredExecutablePathToStarter() async throws {
+        let client = MockOpenCodeAPIClient(health: .init(healthy: false, version: "1.0.0"))
+        let probe = LocalServerProbe()
+        let executablePath = "/custom/bin/opencode"
+        let startedPath = SynchronizedBox<String?>(nil)
+
+        let appState = OpenCodeAppModel(
+            repository: PersistenceRepository(persistence: PersistenceController(inMemory: true)),
+            persistsWorkspacePaneState: false,
+            localServerStarter: { path in
+                startedPath.set(path)
+                Task {
+                    await probe.recordStart()
+                }
+                return LocalServerLaunchHandle()
+            },
+            localServerExecutablePathProvider: { executablePath },
+            apiClientProviderOverride: { _ in client },
+            directoryChooser: {
+                Task {
+                    await probe.recordChooser()
+                }
+            },
+            serverWaiter: { _, _ in .reached }
+        )
+
+        appState.openLocalDirectory()
+        try await waitForAsyncWork()
+
+        XCTAssertEqual(startedPath.get(), executablePath)
     }
 
     func testArchiveSessionUsesInjectedServiceAndUpdatesOpenSessions() async throws {
@@ -851,10 +1351,181 @@ final class OpenCodeAppModelTests: XCTestCase {
         )
 
         await appState.load(directory: directory)
+        try await waitForAsyncWork(milliseconds: 100)
 
         XCTAssertEqual(appState.selectedModelOption(for: session.id)?.reference, ModelReference(providerID: "openai", modelID: "gpt-4.1"))
         XCTAssertEqual(appState.selectedThinkingLevel(for: session.id), OpenCodeAppModel.defaultThinkingLevel)
         XCTAssertEqual(appState.modelOptions(for: session.id).first?.reference, ModelReference(providerID: "openai", modelID: "gpt-4.1"))
+    }
+
+    func testLoadPrefersLocalDefaultModelWhenNoRecentModelExists() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let session = makeSession(id: "session-1", directory: directory)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
+        )
+        workspaceService.modelCatalogResult = makeRichModelCatalog()
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            persistsWorkspacePaneState: false,
+            preferredDefaultModelReferenceProvider: {
+                ModelReference(providerID: "openai", modelID: "gpt-4.1")
+            }
+        )
+
+        await appState.load(directory: directory)
+
+        XCTAssertEqual(appState.selectedModelOption(for: session.id)?.reference, ModelReference(providerID: "openai", modelID: "gpt-4.1"))
+        XCTAssertEqual(appState.modelOptions(for: session.id).first?.reference, ModelReference(providerID: "openai", modelID: "gpt-4.1"))
+    }
+
+    func testLoadPrefersRecentAgentSelection() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let session = makeSession(id: "session-1", directory: directory)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
+        )
+        workspaceService.agentCatalogResult = .init(agents: [
+            .init(id: "build", name: "Build", description: nil),
+            .init(id: "planner", name: "Planner", description: nil)
+        ])
+
+        await repository.applyWorkspaceSnapshot(
+            directory: directory,
+            snapshot: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: []),
+            modelContextLimits: [:],
+            openSessionIDs: [session.id]
+        )
+        await repository.upsertMessageInfo(
+            directory: directory,
+            sessionID: session.id,
+            info: MessageInfo(
+                id: "message-1",
+                sessionID: session.id,
+                role: .assistant,
+                time: .init(created: 2_000, completed: nil),
+                parentID: nil,
+                agent: "planner",
+                model: nil,
+                modelID: nil,
+                providerID: nil,
+                mode: nil,
+                path: nil,
+                cost: nil,
+                tokens: nil,
+                finish: nil,
+                summary: nil,
+                error: nil
+            ),
+            modelContextLimits: [:]
+        )
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+        try await waitForAsyncWork(milliseconds: 100)
+
+        XCTAssertEqual(appState.selectedAgentOption(for: session.id)?.id, "planner")
+        XCTAssertEqual(appState.agentOptions(for: session.id).first?.id, "planner")
+    }
+
+    func testSetSelectedModelWithUpdateDefaultPersistsPreferredDefault() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let session = makeSession(id: "session-1", directory: directory)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
+        )
+        workspaceService.modelCatalogResult = makeRichModelCatalog()
+        let preferenceRecorder = PreferenceRecorder()
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            persistsWorkspacePaneState: false,
+            preferredDefaultModelReferenceProvider: { preferenceRecorder.value },
+            preferredDefaultModelReferenceSetter: { preferenceRecorder.value = $0 }
+        )
+
+        await appState.load(directory: directory)
+        appState.setSelectedModel("openai/gpt-4.1", for: session.id, updateDefault: true)
+
+        XCTAssertEqual(preferenceRecorder.value, ModelReference(providerID: "openai", modelID: "gpt-4.1"))
+        XCTAssertEqual(appState.preferredDefaultModelReference, ModelReference(providerID: "openai", modelID: "gpt-4.1"))
+    }
+
+    func testCreateSessionUsesLocalDefaultModelForNewSession() async throws {
+        let directory = "/tmp/project"
+        let connection = WorkspaceConnection(serverURL: OpenCodeAppModel.defaultServerURL, directory: directory)
+        let session = makeSession(id: "created-session", directory: directory)
+        let repository = PersistenceRepository(persistence: PersistenceController(inMemory: true))
+        let workspaceService = MockWorkspaceService(createSessionResult: session)
+        workspaceService.modelCatalogResult = makeRichModelCatalog()
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false,
+            initialDirectory: directory,
+            preferredDefaultModelReferenceProvider: {
+                ModelReference(providerID: "openai", modelID: "gpt-4.1")
+            }
+        )
+
+        await appState.load(directory: directory)
+        appState.createSession()
+        try await Task.sleep(for: .milliseconds(150))
+
+        XCTAssertEqual(workspaceService.createSessionCalls, [.init(directory: directory, title: nil, parentID: nil)])
+        XCTAssertEqual(appState.selectedModelOption(for: session.id)?.reference, ModelReference(providerID: "openai", modelID: "gpt-4.1"))
+        let resolvedCoordinator = await registry.coordinator(for: connection) as? MockWorkspaceSyncCoordinator
+        XCTAssertTrue(resolvedCoordinator === coordinator)
+    }
+
+    func testSendMessageIncludesSelectedAgent() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let session = makeSession(id: "session-1", directory: directory)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
+        )
+        workspaceService.agentCatalogResult = .init(agents: [
+            .init(id: "build", name: "Build", description: nil),
+            .init(id: "planner", name: "Planner", description: nil)
+        ])
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+        appState.setSelectedAgent("planner", for: session.id)
+        appState.drafts[session.id] = "Hello world"
+
+        appState.sendMessage(sessionID: session.id)
+        try await waitForAsyncWork()
+
+        XCTAssertEqual(workspaceService.sendMessageCalls.first?.agent, "planner")
     }
 
     func testSendMessageFailureRestoresDraftAndSetsError() async throws {
@@ -885,28 +1556,6 @@ final class OpenCodeAppModelTests: XCTestCase {
         XCTAssertEqual(appState.drafts[session.id], "Hello world")
         XCTAssertNotNil(appState.errorMessage)
         XCTAssertEqual(workspaceService.sendMessageCalls.count, 1)
-    }
-}
-
-final class FocusedSessionTimelineKeyEventTests: XCTestCase {
-    func testScrollDirectionMapsHomeAndEndKeys() {
-        XCTAssertEqual(
-            FocusedSessionTimelineKeyEvent.scrollDirection(keyCode: 115, modifiers: [], isTextInputActive: false),
-            .top
-        )
-        XCTAssertEqual(
-            FocusedSessionTimelineKeyEvent.scrollDirection(keyCode: 119, modifiers: [], isTextInputActive: false),
-            .bottom
-        )
-    }
-
-    func testScrollDirectionIgnoresTextInputAndModifiedKeys() {
-        XCTAssertNil(
-            FocusedSessionTimelineKeyEvent.scrollDirection(keyCode: 115, modifiers: [], isTextInputActive: true)
-        )
-        XCTAssertNil(
-            FocusedSessionTimelineKeyEvent.scrollDirection(keyCode: 119, modifiers: [.shift], isTextInputActive: false)
-        )
     }
 }
 
@@ -1315,6 +1964,7 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
         let directory: String
         let sessionID: String
         let text: String
+        let agent: String?
         let model: ModelReference?
         let variant: String?
     }
@@ -1351,9 +2001,11 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
     var messagesResult: [String: [MessageEnvelope]]
     var todosResult: [String: [SessionTodo]]
     var statusesResult: [String: SessionStatus]
+    var agentCatalogResult: AgentCatalog
     var modelContextLimitsResult: [ModelContextKey: Int]
     var modelCatalogResult: ModelCatalog
     var loadWorkspaceError: Error?
+    var loadWorkspaceDelay: Duration?
     var sendMessageError: Error?
 
     private(set) var loadWorkspaceDirectories: [String] = []
@@ -1378,6 +2030,7 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
         messagesResult: [String: [MessageEnvelope]] = [:],
         todosResult: [String: [SessionTodo]] = [:],
         statusesResult: [String: SessionStatus] = [:],
+        agentCatalogResult: AgentCatalog = .init(agents: []),
         modelContextLimitsResult: [ModelContextKey: Int] = [:],
         modelCatalogResult: ModelCatalog = .init(providers: [], defaultModels: [:], connectedProviderIDs: [])
     ) {
@@ -1389,12 +2042,16 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
         self.messagesResult = messagesResult
         self.todosResult = todosResult
         self.statusesResult = statusesResult
+        self.agentCatalogResult = agentCatalogResult
         self.modelContextLimitsResult = modelContextLimitsResult
         self.modelCatalogResult = modelCatalogResult
     }
 
     func loadWorkspace(directory: String) async throws -> WorkspaceSnapshot {
         record { loadWorkspaceDirectories.append(directory) }
+        if let loadWorkspaceDelay {
+            try? await Task.sleep(for: loadWorkspaceDelay)
+        }
         if let loadWorkspaceError {
             throw loadWorkspaceError
         }
@@ -1436,6 +2093,10 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
         return statusesResult
     }
 
+    func loadAgentCatalog() async throws -> AgentCatalog {
+        agentCatalogResult
+    }
+
     func loadModelContextLimits() async throws -> [ModelContextKey: Int] {
         modelContextLimitsResult
     }
@@ -1444,8 +2105,8 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
         modelCatalogResult
     }
 
-    func sendMessage(directory: String, sessionID: String, text: String, model: ModelReference?, variant: String?) async throws {
-        record { sendMessageCalls.append(.init(directory: directory, sessionID: sessionID, text: text, model: model, variant: variant)) }
+    func sendMessage(directory: String, sessionID: String, text: String, agent: String?, model: ModelReference?, variant: String?) async throws {
+        record { sendMessageCalls.append(.init(directory: directory, sessionID: sessionID, text: text, agent: agent, model: model, variant: variant)) }
         if let sendMessageError {
             throw sendMessageError
         }
@@ -1569,6 +2230,10 @@ private actor TestWorkspaceSyncRegistry: WorkspaceSyncRegistryProtocol {
     }
 }
 
+private final class PreferenceRecorder: @unchecked Sendable {
+    var value: ModelReference?
+}
+
 private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked Sendable {
     let sessionsResult: [OpenCodeSession]
     let statusesResult: [String: SessionStatus]
@@ -1576,6 +2241,7 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
     let permissionsResult: [PermissionRequest]
     let healthResult: OpenCodeServerHealth
     let projectsResult: [OpenCodeProject]
+    let agentCatalogResult: AgentCatalog
 
     private let lock = NSLock()
     private(set) var recordedDirectories: [String] = []
@@ -1588,7 +2254,8 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
         questions: [QuestionRequest] = [],
         permissions: [PermissionRequest] = [],
         health: OpenCodeServerHealth = .init(healthy: true, version: "1.0.0"),
-        projects: [OpenCodeProject] = []
+        projects: [OpenCodeProject] = [],
+        agentCatalog: AgentCatalog = .init(agents: [])
     ) {
         sessionsResult = sessions
         statusesResult = statuses
@@ -1596,6 +2263,7 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
         permissionsResult = permissions
         healthResult = health
         projectsResult = projects
+        agentCatalogResult = agentCatalog
     }
 
     func health() async throws -> OpenCodeServerHealth {
@@ -1610,6 +2278,10 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
             projectsCallCount += 1
         }
         return projectsResult
+    }
+
+    func agentCatalog() async throws -> AgentCatalog {
+        agentCatalogResult
     }
 
     func sessions(directory: String) async throws -> [OpenCodeSession] {
@@ -1642,7 +2314,7 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
         throw TestError.unimplemented
     }
 
-    func sendMessage(directory: String, sessionID: String, text: String, model: ModelReference?, variant: String?) async throws {
+    func sendMessage(directory: String, sessionID: String, text: String, agent: String?, model: ModelReference?, variant: String?) async throws {
         record(directory)
     }
 
@@ -1696,6 +2368,28 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
 
 private enum TestError: Error {
     case unimplemented
+}
+
+private final class SynchronizedBox<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value
+
+    init(_ value: Value) {
+        self.value = value
+    }
+
+    func set(_ newValue: Value) {
+        lock.lock()
+        value = newValue
+        lock.unlock()
+    }
+
+    func get() -> Value {
+        lock.lock()
+        let currentValue = value
+        lock.unlock()
+        return currentValue
+    }
 }
 
 private func makeSession(
@@ -1976,4 +2670,9 @@ private func makeTemporaryDirectory() throws -> String {
 
 private func waitForAsyncWork(milliseconds: UInt64 = 200) async throws {
     try await Task.sleep(for: .milliseconds(Int(milliseconds)))
+}
+
+private func durationMilliseconds(_ duration: Duration) -> Int64 {
+    let components = duration.components
+    return components.seconds * 1_000 + Int64(components.attoseconds / 1_000_000_000_000_000)
 }

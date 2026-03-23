@@ -20,10 +20,11 @@ private struct MarkdownContentView: View {
             .applyForegroundStyle(foregroundStyle)
             .textual.textSelection(.enabled)
             .textual.structuredTextStyle(.gitHub)
+            .textual.highlighterTheme(theme.highlighterTheme)
             .textual.codeBlockStyle(
                 OpenCodeCodeBlockStyle(
                     foregroundStyle: foregroundStyle,
-                    backgroundColor: messageRole.isAssistant ? theme.codeBlockBackground : Color.accentColor.opacity(0.12),
+                    backgroundColor: messageRole.isAssistant ? theme.codeBlockBackground : theme.userBubble,
                     alignment: contentAlignment
                 )
             )
@@ -124,6 +125,18 @@ private extension View {
     }
 }
 
+private struct PaneShadowModifier: ViewModifier {
+    let isFocused: Bool
+
+    func body(content: Content) -> some View {
+        if isFocused {
+            content.shadow(color: .black.opacity(0.20), radius: 18, x: 0, y: 8)
+        } else {
+            content
+        }
+    }
+}
+
 struct SessionColumnView: View {
     @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
@@ -139,6 +152,12 @@ struct SessionColumnView: View {
         let messages = sessionState.messages
         let questions = sessionState.questions
         let permissions = deduplicatedPermissions(sessionState.permissions)
+        let thinkingBannerTitle = latestThinkingBannerTitle(
+            session: session,
+            messages: messages,
+            questions: questions,
+            permissions: permissions
+        )
 
         VStack(spacing: 0) {
             if chrome == .pane {
@@ -150,9 +169,14 @@ struct SessionColumnView: View {
                 )
                 Divider()
             }
-            SessionTimelineView(sessionID: sessionID, messages: messages, questions: questions)
+            SessionTimelineView(
+                sessionID: sessionID,
+                messages: messages,
+                questions: questions,
+                thinkingBannerTitle: thinkingBannerTitle
+            )
             Divider()
-            SessionComposerView(sessionID: sessionID, permissions: permissions)
+            SessionComposerView(sessionID: sessionID, permissions: permissions, sessionState: sessionState)
         }
         .background(backgroundView)
         .overlay { overlayView }
@@ -182,7 +206,11 @@ struct SessionColumnView: View {
     }
 
     private var borderColor: Color {
-        appState.focusedSessionID == sessionID ? Color.accentColor.opacity(0.85) : theme.border.opacity(0.7)
+        appState.focusedSessionID == sessionID ? theme.accent.opacity(0.85) : theme.border.opacity(0.7)
+    }
+
+    private var isFocused: Bool {
+        appState.focusedSessionID == sessionID
     }
 
     @ViewBuilder
@@ -191,7 +219,7 @@ struct SessionColumnView: View {
         case .pane:
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(theme.surfaceBackground)
-                .shadow(color: .black.opacity(0.08), radius: 14, x: 0, y: 6)
+                .modifier(PaneShadowModifier(isFocused: isFocused))
         case .window:
             theme.surfaceBackground
         }
@@ -203,6 +231,19 @@ struct SessionColumnView: View {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .stroke(borderColor, lineWidth: appState.focusedSessionID == sessionID ? 2 : 1)
         }
+    }
+
+    private func latestThinkingBannerTitle(
+        session: SessionDisplay?,
+        messages: [MessageEnvelope],
+        questions: [QuestionRequest],
+        permissions: [PermissionRequest]
+    ) -> String? {
+        guard !UserDefaults.standard.bool(forKey: "showsThinking") else { return nil }
+        guard permissions.isEmpty, questions.isEmpty else { return nil }
+        guard session?.status?.isThinkingActive == true else { return nil }
+
+        return messages.reversed().compactMap(\.latestReasoningTitle).first
     }
 }
 
@@ -227,7 +268,7 @@ private struct SessionHeaderView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .top, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Button {
                             appState.closeSession(sessionID)
                         } label: {
@@ -237,11 +278,14 @@ private struct SessionHeaderView: View {
                                         .font(.caption.weight(.bold))
                                         .foregroundStyle(theme.secondaryText)
                                 } else {
-                                    SessionStatusIcon(color: indicator.color)
+                                    SessionStatusIcon(color: indicator.color())
                                 }
                             }
                             .frame(width: 14, height: 14)
-                            .padding(.top, 5)
+                            .offset(y: -6)
+                        }
+                        .alignmentGuide(.firstTextBaseline) { dimensions in
+                            dimensions[VerticalAlignment.center]
                         }
                         .buttonStyle(.plain)
                         .help("Close Pane")
@@ -282,362 +326,44 @@ private struct SessionHeaderView: View {
 }
 
 private struct SessionTimelineView: View {
-    @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
-
-    @State private var scrollMetrics = TimelineScrollMetrics.zero
-    @State private var isPinnedToBottom = true
-    @State private var autoScrollTask: Task<Void, Never>?
-    @State private var programmaticScroll: ProgrammaticTimelineScroll?
 
     let sessionID: String
     let messages: [MessageEnvelope]
     let questions: [QuestionRequest]
-
-    private let autoFollowThreshold: CGFloat = 36
-
-    private var contentSignature: TimelineContentSignature {
-        TimelineContentSignature(messages: messages, questions: questions)
-    }
+    let thinkingBannerTitle: String?
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    Color.clear
-                        .frame(height: 0)
-                        .id(topAnchorID)
-
-                    ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
-                        MessageCard(message: message, showsTimestamp: shouldShowTimestamp(for: index))
-                            .id(message.id)
-                    }
-
-                    ForEach(questions) { request in
-                        QuestionCard(request: request)
-                    }
-
-                    Color.clear
-                        .frame(height: 0)
-                        .id(bottomAnchorID)
-                }
-                .padding(18)
-                .background(
-                    TimelineScrollObserver { change in
-                        handleScrollMetricsChange(change)
-                    }
-                )
-            }
-            .defaultScrollAnchor(.bottom)
-            .background(theme.mutedSurfaceBackground.opacity(0.8))
-            .onChange(of: contentSignature) { oldValue, newValue in
-                guard shouldAutoFollow(for: oldValue, newValue) else { return }
-                scheduleAutoFollow(with: proxy)
-            }
-            .onChange(of: appState.focusedSessionScrollRequest) { _, request in
-                guard let request, request.sessionID == sessionID else { return }
-
-                switch request.direction {
-                case .top:
-                    requestScroll(to: .top, with: proxy, animated: true)
-                case .bottom:
-                    requestScroll(to: .bottom, with: proxy, animated: true)
-                }
-            }
-            .onDisappear {
-                autoScrollTask?.cancel()
-                autoScrollTask = nil
-            }
-        }
-    }
-
-    private var topAnchorID: String {
-        "session-timeline-top-\(sessionID)"
-    }
-
-    private var bottomAnchorID: String {
-        "session-timeline-bottom-\(sessionID)"
-    }
-
-    private func shouldAutoFollow(for oldValue: TimelineContentSignature?, _ newValue: TimelineContentSignature) -> Bool {
-        guard oldValue != nil else { return false }
-        return isPinnedToBottom
-    }
-
-    private func scheduleAutoFollow(with proxy: ScrollViewProxy) {
-        autoScrollTask?.cancel()
-        autoScrollTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(16))
-            requestScroll(to: .bottom, with: proxy, animated: false)
-        }
-    }
-
-    private func requestScroll(to target: TimelineScrollTarget, with proxy: ScrollViewProxy, animated: Bool, attempt: Int = 0) {
-        let request = ProgrammaticTimelineScroll(target: target)
-        programmaticScroll = request
-
-        let action = {
-            switch target {
-            case .top:
-                proxy.scrollTo(topAnchorID, anchor: .top)
-            case .bottom:
-                proxy.scrollTo(bottomAnchorID, anchor: .bottom)
-            }
-        }
-
-        if animated {
-            withAnimation(.easeOut(duration: 0.2)) {
-                action()
-            }
-        } else {
-            action()
-        }
-
-        if target == .bottom {
-            isPinnedToBottom = true
-        }
-
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(250))
-            if programmaticScroll == request {
-                let nearBottom = scrollMetrics.distanceToBottom <= autoFollowThreshold
-
-                if target == .bottom, !nearBottom, isPinnedToBottom, attempt == 0 {
-                    requestScroll(to: .bottom, with: proxy, animated: false, attempt: 1)
-                    return
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
+                    MessageCard(message: message, showsTimestamp: shouldShowTimestamp(for: index))
                 }
 
-                programmaticScroll = nil
-                isPinnedToBottom = nearBottom || scrollMetrics.contentHeight <= scrollMetrics.viewportHeight + 1
+                ForEach(questions) { request in
+                    QuestionCard(request: request)
+                }
+
+                if let thinkingBannerTitle {
+                    ThinkingStatusBanner(title: thinkingBannerTitle)
+                        .padding(.top, 4)
+                        .padding(.leading, TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.messageCardPadding))
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                            removal: .move(edge: .top).combined(with: .opacity)
+                        ))
+                }
             }
-        }
-    }
-
-    private func handleScrollMetricsChange(_ change: TimelineScrollChange) {
-        let previous = scrollMetrics
-        let metrics = change.metrics
-        scrollMetrics = metrics
-
-        if metrics.contentHeight <= metrics.viewportHeight + 1 {
-            isPinnedToBottom = true
-
-            return
+            .padding(18)
         }
 
-        let nearBottom = metrics.distanceToBottom <= autoFollowThreshold
-        let viewportHeightChanged = abs(metrics.viewportHeight - previous.viewportHeight) > 1
-
-        if let request = programmaticScroll {
-            if request.target == .bottom, nearBottom {
-                isPinnedToBottom = true
-                programmaticScroll = nil
-            }
-            return
-        }
-
-        if change.source == .user || viewportHeightChanged {
-            isPinnedToBottom = nearBottom
-            return
-        }
+        .defaultScrollAnchor(.bottom)
+        .background(theme.mutedSurfaceBackground.opacity(0.8))
     }
 
     private func shouldShowTimestamp(for index: Int) -> Bool {
         guard index > 0 else { return true }
         return messages[index].createdAt.timeIntervalSince(messages[index - 1].createdAt) > 300
-    }
-}
-
-private enum TimelineScrollTarget: Equatable {
-    case top
-    case bottom
-}
-
-private struct ProgrammaticTimelineScroll: Equatable {
-    let id = UUID()
-    let target: TimelineScrollTarget
-}
-
-private struct TimelineContentSignature: Equatable {
-    let messageCount: Int
-    let lastMessageID: String?
-    let lastVisibleTextLength: Int
-    let lastReasoningTextLength: Int
-    let lastPartCount: Int
-    let questionCount: Int
-
-    init(messages: [MessageEnvelope], questions: [QuestionRequest]) {
-        let lastMessage = messages.last
-        messageCount = messages.count
-        lastMessageID = lastMessage?.id
-        lastVisibleTextLength = lastMessage?.visibleText.count ?? 0
-        lastReasoningTextLength = lastMessage?.reasoningText.count ?? 0
-        lastPartCount = lastMessage?.parts.count ?? 0
-        questionCount = questions.count
-    }
-}
-
-private struct TimelineScrollMetrics: Equatable {
-    let verticalOffset: CGFloat
-    let viewportHeight: CGFloat
-    let contentHeight: CGFloat
-    let distanceToBottom: CGFloat
-
-    static let zero = TimelineScrollMetrics(verticalOffset: 0, viewportHeight: 0, contentHeight: 0, distanceToBottom: 0)
-}
-
-private struct TimelineScrollChange: Equatable {
-    let metrics: TimelineScrollMetrics
-    let source: TimelineScrollChangeSource
-}
-
-private enum TimelineScrollChangeSource: Equatable {
-    case user
-    case content
-    case layout
-}
-
-private struct TimelineScrollObserver: NSViewRepresentable {
-    let onChange: @MainActor (TimelineScrollChange) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onChange: onChange)
-    }
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        context.coordinator.attach(to: view)
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        Task { @MainActor in
-            context.coordinator.onChange = onChange
-            context.coordinator.attach(to: nsView)
-        }
-    }
-
-    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
-        Task { @MainActor in
-            coordinator.detach()
-        }
-    }
-
-    @MainActor
-    final class Coordinator: NSObject {
-        var onChange: (TimelineScrollChange) -> Void
-
-        private weak var observedView: NSView?
-        private weak var scrollView: NSScrollView?
-        private weak var clipView: NSClipView?
-        private weak var documentView: NSView?
-
-        init(onChange: @escaping @MainActor (TimelineScrollChange) -> Void) {
-            self.onChange = onChange
-            super.init()
-        }
-
-        func attach(to view: NSView) {
-            observedView = view
-            DispatchQueue.main.async { [weak self, weak view] in
-                guard let self, let view else { return }
-                self.installObservers(from: view)
-            }
-        }
-
-        func detach() {
-            NotificationCenter.default.removeObserver(self)
-            clipView?.postsBoundsChangedNotifications = false
-            documentView?.postsFrameChangedNotifications = false
-            scrollView = nil
-            clipView = nil
-            documentView = nil
-            observedView = nil
-        }
-
-        private func installObservers(from view: NSView) {
-            guard let scrollView = view.enclosingScrollView,
-                  let clipView = scrollView.contentView as NSClipView?,
-                  let documentView = scrollView.documentView
-            else { return }
-
-            if self.scrollView === scrollView, self.documentView === documentView {
-                publishMetrics(source: .layout)
-                return
-            }
-
-            detach()
-
-            observedView = view
-            self.scrollView = scrollView
-            self.clipView = clipView
-            self.documentView = documentView
-
-            clipView.postsBoundsChangedNotifications = true
-            documentView.postsFrameChangedNotifications = true
-
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(handleBoundsChanged),
-                name: NSView.boundsDidChangeNotification,
-                object: clipView
-            )
-
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(handleFrameChanged),
-                name: NSView.frameDidChangeNotification,
-                object: documentView
-            )
-
-            publishMetrics(source: .layout)
-        }
-
-        @objc private func handleBoundsChanged() {
-            publishMetrics(source: boundsChangeSource())
-        }
-
-        @objc private func handleFrameChanged() {
-            publishMetrics(source: .content)
-        }
-
-        private func boundsChangeSource() -> TimelineScrollChangeSource {
-            guard let event = NSApp.currentEvent else { return .layout }
-
-            switch event.type {
-            case .scrollWheel, .swipe, .keyDown, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
-                return .user
-            default:
-                return .layout
-            }
-        }
-
-        private func publishMetrics(source: TimelineScrollChangeSource) {
-            guard let clipView, let documentView else { return }
-
-            let visibleRect = clipView.documentVisibleRect
-            let contentHeight = documentView.bounds.height
-            let viewportHeight = visibleRect.height
-            let verticalOffset = visibleRect.origin.y
-            let distanceToBottom: CGFloat
-
-            if documentView.isFlipped {
-                distanceToBottom = max(contentHeight - visibleRect.maxY, 0)
-            } else {
-                distanceToBottom = max(visibleRect.minY, 0)
-            }
-
-            onChange(
-                TimelineScrollChange(
-                    metrics: TimelineScrollMetrics(
-                        verticalOffset: verticalOffset,
-                        viewportHeight: viewportHeight,
-                        contentHeight: contentHeight,
-                        distanceToBottom: distanceToBottom
-                    ),
-                    source: source
-                )
-            )
-        }
     }
 }
 
@@ -666,10 +392,21 @@ private struct SessionComposerView: View {
         appState.modelOptions(for: sessionID)
     }
 
+    private var agentOptions: [AgentOption] {
+        appState.agentOptions(for: sessionID)
+    }
+
+    private var selectedAgentKey: Binding<String> {
+        Binding(
+            get: { appState.selectedAgentOption(for: sessionID)?.id ?? agentOptions.first?.id ?? "" },
+            set: { appState.setSelectedAgent($0, for: sessionID) }
+        )
+    }
+
     private var selectedModelKey: Binding<String> {
         Binding(
             get: { appState.selectedModelOption(for: sessionID)?.id ?? modelOptions.first?.id ?? "" },
-            set: { appState.setSelectedModel($0, for: sessionID) }
+            set: { appState.setSelectedModel($0, for: sessionID, updateDefault: NSEvent.modifierFlags.contains(.option)) }
         )
     }
 
@@ -682,6 +419,14 @@ private struct SessionComposerView: View {
             get: { appState.selectedThinkingLevel(for: sessionID) ?? thinkingLevels.first ?? "" },
             set: { appState.setSelectedThinkingLevel($0, for: sessionID) }
         )
+    }
+
+    @ObservedObject private var sessionState: SessionLiveState
+
+    init(sessionID: String, permissions: [PermissionRequest], sessionState: SessionLiveState) {
+        self.sessionID = sessionID
+        self.permissions = permissions
+        _sessionState = ObservedObject(wrappedValue: sessionState)
     }
 
     var body: some View {
@@ -709,7 +454,18 @@ private struct SessionComposerView: View {
                     .frame(height: promptHeight)
                     .padding(4)
 
-                    HStack {
+                    HStack(spacing: 8) {
+                        if !agentOptions.isEmpty {
+                            Picker("Agent", selection: selectedAgentKey) {
+                                ForEach(agentOptions) { option in
+                                    Text(option.menuLabel).tag(option.id)
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: 240, alignment: .leading)
+                        }
+
                         if !modelOptions.isEmpty {
                             Picker("Model", selection: selectedModelKey) {
                                 ForEach(modelOptions) { option in
@@ -718,7 +474,7 @@ private struct SessionComposerView: View {
                             }
                             .labelsHidden()
                             .pickerStyle(.menu)
-                            .frame(maxWidth: 320)
+                            .frame(maxWidth: 320, alignment: .leading)
 
                             if let selectedModel = appState.selectedModelOption(for: sessionID), selectedModel.supportsReasoning {
                                 Picker("Thinking", selection: selectedThinkingLevel) {
@@ -734,7 +490,8 @@ private struct SessionComposerView: View {
 
                         Spacer(minLength: 12)
                     }
-                    .padding(.horizontal, 6)
+                    .padding(.leading, 0)
+                    .padding(.trailing, 6)
                 }
             } else {
                 VStack(alignment: .leading, spacing: 12) {
@@ -745,6 +502,107 @@ private struct SessionComposerView: View {
             }
         }
         .padding(18)
+    }
+}
+
+private struct ThinkingStatusBanner: View {
+    @Environment(\.openCodeTheme) private var theme
+    let title: String
+
+    @State private var visibleTitle: String
+    @State private var outgoingTitle: String?
+    @State private var clearOutgoingTask: Task<Void, Never>?
+
+    init(title: String) {
+        self.title = title
+        _visibleTitle = State(initialValue: title)
+    }
+
+    private func attributedTitle(_ title: String) -> AttributedString {
+        (try? AttributedString(markdown: title)) ?? AttributedString(title)
+    }
+
+    private func titleLabel(_ title: String) -> some View {
+        Text(attributedTitle(title))
+            .font(.caption.weight(.semibold))
+            .lineLimit(1)
+            .truncationMode(.tail)
+    }
+
+    private func shimmeringTitle(_ title: String) -> some View {
+        titleLabel(title)
+            .foregroundStyle(Color(nsColor: theme.secondaryTextColor))
+            .overlay {
+                TimelineView(.animation) { context in
+                    GeometryReader { geometry in
+                        let cycle = 1.8
+                        let progress = context.date.timeIntervalSinceReferenceDate
+                            .truncatingRemainder(dividingBy: cycle) / cycle
+                        let shimmerWidth = max(geometry.size.width * 0.5, 28)
+                        let travel = geometry.size.width + shimmerWidth
+
+                        LinearGradient(
+                            colors: [
+                                theme.accent.opacity(0),
+                                theme.accent.opacity(0.2),
+                                Color.white.opacity(0.95),
+                                theme.accent.opacity(0.2),
+                                theme.accent.opacity(0)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: shimmerWidth)
+                        .offset(x: -shimmerWidth + (travel * progress))
+                        .mask(titleLabel(title))
+                    }
+                }
+                .allowsHitTesting(false)
+            }
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ZStack(alignment: .leading) {
+                if let outgoingTitle {
+                    titleLabel(outgoingTitle)
+                        .foregroundStyle(Color(nsColor: theme.secondaryTextColor))
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
+                shimmeringTitle(visibleTitle)
+                    .id(visibleTitle)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            .frame(maxWidth: .infinity, minHeight: 16, maxHeight: 16, alignment: .leading)
+            .clipped()
+        }
+        .padding(.leading, 6)
+        .padding(.trailing, 4)
+        .padding(.vertical, 2)
+        .animation(.easeInOut(duration: 0.22), value: visibleTitle)
+        .onChange(of: title) { _, newTitle in
+            guard newTitle != visibleTitle else { return }
+
+            clearOutgoingTask?.cancel()
+
+            let previousTitle = visibleTitle
+            outgoingTitle = previousTitle
+
+            withAnimation(.easeInOut(duration: 0.22)) {
+                visibleTitle = newTitle
+            }
+
+            clearOutgoingTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(240))
+                guard !Task.isCancelled else { return }
+                outgoingTitle = nil
+            }
+        }
+        .onDisappear {
+            clearOutgoingTask?.cancel()
+            clearOutgoingTask = nil
+        }
     }
 }
 
@@ -817,7 +675,7 @@ private struct MessageCard: View {
                         Text(message.info.error?.prettyDescription ?? "Unknown error")
                             .font(.caption)
                             .multilineTextAlignment(.leading)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(theme.error)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
@@ -836,7 +694,7 @@ private struct MessageCard: View {
 
     private var bubbleBackground: some View {
         RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(message.info.role.isAssistant ? theme.assistantBubble : Color.accentColor.opacity(0.16))
+            .fill(message.info.role.isAssistant ? theme.assistantBubble : theme.userBubble)
     }
 
     private var showsMessageBubble: Bool {
@@ -958,10 +816,13 @@ private struct ToolSummaryView: View {
 }
 
 private struct StandardToolSummaryView: View {
+    @Environment(\.openCodeTheme) private var theme
     let summary: ToolCallSummary
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
+            ToolSummaryIcon(systemName: summary.iconSystemName ?? ToolCallSummary.genericIconSystemName)
+
             Text(summary.action)
                 .fontWeight(.semibold)
 
@@ -973,13 +834,13 @@ private struct StandardToolSummaryView: View {
             if let additions = summary.additions {
                 Text("+\(additions)")
                     .font(.caption.monospaced())
-                    .foregroundStyle(.green)
+                    .foregroundStyle(theme.diffAddition)
             }
 
             if let deletions = summary.deletions {
                 Text("-\(deletions)")
                     .font(.caption.monospaced())
-                    .foregroundStyle(.red)
+                    .foregroundStyle(theme.diffDeletion)
             }
         }
         .font(.caption)
@@ -1260,7 +1121,7 @@ private struct ToolPartDetailSection: View {
     var isError = false
 
     private var resolvedTextColor: NSColor {
-        isError ? .systemRed : theme.primaryTextColor
+        isError ? theme.errorColor : theme.primaryTextColor
     }
 
     private var contentHeight: CGFloat {
@@ -1284,6 +1145,8 @@ private struct ToolPartDetailSection: View {
 
 private struct PermissionPromptView: View {
     @EnvironmentObject private var appState: OpenCodeAppModel
+
+    @Environment(\.openCodeTheme) private var theme
 
     let request: PermissionRequest
 
@@ -1316,7 +1179,7 @@ private struct PermissionPromptView: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.red.opacity(0.08))
+                .fill(theme.errorBackground)
         )
         .padding(.leading, TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.promptCardPadding))
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1325,6 +1188,7 @@ private struct PermissionPromptView: View {
 
 private struct QuestionCard: View {
     @EnvironmentObject private var appState: OpenCodeAppModel
+    @Environment(\.openCodeTheme) private var theme
 
     let request: QuestionRequest
     @State private var selections: [String: Set<String>] = [:]
@@ -1355,7 +1219,7 @@ private struct QuestionCard: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.blue.opacity(0.10))
+                .fill(theme.accentSubtleBackground)
         )
         .padding(.leading, TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.promptCardPadding))
         .frame(maxWidth: .infinity, alignment: .leading)

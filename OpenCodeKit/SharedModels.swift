@@ -57,6 +57,126 @@ struct WorkspaceConnection: Codable, Hashable {
     let directory: String
 }
 
+struct AgentCatalog: Codable, Hashable {
+    private struct Wrapper: Codable {
+        let agents: [AgentDefinition]?
+        let all: [AgentDefinition]?
+        let available: [AgentDefinition]?
+        let items: [AgentDefinition]?
+    }
+
+    private struct RawAgentDefinition: Codable {
+        let id: String?
+        let name: String?
+        let description: String?
+        let hidden: Bool?
+        let mode: String?
+    }
+
+    let agents: [AgentDefinition]
+
+    init(agents: [AgentDefinition]) {
+        self.agents = agents
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+
+        if let agents = try? container.decode([AgentDefinition].self) {
+            self.agents = agents
+            return
+        }
+
+        if let wrapper = try? container.decode(Wrapper.self) {
+            self.agents = wrapper.agents ?? wrapper.all ?? wrapper.available ?? wrapper.items ?? []
+            return
+        }
+
+        if let definitionsByID = try? container.decode([String: RawAgentDefinition].self) {
+            self.agents = definitionsByID.map { key, value in
+                AgentDefinition(
+                    id: value.id ?? key,
+                    name: value.name,
+                    description: value.description,
+                    hidden: value.hidden ?? false,
+                    mode: value.mode
+                )
+            }
+            return
+        }
+
+        if let namesByID = try? container.decode([String: String].self) {
+            self.agents = namesByID.map { key, value in
+                AgentDefinition(id: key, name: value, description: nil, hidden: false, mode: nil)
+            }
+            return
+        }
+
+        throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported agent catalog payload")
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(agents)
+    }
+}
+
+struct AgentDefinition: Codable, Identifiable, Hashable {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case description
+        case hidden
+        case mode
+    }
+
+    let id: String
+    let name: String?
+    let description: String?
+    let hidden: Bool
+    let mode: String?
+
+    init(id: String, name: String?, description: String?, hidden: Bool = false, mode: String? = nil) {
+        self.id = id
+        self.name = name
+        self.description = description
+        self.hidden = hidden
+        self.mode = mode
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let resolvedName = try container.decodeIfPresent(String.self, forKey: .name)
+        let resolvedID = try container.decodeIfPresent(String.self, forKey: .id) ?? resolvedName
+
+        guard let resolvedID, !resolvedID.isEmpty else {
+            throw DecodingError.dataCorruptedError(forKey: .id, in: container, debugDescription: "Agent is missing both id and name")
+        }
+
+        id = resolvedID
+        name = resolvedName
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        hidden = try container.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
+        mode = try container.decodeIfPresent(String.self, forKey: .mode)
+    }
+
+    var displayName: String {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? id : trimmed
+    }
+}
+
+struct AgentOption: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let description: String?
+    let isRecent: Bool
+
+    var menuLabel: String {
+        isRecent ? "\(name) - Recent" : name
+    }
+}
+
 struct ModelContextKey: Hashable {
     let providerID: String
     let modelID: String
@@ -162,6 +282,17 @@ struct ModelReference: Codable, Hashable, Identifiable {
         self.providerID = providerID
         self.modelID = modelID
     }
+
+    init?(key: String) {
+        let components = key.split(separator: "/", maxSplits: 1).map(String.init)
+        guard components.count == 2,
+              !components[0].isEmpty,
+              !components[1].isEmpty else {
+            return nil
+        }
+
+        self.init(providerID: components[0], modelID: components[1])
+    }
 }
 
 struct ModelOption: Identifiable, Hashable {
@@ -171,7 +302,8 @@ struct ModelOption: Identifiable, Hashable {
     let modelName: String
     let supportsReasoning: Bool
     let thinkingLevels: [String]
-    let isDefault: Bool
+    let isServerDefault: Bool
+    let isPreferredDefault: Bool
     let isRecent: Bool
 
     var id: String { reference.key }
@@ -185,11 +317,19 @@ struct ModelOption: Identifiable, Hashable {
             return "\(modelName) - \(providerName) - Recent"
         }
 
-        if isDefault {
+        if isPreferredDefault {
+            return "\(modelName) - \(providerName) - Local Default"
+        }
+
+        if isServerDefault {
             return "\(modelName) - \(providerName) - Default"
         }
 
         return "\(modelName) - \(providerName)"
+    }
+
+    var preferenceLabel: String {
+        "\(modelName) - \(providerName)"
     }
 }
 
@@ -569,8 +709,11 @@ struct PersistenceSnapshot: Equatable {
 }
 
 struct ToolCallSummary: Hashable {
+    static let genericIconSystemName = "wrench.and.screwdriver"
+
     let action: String
     let target: String?
+    let iconSystemName: String?
     let additions: Int?
     let deletions: Int?
 }
@@ -650,6 +793,26 @@ struct ToolPresentation: Hashable {
 }
 
 extension MessagePart {
+    var reasoningTitle: String? {
+        guard type == .reasoning else { return nil }
+
+        let directCandidates = [
+            metadata?["title"]?.stringValue,
+            metadata?["header"]?.stringValue,
+            name,
+            description,
+            prompt
+        ]
+
+        for candidate in directCandidates {
+            if let normalized = Self.normalizedReasoningTitleCandidate(candidate) {
+                return normalized
+            }
+        }
+
+        return Self.reasoningTitle(from: text)
+    }
+
     var toolDrawerTitle: String? {
         guard let title = normalizedToolSupplementalText(state?.title) else { return nil }
 
@@ -722,6 +885,7 @@ extension MessagePart {
                     ToolCallSummary(
                         action: toolKey.capitalized,
                         target: Self.fileName(from: filePath),
+                        iconSystemName: ToolCallSummary.genericIconSystemName,
                         additions: nil,
                         deletions: nil
                     )
@@ -732,7 +896,7 @@ extension MessagePart {
             let pattern = input["pattern"]?.stringValue
             return ToolDescriptor(
                 summaryStyle: .standard(
-                    ToolCallSummary(action: "Search", target: pattern, additions: nil, deletions: nil)
+                    ToolCallSummary(action: "Search", target: pattern, iconSystemName: "magnifyingglass", additions: nil, deletions: nil)
                 ),
                 detailFields: Self.detailField(title: "Pattern", value: pattern)
             )
@@ -740,7 +904,7 @@ extension MessagePart {
             let pattern = input["pattern"]?.stringValue
             return ToolDescriptor(
                 summaryStyle: .standard(
-                    ToolCallSummary(action: "Find", target: pattern, additions: nil, deletions: nil)
+                    ToolCallSummary(action: "Find", target: pattern, iconSystemName: "magnifyingglass", additions: nil, deletions: nil)
                 ),
                 detailFields: Self.detailField(title: "Pattern", value: pattern)
             )
@@ -748,7 +912,7 @@ extension MessagePart {
             let url = input["url"]?.stringValue
             return ToolDescriptor(
                 summaryStyle: .standard(
-                    ToolCallSummary(action: "Fetch", target: url, additions: nil, deletions: nil)
+                    ToolCallSummary(action: "Fetch", target: url, iconSystemName: "globe", additions: nil, deletions: nil)
                 ),
                 detailFields: Self.detailField(title: "URL", value: url)
             )
@@ -770,11 +934,25 @@ extension MessagePart {
                     ToolCallSummary(
                         action: action,
                         target: action == "Run" ? Self.truncated(command ?? "", limit: 44) : nil,
+                        iconSystemName: "terminal",
                         additions: nil,
                         deletions: nil
                     )
                 ),
                 detailFields: Self.detailField(title: "Command", value: command)
+            )
+        case "todowrite":
+            return ToolDescriptor(
+                summaryStyle: .standard(
+                    ToolCallSummary(
+                        action: "Todo",
+                        target: nil,
+                        iconSystemName: "pin",
+                        additions: nil,
+                        deletions: nil
+                    )
+                ),
+                detailFields: []
             )
         default:
             return ToolDescriptor(
@@ -782,6 +960,7 @@ extension MessagePart {
                     ToolCallSummary(
                         action: state?.title.flatMap { $0.isEmpty ? nil : $0 } ?? Self.humanizedToolName(toolKey),
                         target: nil,
+                        iconSystemName: ToolCallSummary.genericIconSystemName,
                         additions: nil,
                         deletions: nil
                     )
@@ -806,6 +985,43 @@ extension MessagePart {
 
         let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return normalized.isEmpty ? nil : normalized
+    }
+
+    private static func reasoningTitle(from text: String?) -> String? {
+        guard let text else { return nil }
+
+        for line in text.components(separatedBy: .newlines) {
+            if let candidate = normalizedReasoningTitleCandidate(line) {
+                return candidate
+            }
+        }
+
+        return nil
+    }
+
+    private static func normalizedReasoningTitleCandidate(_ value: String?) -> String? {
+        guard var candidate = value?.trimmingCharacters(in: .whitespacesAndNewlines), !candidate.isEmpty else {
+            return nil
+        }
+
+        if candidate.hasPrefix("#") {
+            while candidate.first == "#" {
+                candidate.removeFirst()
+            }
+            candidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if candidate.hasPrefix("- ") || candidate.hasPrefix("* ") {
+            candidate = String(candidate.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if candidate.hasSuffix(":") {
+            candidate.removeLast()
+            candidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        candidate = candidate.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+
+        guard !candidate.isEmpty, candidate.count <= 80 else { return nil }
+        return candidate
     }
 
     private static func humanizedToolName(_ tool: String) -> String {
@@ -1189,6 +1405,10 @@ extension MessageEnvelope {
         parts.filter { $0.type == .reasoning }.compactMap(\.text).joined(separator: "\n\n")
     }
 
+    var latestReasoningTitle: String? {
+        parts.reversed().compactMap(\.reasoningTitle).first
+    }
+
     var toolParts: [MessagePart] {
         parts.filter { $0.type == .tool }
     }
@@ -1212,6 +1432,15 @@ extension MessageInfo {
 }
 
 extension SessionStatus {
+    var isThinkingActive: Bool {
+        switch self {
+        case .busy, .retry:
+            return true
+        case .idle, .unknown:
+            return false
+        }
+    }
+
     var activityTint: SessionIndicatorTint {
         switch self {
         case .busy, .retry:
