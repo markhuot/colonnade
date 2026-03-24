@@ -31,6 +31,7 @@ final class OpenCodeAppModel: ObservableObject {
     @Published private(set) var isValidatingRemoteServer = false
     @Published private(set) var promptFocusRequest: SessionPromptFocusRequest?
     @Published private(set) var paneWidths: [String: CGFloat] = [:]
+    @Published private(set) var commandCatalog = CommandCatalog(commands: [])
     @Published private(set) var agentCatalog = AgentCatalog(agents: [])
     @Published private(set) var modelCatalog = ModelCatalog(providers: [], defaultModels: [:], connectedProviderIDs: [])
     @Published private(set) var selectedAgentBySession: [String: String] = [:]
@@ -165,6 +166,10 @@ final class OpenCodeAppModel: ObservableObject {
 
     func availableAgentOptions() -> [AgentOption] {
         buildAgentOptions(recentAgentID: nil)
+    }
+
+    func availableCommandOptions() -> [CommandOption] {
+        buildCommandOptions()
     }
 
     func configurePreferredDefaultModelPersistence(
@@ -499,10 +504,19 @@ final class OpenCodeAppModel: ObservableObject {
         workspaceService: any WorkspaceServiceProtocol,
         liveStore: WorkspaceLiveStore
     ) async -> [ModelContextKey: Int] {
+        async let commandCatalogTask = workspaceService.loadCommandCatalog()
         async let modelCatalogTask = workspaceService.loadModelCatalog()
         async let agentCatalogTask = workspaceService.loadAgentCatalog()
         async let modelContextLimitTask = workspaceService.loadModelContextLimits()
         var loadedModelContextLimits = modelContextLimits
+
+        do {
+            let catalog = try await commandCatalogTask
+            guard isCurrentLoad(loadID, for: connection), self.liveStore === liveStore else { return loadedModelContextLimits }
+            commandCatalog = catalog
+        } catch {
+            logger.error("Command catalog load failed: \(error.localizedDescription, privacy: .public)")
+        }
 
         do {
             let catalog = try await agentCatalogTask
@@ -844,6 +858,18 @@ final class OpenCodeAppModel: ObservableObject {
         selectedThinkingLevelBySession[sessionID] = level
     }
 
+    func slashCommandSuggestions(for sessionID: String) -> [CommandOption] {
+        guard focusedSessionID == sessionID || openSessionIDs.contains(sessionID) else { return [] }
+        let draft = drafts[sessionID, default: ""]
+        return CommandAutocomplete.suggestions(for: draft, commands: availableCommandOptions())
+    }
+
+    func applySlashCommandSuggestion(_ option: CommandOption, for sessionID: String) {
+        let draft = drafts[sessionID, default: ""]
+        guard let updatedDraft = CommandAutocomplete.applying(option, to: draft) else { return }
+        setDraft(updatedDraft, for: sessionID)
+    }
+
     @discardableResult
     func sendMessage(sessionID: String) -> Bool {
         guard let selectedDirectory else { return false }
@@ -857,6 +883,39 @@ final class OpenCodeAppModel: ObservableObject {
         let selectedVariant = selectedThinkingLevel(for: sessionID) == Self.defaultThinkingLevel
             ? nil
             : selectedThinkingLevel(for: sessionID)
+
+        if let command = CommandInvocation(draft: draft) {
+            setDraft("", for: sessionID)
+
+            Task {
+                do {
+                    logger.notice(
+                        "Execute slash command started directory=\(selectedDirectory, privacy: .public) sessionID=\(sessionID, privacy: .public) command=\(command.name, privacy: .public) argsBytes=\(command.arguments.utf8.count, privacy: .public)"
+                    )
+                    let workspaceService = workspaceServiceProvider(serverURL)
+                    _ = try await workspaceService.executeCommand(
+                        directory: selectedDirectory,
+                        sessionID: sessionID,
+                        command: command.name,
+                        arguments: command.arguments,
+                        agent: selectedAgent,
+                        model: selectedModel
+                    )
+                    logger.notice(
+                        "Execute slash command completed directory=\(selectedDirectory, privacy: .public) sessionID=\(sessionID, privacy: .public) command=\(command.name, privacy: .public)"
+                    )
+                    guard let workspaceConnection else { return }
+                    let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
+                    await coordinator.refreshMessages(sessionID: sessionID)
+                } catch {
+                    setDraft(draft, for: sessionID)
+                    logger.error("Execute slash command failed for \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    errorMessage = error.localizedDescription
+                }
+            }
+
+            return true
+        }
 
         setDraft("", for: sessionID)
 
@@ -1150,6 +1209,20 @@ final class OpenCodeAppModel: ObservableObject {
             }
     }
 
+    private func buildCommandOptions() -> [CommandOption] {
+        commandCatalog.commands
+            .map { definition in
+                CommandOption(
+                    id: definition.id,
+                    name: definition.name,
+                    description: definition.description
+                )
+            }
+            .sorted { lhs, rhs in
+                lhs.slashName.localizedCaseInsensitiveCompare(rhs.slashName) == .orderedAscending
+            }
+    }
+
     private func agentIdentifier(from value: String?) -> String? {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1253,6 +1326,7 @@ final class OpenCodeAppModel: ObservableObject {
         focusedSessionID = nil
         liveStore = nil
         paneWidths = [:]
+        commandCatalog = CommandCatalog(commands: [])
         agentCatalog = AgentCatalog(agents: [])
         modelCatalog = ModelCatalog(providers: [], defaultModels: [:], connectedProviderIDs: [])
         preferredDefaultModelReference = preferredDefaultModelReferenceProvider()

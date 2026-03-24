@@ -36,7 +36,7 @@ struct WorkspaceRootContainer: View {
             }
             .background(
                 WindowObserver { window in
-                    WorkspaceCommandCenter.shared.registerWorkspaceWindow(window)
+                    WorkspaceCommandCenter.shared.registerWorkspaceWindow(window, appState: appState)
                 }
             )
     }

@@ -319,6 +319,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 final class WorkspaceCommandCenter: ObservableObject {
     static let shared = WorkspaceCommandCenter()
 
+    private final class WorkspaceWindowBinding {
+        let appState: OpenCodeAppModel
+        var windowNumber: Int?
+        var cancellables: Set<AnyCancellable> = []
+
+        init(appState: OpenCodeAppModel) {
+            self.appState = appState
+        }
+    }
+
     @Published private(set) var canCreateSession = false
     @Published private(set) var canRefresh = false
     @Published private(set) var canRefreshFocusedSession = false
@@ -328,41 +338,63 @@ final class WorkspaceCommandCenter: ObservableObject {
 
     @Published private(set) var currentConnection: WorkspaceConnection?
 
-    private weak var appState: OpenCodeAppModel?
-    private weak var workspaceWindow: NSWindow?
+    private weak var fallbackAppState: OpenCodeAppModel?
+    private var workspaceBindings: [ObjectIdentifier: WorkspaceWindowBinding] = [:]
     private var sessionWindowStates: [String: OpenCodeAppModel] = [:]
     private var sessionWindowsByNumber: [Int: String] = [:]
-    private var availabilityCancellables: Set<AnyCancellable> = []
+    private var windowObservationCancellables: Set<AnyCancellable> = []
 
-    private init() {}
+    var currentWindowNumberProvider: () -> Int? = {
+        if let keyWindow = NSApp.keyWindow {
+            return keyWindow.windowNumber
+        }
+
+        return NSApp.mainWindow?.windowNumber
+    }
+
+    var currentWindowProvider: () -> NSWindow? = {
+        NSApp.keyWindow ?? NSApp.mainWindow
+    }
+
+    private init() {
+        let notificationCenter = NotificationCenter.default
+
+        notificationCenter.publisher(for: NSWindow.didBecomeKeyNotification)
+            .merge(with: notificationCenter.publisher(for: NSWindow.didResignKeyNotification))
+            .merge(with: notificationCenter.publisher(for: NSWindow.didBecomeMainNotification))
+            .merge(with: notificationCenter.publisher(for: NSWindow.didResignMainNotification))
+            .sink { [weak self] _ in
+                self?.refreshAvailabilityForCurrentWindow()
+            }
+            .store(in: &windowObservationCancellables)
+    }
 
     func bind(appState: OpenCodeAppModel) {
-        self.appState = appState
-        availabilityCancellables.removeAll()
-
-        Publishers.CombineLatest4(appState.$selectedDirectory, appState.$focusedSessionID, appState.$openSessionIDs, appState.$serverURL)
-            .sink { [weak self] selectedDirectory, focusedSessionID, openSessionIDs, serverURL in
-                self?.currentConnection = selectedDirectory.map { WorkspaceConnection(serverURL: serverURL, directory: $0) }
-                self?.updateAvailability(
-                    selectedDirectory: selectedDirectory,
-                    focusedSessionID: focusedSessionID,
-                    openSessionIDs: openSessionIDs
-                )
-            }
-            .store(in: &availabilityCancellables)
+        fallbackAppState = appState
+        _ = ensureWorkspaceBinding(for: appState)
+        refreshAvailabilityForCurrentWindow()
     }
 
     func bindSessionWindow(appState: OpenCodeAppModel, sessionID: String) {
         sessionWindowStates[sessionID] = appState
-        updateAvailability(
-            selectedDirectory: self.appState?.selectedDirectory,
-            focusedSessionID: self.appState?.focusedSessionID,
-            openSessionIDs: self.appState?.openSessionIDs ?? []
-        )
+        refreshAvailabilityForCurrentWindow()
     }
 
-    func registerWorkspaceWindow(_ window: NSWindow?) {
-        workspaceWindow = window
+    func registerWorkspaceWindow(_ window: NSWindow?, appState: OpenCodeAppModel) {
+        fallbackAppState = appState
+        registerWorkspaceWindowNumber(window?.windowNumber, appState: appState)
+    }
+
+    func registerWorkspaceWindowNumber(_ windowNumber: Int?, appState: OpenCodeAppModel) {
+        let identifier = ObjectIdentifier(appState)
+        let binding = ensureWorkspaceBinding(for: appState)
+        binding.windowNumber = windowNumber
+
+        if windowNumber == nil {
+            workspaceBindings.removeValue(forKey: identifier)
+        }
+
+        refreshAvailabilityForCurrentWindow()
     }
 
     func registerSessionWindow(_ window: NSWindow?, sessionID: String) {
@@ -393,56 +425,32 @@ final class WorkspaceCommandCenter: ObservableObject {
             sessionWindowsByNumber.removeValue(forKey: windowNumber)
         }
 
-        updateAvailability(
-            selectedDirectory: self.appState?.selectedDirectory,
-            focusedSessionID: self.appState?.focusedSessionID,
-            openSessionIDs: self.appState?.openSessionIDs ?? []
-        )
+        refreshAvailabilityForCurrentWindow()
     }
 
     func createSession() {
-        appState?.createSession()
-        updateAvailability(
-            selectedDirectory: appState?.selectedDirectory,
-            focusedSessionID: appState?.focusedSessionID,
-            openSessionIDs: appState?.openSessionIDs ?? []
-        )
+        createTargetAppState()?.createSession()
+        refreshAvailabilityForCurrentWindow()
     }
 
     func refreshAll() {
-        appState?.refreshAll()
-        updateAvailability(
-            selectedDirectory: appState?.selectedDirectory,
-            focusedSessionID: appState?.focusedSessionID,
-            openSessionIDs: appState?.openSessionIDs ?? []
-        )
+        currentWorkspaceAppState()?.refreshAll()
+        refreshAvailabilityForCurrentWindow()
     }
 
     func refreshFocusedSession() {
-        appState?.refreshFocusedSessionMessages()
-        updateAvailability(
-            selectedDirectory: appState?.selectedDirectory,
-            focusedSessionID: appState?.focusedSessionID,
-            openSessionIDs: appState?.openSessionIDs ?? []
-        )
+        currentWorkspaceAppState()?.refreshFocusedSessionMessages()
+        refreshAvailabilityForCurrentWindow()
     }
 
     func focusPreviousPane() {
-        appState?.focusPreviousPane()
-        updateAvailability(
-            selectedDirectory: appState?.selectedDirectory,
-            focusedSessionID: appState?.focusedSessionID,
-            openSessionIDs: appState?.openSessionIDs ?? []
-        )
+        currentWorkspaceAppState()?.focusPreviousPane()
+        refreshAvailabilityForCurrentWindow()
     }
 
     func focusNextPane() {
-        appState?.focusNextPane()
-        updateAvailability(
-            selectedDirectory: appState?.selectedDirectory,
-            focusedSessionID: appState?.focusedSessionID,
-            openSessionIDs: appState?.openSessionIDs ?? []
-        )
+        currentWorkspaceAppState()?.focusNextPane()
+        refreshAvailabilityForCurrentWindow()
     }
 
     func updateAvailability(selectedDirectory: String?, focusedSessionID: String?, openSessionIDs: [String]) {
@@ -452,11 +460,10 @@ final class WorkspaceCommandCenter: ObservableObject {
         let hasFocusedPane = focusedSessionID.map(openSessionIDs.contains) ?? false
         canFocusPreviousPane = hasFocusedPane
         canFocusNextPane = hasFocusedPane
-        canCloseFocusedSession = closeTarget(
-            selectedDirectory: selectedDirectory,
-            focusedSessionID: focusedSessionID,
-            openSessionIDs: openSessionIDs
-        ) != nil
+        canCloseFocusedSession = currentSessionWindowAppState() != nil || (
+            selectedDirectory != nil &&
+                focusedSessionID.map(openSessionIDs.contains) == true
+        )
     }
 
     private enum CloseTarget {
@@ -475,21 +482,92 @@ final class WorkspaceCommandCenter: ObservableObject {
             return .sessionWindow(appState, sessionID, currentWindowNumber)
         }
 
-        guard let appState,
-              selectedDirectory ?? appState.selectedDirectory != nil,
-              let focusedSessionID = focusedSessionID ?? appState.focusedSessionID,
-              (openSessionIDs ?? appState.openSessionIDs).contains(focusedSessionID) else {
+        let workspaceAppState = currentWorkspaceAppState() ?? fallbackAppState
+
+        guard let workspaceAppState,
+              selectedDirectory ?? workspaceAppState.selectedDirectory != nil,
+              let focusedSessionID = focusedSessionID ?? workspaceAppState.focusedSessionID,
+              (openSessionIDs ?? workspaceAppState.openSessionIDs).contains(focusedSessionID) else {
             return nil
         }
 
-        return .workspace(appState, focusedSessionID)
+        return .workspace(workspaceAppState, focusedSessionID)
+    }
+
+    private func ensureWorkspaceBinding(for appState: OpenCodeAppModel) -> WorkspaceWindowBinding {
+        let identifier = ObjectIdentifier(appState)
+        if let binding = workspaceBindings[identifier] {
+            return binding
+        }
+
+        let binding = WorkspaceWindowBinding(appState: appState)
+        Publishers.CombineLatest4(appState.$selectedDirectory, appState.$focusedSessionID, appState.$openSessionIDs, appState.$serverURL)
+            .sink { [weak self] _, _, _, _ in
+                guard let self else { return }
+                self.refreshAvailabilityForCurrentWindow()
+            }
+            .store(in: &binding.cancellables)
+        workspaceBindings[identifier] = binding
+        return binding
+    }
+
+    private func refreshAvailabilityForCurrentWindow() {
+        let workspaceAppState = currentWorkspaceAppState() ?? fallbackAppState
+        currentConnection = workspaceAppState?.workspaceConnection
+        updateAvailability(
+            selectedDirectory: workspaceAppState?.selectedDirectory,
+            focusedSessionID: workspaceAppState?.focusedSessionID,
+            openSessionIDs: workspaceAppState?.openSessionIDs ?? []
+        )
+    }
+
+    private func currentWorkspaceAppState() -> OpenCodeAppModel? {
+        guard let currentWindowNumber else { return nil }
+        return workspaceBindings.values.first(where: { $0.windowNumber == currentWindowNumber })?.appState
+    }
+
+    private func currentSessionWindowAppState() -> OpenCodeAppModel? {
+        guard let currentWindowNumber,
+              let sessionID = sessionWindowsByNumber[currentWindowNumber] else {
+            return nil
+        }
+
+        return sessionWindowStates[sessionID]
+    }
+
+    private func createTargetAppState() -> OpenCodeAppModel? {
+        currentWorkspaceAppState() ?? fallbackAppState
     }
 
     private var currentWindowNumber: Int? {
-        currentWindow()?.windowNumber
+        currentWindowNumberProvider()
     }
 
     private func currentWindow() -> NSWindow? {
-        NSApp.keyWindow ?? NSApp.mainWindow ?? workspaceWindow
+        currentWindowProvider()
+    }
+
+    func resetForTesting() {
+        fallbackAppState = nil
+        workspaceBindings.removeAll()
+        sessionWindowStates.removeAll()
+        sessionWindowsByNumber.removeAll()
+        currentConnection = nil
+        canCreateSession = false
+        canRefresh = false
+        canRefreshFocusedSession = false
+        canFocusPreviousPane = false
+        canFocusNextPane = false
+        canCloseFocusedSession = false
+        currentWindowNumberProvider = {
+            if let keyWindow = NSApp.keyWindow {
+                return keyWindow.windowNumber
+            }
+
+            return NSApp.mainWindow?.windowNumber
+        }
+        currentWindowProvider = {
+            NSApp.keyWindow ?? NSApp.mainWindow
+        }
     }
 }

@@ -6,11 +6,15 @@ struct PromptTextView: NSViewRepresentable {
 
     @Binding var text: String
     @Binding var measuredHeight: CGFloat
+    @Binding var highlightedSuggestionIndex: Int?
+    let suggestions: [CommandOption]
+    @Binding var suggestionAnchor: CGRect
     let placeholder: String
     let textColor: NSColor
     let insertionPointColor: NSColor
     let placeholderColor: NSColor
     let focusRequestID: UUID?
+    let onSelectSuggestion: (CommandOption) -> Void
     let onFocus: () -> Void
     let onSubmit: () -> Void
 
@@ -22,14 +26,18 @@ struct PromptTextView: NSViewRepresentable {
         Coordinator(
             text: $text,
             measuredHeight: $measuredHeight,
+            highlightedSuggestionIndex: $highlightedSuggestionIndex,
+            suggestionAnchor: $suggestionAnchor,
             minLineCount: minLineCount,
             maxLineCount: maxLineCount,
             textInsets: textInsets,
+            suggestions: suggestions,
             placeholder: placeholder,
             textColor: textColor,
             insertionPointColor: insertionPointColor,
             placeholderColor: placeholderColor,
             focusRequestID: focusRequestID,
+            onSelectSuggestion: onSelectSuggestion,
             onFocus: onFocus,
             onSubmit: onSubmit
         )
@@ -50,7 +58,9 @@ struct PromptTextView: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.onFocus = context.coordinator.onFocus
         textView.onSubmit = onSubmit
+        textView.onHighlightedSuggestionChange = context.coordinator.updateHighlightedSuggestionIndex
         textView.placeholder = placeholder
+        textView.onSelectSuggestion = context.coordinator.selectHighlightedSuggestion
         textView.isRichText = false
         textView.importsGraphics = false
         textView.isAutomaticQuoteSubstitutionEnabled = false
@@ -67,6 +77,7 @@ struct PromptTextView: NSViewRepresentable {
         textView.textContainer?.lineFragmentPadding = 0
         textView.textContainerInset = textInsets
         textView.string = text
+        context.coordinator.installSuggestions(suggestions, for: textView)
 
         scrollView.documentView = textView
         context.coordinator.updateHeight(for: scrollView)
@@ -77,13 +88,16 @@ struct PromptTextView: NSViewRepresentable {
         guard let textView = nsView.documentView as? PromptNSTextView else { return }
         textView.onFocus = context.coordinator.onFocus
         textView.onSubmit = onSubmit
+        textView.onHighlightedSuggestionChange = context.coordinator.updateHighlightedSuggestionIndex
         textView.placeholder = placeholder
+        textView.onSelectSuggestion = context.coordinator.selectHighlightedSuggestion
         textView.textColor = textColor
         textView.insertionPointColor = insertionPointColor
         textView.placeholderColor = placeholderColor
         if textView.string != text {
             context.coordinator.applyText(text, to: textView)
         }
+        context.coordinator.installSuggestions(suggestions, for: textView)
         context.coordinator.applyFocusRequestIfNeeded(focusRequestID, to: textView)
         context.coordinator.updateHeight(for: nsView)
     }
@@ -92,41 +106,53 @@ struct PromptTextView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         @Binding var text: String
         @Binding var measuredHeight: CGFloat
+        @Binding var highlightedSuggestionIndex: Int?
+        @Binding var suggestionAnchor: CGRect
         let minLineCount: Int
         let maxLineCount: Int
         let textInsets: NSSize
+        private var suggestions: [CommandOption]
         let placeholder: String
         let textColor: NSColor
         let insertionPointColor: NSColor
         let placeholderColor: NSColor
         private var lastAppliedFocusRequestID: UUID?
+        private let onSelectSuggestion: (CommandOption) -> Void
         let onFocus: () -> Void
         let onSubmit: () -> Void
 
         init(
             text: Binding<String>,
             measuredHeight: Binding<CGFloat>,
+            highlightedSuggestionIndex: Binding<Int?>,
+            suggestionAnchor: Binding<CGRect>,
             minLineCount: Int,
             maxLineCount: Int,
             textInsets: NSSize,
+            suggestions: [CommandOption],
             placeholder: String,
             textColor: NSColor,
             insertionPointColor: NSColor,
             placeholderColor: NSColor,
             focusRequestID: UUID?,
+            onSelectSuggestion: @escaping (CommandOption) -> Void,
             onFocus: @escaping () -> Void,
             onSubmit: @escaping () -> Void
         ) {
             _text = text
             _measuredHeight = measuredHeight
+            _highlightedSuggestionIndex = highlightedSuggestionIndex
+            _suggestionAnchor = suggestionAnchor
             self.minLineCount = minLineCount
             self.maxLineCount = maxLineCount
             self.textInsets = textInsets
+            self.suggestions = suggestions
             self.placeholder = placeholder
             self.textColor = textColor
             self.insertionPointColor = insertionPointColor
             self.placeholderColor = placeholderColor
             lastAppliedFocusRequestID = nil
+            self.onSelectSuggestion = onSelectSuggestion
             self.onFocus = onFocus
             self.onSubmit = onSubmit
         }
@@ -136,6 +162,25 @@ struct PromptTextView: NSViewRepresentable {
             text = textView.string
             guard let scrollView = textView.enclosingScrollView else { return }
             updateHeight(for: scrollView)
+        }
+
+        func installSuggestions(_ suggestions: [CommandOption], for textView: PromptNSTextView) {
+            self.suggestions = suggestions
+            textView.suggestions = suggestions
+            textView.highlightedSuggestionIndex = highlightedSuggestionIndex ?? (suggestions.isEmpty ? nil : 0)
+            updateSuggestionAnchor(for: textView)
+        }
+
+        func updateHighlightedSuggestionIndex(_ index: Int?) {
+            highlightedSuggestionIndex = index
+        }
+
+        func selectHighlightedSuggestion() {
+            guard let textView = NSApp.keyWindow?.firstResponder as? PromptNSTextView,
+                  textView.isSelectingSuggestion,
+                  let option = textView.highlightedSuggestion else { return }
+            onSelectSuggestion(option)
+            textView.highlightedSuggestionIndex = 0
         }
 
         func updateHeight(for scrollView: NSScrollView) {
@@ -159,6 +204,10 @@ struct PromptTextView: NSViewRepresentable {
             )
             if scrollView.hasVerticalScroller != shouldScroll {
                 scrollView.hasVerticalScroller = shouldScroll
+            }
+
+            if let promptTextView = textView as? PromptNSTextView {
+                updateSuggestionAnchor(for: promptTextView)
             }
         }
 
@@ -184,6 +233,17 @@ struct PromptTextView: NSViewRepresentable {
             DispatchQueue.main.async {
                 textView.window?.makeFirstResponder(textView)
             }
+        }
+
+        private func updateSuggestionAnchor(for textView: PromptNSTextView) {
+            guard let window = textView.window else {
+                suggestionAnchor = .zero
+                return
+            }
+
+            let boundsInWindow = textView.convert(textView.bounds, to: nil)
+            let boundsOnScreen = window.convertToScreen(boundsInWindow)
+            suggestionAnchor = boundsOnScreen
         }
 
         private static func height(
@@ -236,7 +296,32 @@ final class PromptScrollView: NSScrollView {
 final class PromptNSTextView: NSTextView {
     var onFocus: (() -> Void)?
     var onSubmit: (() -> Void)?
+    var onSelectSuggestion: (() -> Void)?
+    var onHighlightedSuggestionChange: ((Int?) -> Void)?
     var placeholderColor: NSColor = .placeholderTextColor
+    var suggestions: [CommandOption] = [] {
+        didSet {
+            if let currentIndex = highlightedSuggestionIndex, currentIndex >= suggestions.count {
+                self.highlightedSuggestionIndex = suggestions.isEmpty ? nil : 0
+            } else if highlightedSuggestionIndex == nil, !suggestions.isEmpty {
+                highlightedSuggestionIndex = 0
+            }
+        }
+    }
+    var highlightedSuggestionIndex: Int? {
+        didSet {
+            onHighlightedSuggestionChange?(highlightedSuggestionIndex)
+        }
+    }
+
+    var highlightedSuggestion: CommandOption? {
+        guard let highlightedSuggestionIndex, suggestions.indices.contains(highlightedSuggestionIndex) else { return nil }
+        return suggestions[highlightedSuggestionIndex]
+    }
+
+    var isSelectingSuggestion: Bool {
+        highlightedSuggestionIndex != nil && !suggestions.isEmpty
+    }
     var placeholder = "" {
         didSet {
             needsDisplay = true
@@ -254,6 +339,14 @@ final class PromptNSTextView: NSTextView {
             onFocus?()
         }
         return didBecomeFirstResponder
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let didResign = super.resignFirstResponder()
+        if didResign {
+            highlightedSuggestionIndex = suggestions.isEmpty ? nil : 0
+        }
+        return didResign
     }
 
     override func keyDown(with event: NSEvent) {
@@ -279,12 +372,38 @@ final class PromptNSTextView: NSTextView {
             }
         }
 
+        if suggestions.isEmpty == false {
+            switch event.keyCode {
+            case 125:
+                moveSuggestionSelection(offset: 1)
+                return
+            case 126:
+                moveSuggestionSelection(offset: -1)
+                return
+            case 36, 76:
+                onSelectSuggestion?()
+                return
+            case 48:
+                onSelectSuggestion?()
+                return
+            default:
+                break
+            }
+        }
+
         if isReturn && !insertsNewline {
             onSubmit?()
             return
         }
 
         super.keyDown(with: event)
+    }
+
+    private func moveSuggestionSelection(offset: Int) {
+        guard !suggestions.isEmpty else { return }
+        let currentIndex = highlightedSuggestionIndex ?? 0
+        let nextIndex = min(max(currentIndex + offset, 0), suggestions.count - 1)
+        highlightedSuggestionIndex = nextIndex
     }
 
     override func draw(_ dirtyRect: NSRect) {

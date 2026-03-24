@@ -4,6 +4,7 @@ import OSLog
 protocol OpenCodeAPIClientProtocol: Sendable {
     func health() async throws -> OpenCodeServerHealth
     func projects() async throws -> [OpenCodeProject]
+    func commands() async throws -> CommandCatalog
     func agentCatalog() async throws -> AgentCatalog
     func sessions(directory: String) async throws -> [OpenCodeSession]
     func sessionStatus(directory: String) async throws -> [String: SessionStatus]
@@ -12,6 +13,7 @@ protocol OpenCodeAPIClientProtocol: Sendable {
     func createSession(directory: String, title: String?, parentID: String?) async throws -> OpenCodeSession
     func archiveSession(directory: String, sessionID: String, archivedAtMS: Double) async throws -> OpenCodeSession
     func abortSession(directory: String, sessionID: String) async throws
+    func executeCommand(directory: String, sessionID: String, command: String, arguments: String, agent: String?, model: ModelReference?) async throws -> MessageEnvelope
     func sendMessage(directory: String, sessionID: String, text: String, agent: String?, model: ModelReference?, variant: String?) async throws
     func modelCatalog() async throws -> ModelCatalog
     func questions(directory: String) async throws -> [QuestionRequest]
@@ -51,6 +53,10 @@ struct OpenCodeAPIClient: @unchecked Sendable {
 
     func projects() async throws -> [OpenCodeProject] {
         try await globalGet("/project")
+    }
+
+    func commands() async throws -> CommandCatalog {
+        try await globalGet("/command")
     }
 
     func agentCatalog() async throws -> AgentCatalog {
@@ -133,6 +139,37 @@ struct OpenCodeAPIClient: @unchecked Sendable {
             responseType: Bool.self,
             allowNoBody: true
         )
+    }
+
+    func executeCommand(directory: String, sessionID: String, command: String, arguments: String, agent: String?, model: ModelReference?) async throws -> MessageEnvelope {
+        struct Body: Encodable {
+            let agent: String?
+            let model: String?
+            let command: String
+            let arguments: String
+        }
+
+        logger.notice(
+            "Execute command request directory=\(directory, privacy: .public) sessionID=\(sessionID, privacy: .public) command=\(command, privacy: .public) argsBytes=\(arguments.utf8.count, privacy: .public)"
+        )
+
+        let response: MessageEnvelope = try await send(
+            path: "/session/\(sessionID)/command",
+            method: "POST",
+            directory: directory,
+            body: Body(agent: agent, model: Self.commandModelIdentifier(model), command: command, arguments: arguments),
+            responseType: MessageEnvelope.self
+        )
+
+        logger.notice(
+            "Execute command completed directory=\(directory, privacy: .public) sessionID=\(sessionID, privacy: .public) command=\(command, privacy: .public)"
+        )
+
+        return response
+    }
+
+    static func commandModelIdentifier(_ model: ModelReference?) -> String? {
+        model?.key
     }
 
     func sendMessage(directory: String, sessionID: String, text: String, agent: String?, model: ModelReference?, variant: String?) async throws {

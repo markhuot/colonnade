@@ -366,6 +366,8 @@ private struct SessionComposerView: View {
     ]
 
     @State private var promptHeight = PromptTextView.defaultHeight
+    @State private var highlightedCommandSuggestionIndex: Int? = 0
+    @State private var promptSuggestionAnchor: CGRect = .zero
     @State private var placeholderText = Self.placeholderOptions.randomElement() ?? "Let's get started!"
 
     let sessionID: String
@@ -381,6 +383,16 @@ private struct SessionComposerView: View {
 
     private var agentOptions: [AgentOption] {
         appState.agentOptions(for: sessionID)
+    }
+
+    private var commandSuggestions: [CommandOption] {
+        appState.slashCommandSuggestions(for: sessionID)
+    }
+
+    private var normalizedHighlightedCommandSuggestionIndex: Int? {
+        guard !commandSuggestions.isEmpty else { return nil }
+        let candidate = highlightedCommandSuggestionIndex ?? 0
+        return min(max(candidate, 0), commandSuggestions.count - 1)
     }
 
     private var selectedAgentKey: Binding<String> {
@@ -426,11 +438,17 @@ private struct SessionComposerView: View {
                             set: { appState.setDraft($0, for: sessionID) }
                         ),
                         measuredHeight: $promptHeight,
+                        highlightedSuggestionIndex: $highlightedCommandSuggestionIndex,
+                        suggestions: commandSuggestions,
+                        suggestionAnchor: $promptSuggestionAnchor,
                         placeholder: placeholderText,
                         textColor: theme.primaryTextColor,
                         insertionPointColor: theme.primaryTextColor,
                         placeholderColor: theme.secondaryTextColor,
                         focusRequestID: appState.promptFocusRequest?.sessionID == sessionID ? appState.promptFocusRequest?.id : nil,
+                        onSelectSuggestion: { option in
+                            appState.applySlashCommandSuggestion(option, for: sessionID)
+                        },
                         onFocus: {
                             appState.focusSession(sessionID)
                         },
@@ -480,11 +498,180 @@ private struct SessionComposerView: View {
                     .padding(.trailing, 6)
                 }
                 .padding(18)
+                .background {
+                    SlashCommandSuggestionOverlayBridge(
+                        sessionID: sessionID,
+                        anchor: promptSuggestionAnchor,
+                        suggestions: commandSuggestions,
+                        highlightedIndex: normalizedHighlightedCommandSuggestionIndex,
+                        theme: theme,
+                        onSelect: { option in
+                            appState.applySlashCommandSuggestion(option, for: sessionID)
+                        }
+                    )
+                }
             } else if let request = activePermission {
                 PermissionPromptView(request: request)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+}
+
+private struct SlashCommandSuggestionsView: View {
+    let theme: OpenCodeTheme
+    let suggestions: [CommandOption]
+    let highlightedIndex: Int?
+    let onSelect: (CommandOption) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, option in
+                Button {
+                    onSelect(option)
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(option.slashName)
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(theme.primaryText)
+
+                        if let description = option.description, !description.isEmpty {
+                            Text(description)
+                                .font(.caption)
+                                .foregroundStyle(theme.secondaryText)
+                                .lineLimit(1)
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(index == highlightedIndex ? theme.accentSubtleBackground : .clear)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(6)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(theme.surfaceBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(theme.border.opacity(0.7), lineWidth: 1)
+        )
+    }
+}
+
+private struct SlashCommandSuggestionOverlayBridge: NSViewRepresentable {
+    let sessionID: String
+    let anchor: CGRect
+    let suggestions: [CommandOption]
+    let highlightedIndex: Int?
+    let theme: OpenCodeTheme
+    let onSelect: (CommandOption) -> Void
+
+    @MainActor
+    func makeNSView(context: Context) -> NSView {
+        NSView(frame: .zero)
+    }
+
+    @MainActor
+    func updateNSView(_ nsView: NSView, context: Context) {
+        if suggestions.isEmpty || anchor == .zero {
+            SlashCommandSuggestionOverlayController.shared.dismiss(for: sessionID)
+        } else {
+            SlashCommandSuggestionOverlayController.shared.present(
+                for: sessionID,
+                anchor: anchor,
+                suggestions: suggestions,
+                highlightedIndex: highlightedIndex,
+                theme: theme,
+                onSelect: onSelect
+            )
+        }
+    }
+
+    @MainActor
+    static func dismantleNSView(_ nsView: NSView, coordinator: ()) {
+        SlashCommandSuggestionOverlayController.shared.dismissAll()
+    }
+}
+
+@MainActor
+private final class SlashCommandSuggestionOverlayController {
+    static let shared = SlashCommandSuggestionOverlayController()
+
+    private var panel: NSPanel?
+    private var activeSessionID: String?
+
+    func present(
+        for sessionID: String,
+        anchor: CGRect,
+        suggestions: [CommandOption],
+        highlightedIndex: Int?,
+        theme: OpenCodeTheme,
+        onSelect: @escaping (CommandOption) -> Void
+    ) {
+        guard !suggestions.isEmpty, anchor != .zero else {
+            dismiss(for: sessionID)
+            return
+        }
+
+        let panel = ensurePanel()
+        let rowHeight: CGFloat = 34
+        let height = min(CGFloat(suggestions.count) * rowHeight + 12, 220)
+        let width = max(anchor.width, 360)
+        let origin = CGPoint(x: anchor.minX, y: anchor.minY - height - 6)
+        panel.setFrame(CGRect(origin: origin, size: CGSize(width: width, height: height)), display: true)
+        panel.contentView = NSHostingView(
+            rootView: SlashCommandSuggestionsView(theme: theme, suggestions: suggestions, highlightedIndex: highlightedIndex, onSelect: { option in
+                onSelect(option)
+                self.dismiss(for: sessionID)
+            })
+        )
+        if panel.isVisible == false {
+            panel.orderFrontRegardless()
+        }
+        activeSessionID = sessionID
+    }
+
+    func dismiss(for sessionID: String) {
+        guard activeSessionID == sessionID else { return }
+        panel?.orderOut(nil)
+        activeSessionID = nil
+    }
+
+    func dismissAll() {
+        panel?.orderOut(nil)
+        activeSessionID = nil
+    }
+
+    private func ensurePanel() -> NSPanel {
+        if let panel {
+            return panel
+        }
+
+        let panel = NSPanel(
+            contentRect: .zero,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isFloatingPanel = true
+        panel.level = .popUpMenu
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
+        self.panel = panel
+        return panel
     }
 }
 

@@ -6,6 +6,8 @@ protocol WorkspaceServiceProtocol: Sendable {
     func createSession(directory: String, title: String?, parentID: String?) async throws -> OpenCodeSession
     func archiveSession(directory: String, sessionID: String) async throws -> OpenCodeSession
     func stopSession(directory: String, sessionID: String) async throws
+    func loadCommandCatalog() async throws -> CommandCatalog
+    func executeCommand(directory: String, sessionID: String, command: String, arguments: String, agent: String?, model: ModelReference?) async throws -> MessageEnvelope
     func loadSessions(directory: String) async throws -> [OpenCodeSession]
     func loadMessages(directory: String, sessionID: String) async throws -> [MessageEnvelope]
     func loadTodos(directory: String, sessionID: String) async throws -> [SessionTodo]
@@ -68,6 +70,14 @@ struct WorkspaceService: WorkspaceServiceProtocol {
 
     func stopSession(directory: String, sessionID: String) async throws {
         try await client.abortSession(directory: directory, sessionID: sessionID)
+    }
+
+    func loadCommandCatalog() async throws -> CommandCatalog {
+        try await client.commands()
+    }
+
+    func executeCommand(directory: String, sessionID: String, command: String, arguments: String, agent: String?, model: ModelReference?) async throws -> MessageEnvelope {
+        try await client.executeCommand(directory: directory, sessionID: sessionID, command: command, arguments: arguments, agent: agent, model: model)
     }
 
     func loadSessions(directory: String) async throws -> [OpenCodeSession] {

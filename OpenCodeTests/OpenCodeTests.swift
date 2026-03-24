@@ -861,6 +861,23 @@ final class WorkspaceServiceTests: XCTestCase {
 
         XCTAssertEqual(client.abortSessionCalls, [.init(directory: "/tmp/project", sessionID: "session-1")])
     }
+
+    func testLoadCommandCatalogReturnsValuesFromInjectedClient() async throws {
+        let client = MockOpenCodeAPIClient(commands: .init(commands: [
+            .init(name: "happycog/release", description: "Release branch helper", agent: nil, model: nil, template: "tmpl", subtask: nil)
+        ]))
+
+        let catalog = try await WorkspaceService(client: client).loadCommandCatalog()
+
+        XCTAssertEqual(catalog.commands.map(\.name), ["happycog/release"])
+    }
+
+    func testCommandModelIdentifierUsesProviderSlashModelKey() {
+        let model = ModelReference(providerID: "github-copilot", modelID: "gpt-5.4")
+
+        XCTAssertEqual(OpenCodeAPIClient.commandModelIdentifier(model), "github-copilot/gpt-5.4")
+        XCTAssertNil(OpenCodeAPIClient.commandModelIdentifier(nil))
+    }
 }
 
 @MainActor
@@ -1076,9 +1093,12 @@ final class OpenCodeAppModelTests: XCTestCase {
         XCTAssertEqual(panes.map(\.sessionID), ["session-1", "session-3", "session-2"])
     }
 
-    func testWorkspaceCommandCenterTracksPaneFocusAfterBinding() {
-        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
+    func testWorkspaceCommandCenterTracksPaneFocusAfterBinding() async throws {
         let commandCenter = WorkspaceCommandCenter.shared
+        commandCenter.resetForTesting()
+        defer { commandCenter.resetForTesting() }
+
+        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
 
         commandCenter.bind(appState: appState)
         XCTAssertFalse(commandCenter.canFocusPreviousPane)
@@ -1086,11 +1106,21 @@ final class OpenCodeAppModelTests: XCTestCase {
 
         appState.openSessionIDs = ["session-1", "session-2"]
         appState.focusedSessionID = "session-1"
+        commandCenter.updateAvailability(
+            selectedDirectory: appState.selectedDirectory,
+            focusedSessionID: appState.focusedSessionID,
+            openSessionIDs: appState.openSessionIDs
+        )
 
         XCTAssertTrue(commandCenter.canFocusPreviousPane)
         XCTAssertTrue(commandCenter.canFocusNextPane)
 
         appState.focusedSessionID = nil
+        commandCenter.updateAvailability(
+            selectedDirectory: appState.selectedDirectory,
+            focusedSessionID: appState.focusedSessionID,
+            openSessionIDs: appState.openSessionIDs
+        )
 
         XCTAssertFalse(commandCenter.canFocusPreviousPane)
         XCTAssertFalse(commandCenter.canFocusNextPane)
@@ -1098,6 +1128,8 @@ final class OpenCodeAppModelTests: XCTestCase {
 
     func testWorkspaceCommandCenterEnablesPaneCommandsAtEdgesWhenPaneIsFocused() {
         let commandCenter = WorkspaceCommandCenter.shared
+        commandCenter.resetForTesting()
+        defer { commandCenter.resetForTesting() }
 
         commandCenter.updateAvailability(
             selectedDirectory: "/tmp/project",
@@ -1111,6 +1143,8 @@ final class OpenCodeAppModelTests: XCTestCase {
 
     func testWorkspaceCommandCenterEnablesCloseSessionForFocusedWorkspacePane() {
         let commandCenter = WorkspaceCommandCenter.shared
+        commandCenter.resetForTesting()
+        defer { commandCenter.resetForTesting() }
 
         commandCenter.updateAvailability(
             selectedDirectory: "/tmp/project",
@@ -1123,6 +1157,8 @@ final class OpenCodeAppModelTests: XCTestCase {
 
     func testWorkspaceCommandCenterDisablesCloseSessionWithoutFocusedWorkspacePane() {
         let commandCenter = WorkspaceCommandCenter.shared
+        commandCenter.resetForTesting()
+        defer { commandCenter.resetForTesting() }
 
         commandCenter.updateAvailability(
             selectedDirectory: "/tmp/project",
@@ -1131,6 +1167,45 @@ final class OpenCodeAppModelTests: XCTestCase {
         )
 
         XCTAssertFalse(commandCenter.canCloseFocusedSession)
+    }
+
+    func testWorkspaceCommandCenterCreatesSessionInForegroundWorkspaceWindow() async throws {
+        let commandCenter = WorkspaceCommandCenter.shared
+        commandCenter.resetForTesting()
+        defer { commandCenter.resetForTesting() }
+
+        let firstDirectory = "/tmp/project-a"
+        let secondDirectory = "/tmp/project-b"
+        let firstService = MockWorkspaceService(createSessionResult: makeSession(id: "ses-created-a", directory: firstDirectory))
+        let secondService = MockWorkspaceService(createSessionResult: makeSession(id: "ses-created-b", directory: secondDirectory))
+
+        let firstAppState = OpenCodeAppModel(
+            workspaceService: firstService,
+            repository: PersistenceRepository(persistence: PersistenceController(inMemory: true)),
+            persistsWorkspacePaneState: false,
+            initialDirectory: firstDirectory
+        )
+        firstAppState.selectedDirectory = firstDirectory
+
+        let secondAppState = OpenCodeAppModel(
+            workspaceService: secondService,
+            repository: PersistenceRepository(persistence: PersistenceController(inMemory: true)),
+            persistsWorkspacePaneState: false,
+            initialDirectory: secondDirectory
+        )
+        secondAppState.selectedDirectory = secondDirectory
+
+        commandCenter.bind(appState: firstAppState)
+        commandCenter.bind(appState: secondAppState)
+        commandCenter.registerWorkspaceWindowNumber(11, appState: firstAppState)
+        commandCenter.registerWorkspaceWindowNumber(22, appState: secondAppState)
+        commandCenter.currentWindowNumberProvider = { 22 }
+
+        commandCenter.createSession()
+        try await Task.sleep(for: .milliseconds(150))
+
+        XCTAssertEqual(firstService.createSessionCalls, [])
+        XCTAssertEqual(secondService.createSessionCalls, [.init(directory: secondDirectory, title: nil, parentID: nil)])
     }
 
     func testLoadRestoresPersistedPaneStateAndClampsPaneWidths() async throws {
@@ -1949,6 +2024,100 @@ final class OpenCodeAppModelTests: XCTestCase {
         XCTAssertEqual(workspaceService.sendMessageCalls.first?.agent, "planner")
     }
 
+    func testLoadCachesCommandCatalog() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let session = makeSession(id: "session-1", directory: directory)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
+        )
+        workspaceService.commandCatalogResult = .init(commands: [
+            .init(name: "happycog/release", description: "Release branch helper", agent: nil, model: nil, template: "tmpl", subtask: nil)
+        ])
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+
+        XCTAssertEqual(appState.availableCommandOptions().map(\.slashName), ["/happycog/release"])
+    }
+
+    func testSlashCommandSuggestionsMatchNestedCommandPath() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let session = makeSession(id: "session-1", directory: directory)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
+        )
+        workspaceService.commandCatalogResult = .init(commands: [
+            .init(name: "happycog/release", description: "Release branch helper", agent: nil, model: nil, template: "tmpl", subtask: nil),
+            .init(name: "happycog/init", description: "Init helper", agent: nil, model: nil, template: "tmpl", subtask: nil)
+        ])
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+        appState.openSessionIDs = [session.id]
+        appState.focusedSessionID = session.id
+        appState.setDraft("/rel", for: session.id)
+
+        XCTAssertEqual(appState.slashCommandSuggestions(for: session.id).map(\.slashName), ["/happycog/release"])
+    }
+
+    func testSendMessageExecutesSlashCommandWhenDraftStartsWithSlash() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let session = makeSession(id: "session-1", directory: directory)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
+        )
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+        appState.openSessionIDs = [session.id]
+        appState.drafts[session.id] = "/happycog/release 2.3.4 360"
+
+        appState.sendMessage(sessionID: session.id)
+        try await waitForAsyncWork()
+
+        XCTAssertEqual(workspaceService.executeCommandCalls, [
+            .init(
+                directory: directory,
+                sessionID: session.id,
+                command: "happycog/release",
+                arguments: "2.3.4 360",
+                agent: nil,
+                model: nil
+            )
+        ])
+        XCTAssertTrue(workspaceService.sendMessageCalls.isEmpty)
+    }
+
     func testSendMessageFailureRestoresDraftAndSetsError() async throws {
         let directory = try makeTemporaryDirectory()
         let persistence = PersistenceController(inMemory: true)
@@ -2618,6 +2787,15 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
         let variant: String?
     }
 
+    struct CommandCall: Equatable {
+        let directory: String
+        let sessionID: String
+        let command: String
+        let arguments: String
+        let agent: String?
+        let model: ModelReference?
+    }
+
     struct SessionCall: Equatable {
         let directory: String
         let sessionID: String
@@ -2646,6 +2824,7 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
     var interactionSnapshotResult: InteractionSnapshot
     var createSessionResult: OpenCodeSession
     var archiveSessionResult: OpenCodeSession
+    var commandCatalogResult: CommandCatalog
     var loadSessionsResult: [OpenCodeSession]
     var messagesResult: [String: [MessageEnvelope]]
     var todosResult: [String: [SessionTodo]]
@@ -2662,6 +2841,7 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
     private(set) var createSessionCalls: [CreateSessionCall] = []
     private(set) var archiveSessionCalls: [SessionCall] = []
     private(set) var stopSessionCalls: [SessionCall] = []
+    private(set) var executeCommandCalls: [CommandCall] = []
     private(set) var loadSessionsDirectories: [String] = []
     private(set) var loadMessagesCalls: [SessionCall] = []
     private(set) var loadTodosCalls: [SessionCall] = []
@@ -2676,6 +2856,7 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
         interactionSnapshotResult: InteractionSnapshot = InteractionSnapshot(questions: [], permissions: []),
         createSessionResult: OpenCodeSession = makeSession(id: "created-session"),
         archiveSessionResult: OpenCodeSession = makeSession(id: "archived-session"),
+        commandCatalogResult: CommandCatalog = .init(commands: []),
         loadSessionsResult: [OpenCodeSession] = [],
         messagesResult: [String: [MessageEnvelope]] = [:],
         todosResult: [String: [SessionTodo]] = [:],
@@ -2688,6 +2869,7 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
         self.interactionSnapshotResult = interactionSnapshotResult
         self.createSessionResult = createSessionResult
         self.archiveSessionResult = archiveSessionResult
+        self.commandCatalogResult = commandCatalogResult
         self.loadSessionsResult = loadSessionsResult
         self.messagesResult = messagesResult
         self.todosResult = todosResult
@@ -2725,6 +2907,19 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
 
     func stopSession(directory: String, sessionID: String) async throws {
         record { stopSessionCalls.append(.init(directory: directory, sessionID: sessionID)) }
+    }
+
+    func loadCommandCatalog() async throws -> CommandCatalog {
+        commandCatalogResult
+    }
+
+    func executeCommand(directory: String, sessionID: String, command: String, arguments: String, agent: String?, model: ModelReference?) async throws -> MessageEnvelope {
+        record {
+            executeCommandCalls.append(
+                .init(directory: directory, sessionID: sessionID, command: command, arguments: arguments, agent: agent, model: model)
+            )
+        }
+        return makeMessage(sessionID: sessionID)
     }
 
     func loadSessions(directory: String) async throws -> [OpenCodeSession] {
@@ -2934,6 +3129,7 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
     let permissionsResult: [PermissionRequest]
     let healthResult: OpenCodeServerHealth
     let projectsResult: [OpenCodeProject]
+    let commandsResult: CommandCatalog
     let agentCatalogResult: AgentCatalog
 
     private let lock = NSLock()
@@ -2949,6 +3145,7 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
         permissions: [PermissionRequest] = [],
         health: OpenCodeServerHealth = .init(healthy: true, version: "1.0.0"),
         projects: [OpenCodeProject] = [],
+        commands: CommandCatalog = .init(commands: []),
         agentCatalog: AgentCatalog = .init(agents: [])
     ) {
         sessionsResult = sessions
@@ -2957,6 +3154,7 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
         permissionsResult = permissions
         healthResult = health
         projectsResult = projects
+        commandsResult = commands
         agentCatalogResult = agentCatalog
     }
 
@@ -2972,6 +3170,10 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
             projectsCallCount += 1
         }
         return projectsResult
+    }
+
+    func commands() async throws -> CommandCatalog {
+        commandsResult
     }
 
     func agentCatalog() async throws -> AgentCatalog {
@@ -3013,6 +3215,11 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
             recordedDirectories.append(directory)
             abortSessionCalls.append(.init(directory: directory, sessionID: sessionID))
         }
+    }
+
+    func executeCommand(directory: String, sessionID: String, command: String, arguments: String, agent: String?, model: ModelReference?) async throws -> MessageEnvelope {
+        record(directory)
+        return makeMessage(sessionID: sessionID)
     }
 
     func sendMessage(directory: String, sessionID: String, text: String, agent: String?, model: ModelReference?, variant: String?) async throws {

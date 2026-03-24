@@ -177,6 +177,148 @@ struct AgentOption: Identifiable, Hashable {
     }
 }
 
+struct CommandCatalog: Codable, Hashable {
+    private struct Wrapper: Codable {
+        let commands: [CommandDefinition]?
+        let all: [CommandDefinition]?
+        let available: [CommandDefinition]?
+        let items: [CommandDefinition]?
+    }
+
+    let commands: [CommandDefinition]
+
+    init(commands: [CommandDefinition]) {
+        self.commands = commands
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+
+        if let commands = try? container.decode([CommandDefinition].self) {
+            self.commands = commands
+            return
+        }
+
+        if let wrapper = try? container.decode(Wrapper.self) {
+            self.commands = wrapper.commands ?? wrapper.all ?? wrapper.available ?? wrapper.items ?? []
+            return
+        }
+
+        throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported command catalog payload")
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(commands)
+    }
+}
+
+struct CommandDefinition: Codable, Identifiable, Hashable {
+    let name: String
+    let description: String?
+    let agent: String?
+    let model: String?
+    let template: String
+    let subtask: Bool?
+
+    var id: String { name }
+
+    var slashName: String {
+        name.hasPrefix("/") ? name : "/\(name)"
+    }
+}
+
+struct CommandOption: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let description: String?
+
+    var slashName: String {
+        name.hasPrefix("/") ? name : "/\(name)"
+    }
+}
+
+struct CommandInvocation: Equatable {
+    let name: String
+    let arguments: String
+
+    init?(draft: String) {
+        let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedDraft.hasPrefix("/") else { return nil }
+
+        let body = String(trimmedDraft.dropFirst())
+        let pieces = body.split(maxSplits: 1, whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard let rawName = pieces.first?.trimmingCharacters(in: .whitespacesAndNewlines), !rawName.isEmpty else {
+            return nil
+        }
+
+        name = rawName.hasPrefix("/") ? String(rawName.dropFirst()) : rawName
+        arguments = pieces.count > 1 ? pieces[1].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+    }
+}
+
+enum CommandAutocomplete {
+    static func suggestions(for draft: String, commands: [CommandOption], limit: Int = 8) -> [CommandOption] {
+        guard let query = query(from: draft) else { return [] }
+        let normalizedQuery = normalized(query)
+
+        return commands
+            .compactMap { command -> (CommandOption, Int, String)? in
+                guard let score = matchScore(query: normalizedQuery, command: command) else { return nil }
+                return (command, score, command.slashName)
+            }
+            .sorted { lhs, rhs in
+                if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }
+                return lhs.2.localizedCaseInsensitiveCompare(rhs.2) == .orderedAscending
+            }
+            .prefix(limit)
+            .map(\.0)
+    }
+
+    static func applying(_ command: CommandOption, to draft: String) -> String? {
+        guard let query = query(from: draft) else { return nil }
+        let prefixLength = query.count
+        let startIndex = draft.index(draft.startIndex, offsetBy: prefixLength)
+        let remainder = String(draft[startIndex...])
+        let suffix = remainder.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if suffix.isEmpty {
+            return "\(command.slashName) "
+        }
+
+        return "\(command.slashName) \(suffix)"
+    }
+
+    private static func query(from draft: String) -> String? {
+        guard draft.hasPrefix("/") else { return nil }
+        let firstLine = draft.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? draft
+        let commandPortion = firstLine.split(maxSplits: 1, whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? firstLine
+        let trimmed = commandPortion.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func matchScore(query: String, command: CommandOption) -> Int? {
+        let slashName = normalized(command.slashName)
+        if slashName.hasPrefix(query) { return 0 }
+
+        let bareQuery = query.hasPrefix("/") ? String(query.dropFirst()) : query
+        guard !bareQuery.isEmpty else { return 1 }
+
+        let pathComponents = normalized(command.name)
+            .split(separator: "/")
+            .map(String.init)
+
+        if pathComponents.contains(where: { $0.hasPrefix(bareQuery) }) { return 1 }
+        if pathComponents.contains(where: { $0.contains(bareQuery) }) { return 2 }
+        if slashName.contains(query) { return 3 }
+        return nil
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+}
+
 struct ModelContextKey: Hashable {
     let providerID: String
     let modelID: String
