@@ -15,12 +15,12 @@ private struct ThemeTokenPropertyGroup: TextProperty {
     }
 }
 
-private struct ShikiThemeDocument: Decodable {
+private struct TextMateThemeDocument: Decodable {
     let name: String
     let displayName: String?
     let type: String?
     let colors: [String: String]
-    let tokenColors: [ShikiTokenColorRule]
+    let tokenColors: [TextMateTokenColorRule]
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -28,7 +28,7 @@ private struct ShikiThemeDocument: Decodable {
         displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
         type = try container.decodeIfPresent(String.self, forKey: .type)
         colors = try container.decodeIfPresent([String: String].self, forKey: .colors) ?? [:]
-        tokenColors = try container.decodeIfPresent([ShikiTokenColorRule].self, forKey: .tokenColors) ?? []
+        tokenColors = try container.decodeIfPresent([TextMateTokenColorRule].self, forKey: .tokenColors) ?? []
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -40,14 +40,14 @@ private struct ShikiThemeDocument: Decodable {
     }
 }
 
-private struct ShikiTokenColorRule: Decodable {
+private struct TextMateTokenColorRule: Decodable {
     let scopes: [String]
-    let settings: ShikiTokenSettings
+    let settings: TextMateTokenSettings
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let rawScope = try container.decodeIfPresent(ShikiScopeValue.self, forKey: .scope)
-        settings = try container.decodeIfPresent(ShikiTokenSettings.self, forKey: .settings) ?? .empty
+        let rawScope = try container.decodeIfPresent(TextMateScopeValue.self, forKey: .scope)
+        settings = try container.decodeIfPresent(TextMateTokenSettings.self, forKey: .settings) ?? .empty
         scopes = rawScope?.scopes ?? []
     }
 
@@ -57,7 +57,7 @@ private struct ShikiTokenColorRule: Decodable {
     }
 }
 
-private enum ShikiScopeValue: Decodable {
+private enum TextMateScopeValue: Decodable {
     case string(String)
     case array([String])
 
@@ -90,7 +90,7 @@ private enum ShikiScopeValue: Decodable {
     }
 }
 
-private struct ShikiTokenSettings: Decodable {
+private struct TextMateTokenSettings: Decodable {
     let foreground: String?
     let background: String?
     let fontStyle: String?
@@ -99,8 +99,8 @@ private struct ShikiTokenSettings: Decodable {
 }
 
 
-final class ShikiThemeCatalog: @unchecked Sendable {
-    static let shared = ShikiThemeCatalog()
+final class TextMateThemeCatalog: @unchecked Sendable {
+    static let shared = TextMateThemeCatalog()
 
     private let displayNameByID: [OpenCodeThemeID: String]
     private let themeByID: [OpenCodeThemeID: OpenCodeTheme]
@@ -114,7 +114,7 @@ final class ShikiThemeCatalog: @unchecked Sendable {
 
         for themeURL in Self.themeFileURLs(fileManager: fileManager) {
             guard let data = try? Data(contentsOf: themeURL),
-                  let document = try? decoder.decode(ShikiThemeDocument.self, from: data) else {
+                  let document = try? decoder.decode(TextMateThemeDocument.self, from: data) else {
                 continue
             }
 
@@ -152,8 +152,8 @@ final class ShikiThemeCatalog: @unchecked Sendable {
         themeByID[id]
     }
 
-    private static func buildTheme(id: OpenCodeThemeID, document: ShikiThemeDocument) -> OpenCodeTheme {
-        let palette = ShikiThemePalette(document: document)
+    private static func buildTheme(id: OpenCodeThemeID, document: TextMateThemeDocument) -> OpenCodeTheme {
+        let palette = TextMateThemePalette(document: document)
 
         return OpenCodeTheme(
             id: id,
@@ -183,7 +183,7 @@ final class ShikiThemeCatalog: @unchecked Sendable {
         )
     }
 
-    private static func makeHighlighterTheme(document: ShikiThemeDocument, palette: ShikiThemePalette) -> StructuredText.HighlighterTheme {
+    private static func makeHighlighterTheme(document: TextMateThemeDocument, palette: TextMateThemePalette) -> StructuredText.HighlighterTheme {
         var tokenProperties: [StructuredText.HighlighterTheme.TokenType: AnyTextProperty] = [:]
 
         for rule in document.tokenColors {
@@ -203,7 +203,7 @@ final class ShikiThemeCatalog: @unchecked Sendable {
         )
     }
 
-    private static func tokenProperty(from settings: ShikiTokenSettings) -> AnyTextProperty {
+    private static func tokenProperty(from settings: TextMateTokenSettings) -> AnyTextProperty {
         var properties: [AnyTextProperty] = []
 
         if let foreground = settings.foreground.flatMap(NSColor.init(cssHex:)) {
@@ -398,7 +398,7 @@ final class ShikiThemeCatalog: @unchecked Sendable {
         for bundle in candidateBundles {
             guard let resourceURL = bundle.resourceURL else { continue }
 
-            let folderURL = resourceURL.appendingPathComponent("ShikiThemes", isDirectory: true)
+            let folderURL = resourceURL.appendingPathComponent("TextMateThemes", isDirectory: true)
             if fileManager.fileExists(atPath: folderURL.path), seenPaths.insert(folderURL.path).inserted {
                 directories.append(folderURL)
             }
@@ -413,7 +413,7 @@ final class ShikiThemeCatalog: @unchecked Sendable {
     }
 }
 
-private struct ShikiThemePalette {
+private struct TextMateThemePalette {
     let colorScheme: ColorScheme?
     let windowBackground: NSColor
     let surfaceBackground: NSColor
@@ -438,7 +438,7 @@ private struct ShikiThemePalette {
     let errorBackground: NSColor
     let positive: NSColor
 
-    init(document: ShikiThemeDocument) {
+    init(document: TextMateThemeDocument) {
         let themeType = document.type?.lowercased()
         let isDark = themeType == "dark"
         let colors = document.colors

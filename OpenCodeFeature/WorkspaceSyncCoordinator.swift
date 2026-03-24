@@ -9,6 +9,7 @@ protocol WorkspaceSyncCoordinating: Sendable {
     func refreshMessages(sessionID: String) async
     func refreshTodos(sessionID: String) async
     func refreshInteractions(sessionID: String?) async
+    func refreshStatus(sessionID: String) async
 }
 
 protocol WorkspaceSyncRegistryProtocol: Actor {
@@ -400,9 +401,6 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
                     }
                     if let appliedPart {
                         await repository.upsertMessagePart(directory: directory, sessionID: sessionID, part: appliedPart, modelContextLimits: modelContextLimits)
-                        if part.type == .stepFinish {
-                            await repository.flushBufferedStreamMutations()
-                        }
                         return
                     }
                 }

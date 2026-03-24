@@ -2,6 +2,20 @@ import Combine
 import Foundation
 import OSLog
 
+protocol WorkspaceEventNotifying: Sendable {
+    func notify(_ event: WorkspaceEventNotification)
+}
+
+enum WorkspaceEventNotification: Equatable, Sendable {
+    case sessionStopped(sessionID: String, sessionTitle: String)
+    case permissionRequested(sessionID: String, sessionTitle: String, permission: String)
+    case questionAsked(sessionID: String, sessionTitle: String, question: String)
+}
+
+struct NoopWorkspaceEventNotifier: WorkspaceEventNotifying {
+    func notify(_ event: WorkspaceEventNotification) {}
+}
+
 @MainActor
 final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendable {
     private struct BufferedPartDelta: Sendable {
@@ -23,6 +37,10 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
     private var persistedSession: SessionDisplay?
     private var status: SessionStatus?
     private var pendingPartDeltas: [String: [BufferedPartDelta]] = [:]
+
+    var sessionTitle: String {
+        sessionModel?.title ?? persistedSession?.title ?? session?.title ?? id
+    }
 
     init(id: String) {
         self.id = id
@@ -191,6 +209,7 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
         session = SessionDisplay(
             id: sessionModel.id,
             title: sessionModel.title,
+            createdAtMS: sessionModel.time.created,
             updatedAtMS: updatedAtMS,
             parentID: sessionModel.parentID,
             status: status,
@@ -234,11 +253,21 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
     @Published private(set) var sessions: [SessionDisplay] = []
     @Published private(set) var paneStates: [String: SessionPaneState] = [:]
 
+    private var notifier: any WorkspaceEventNotifying
     private var modelContextLimits: [ModelContextKey: Int] = [:]
     private var sessionStates: [String: SessionLiveState] = [:]
+    private var previousStatusBySessionID: [String: SessionStatus] = [:]
+    private var questionRequestIDsBySessionID: [String: Set<String>] = [:]
+    private var permissionRequestIDsBySessionID: [String: Set<String>] = [:]
+    private var hasEstablishedNotificationBaseline = false
 
-    init(connection: WorkspaceConnection) {
+    init(connection: WorkspaceConnection, notifier: any WorkspaceEventNotifying = NoopWorkspaceEventNotifier()) {
         self.connection = connection
+        self.notifier = notifier
+    }
+
+    func setNotifier(_ notifier: any WorkspaceEventNotifying) {
+        self.notifier = notifier
     }
 
     func sessionState(for sessionID: String) -> SessionLiveState {
@@ -276,29 +305,42 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
     }
 
     func applyWorkspaceSnapshot(_ snapshot: WorkspaceSnapshot) {
+        let shouldNotify = hasEstablishedNotificationBaseline
         let incomingSessionIDs = Set(snapshot.sessions.map(\.id))
+        let questionsBySession = Dictionary(grouping: snapshot.questions, by: \.sessionID)
+        let permissionsBySession = Dictionary(grouping: snapshot.permissions, by: \.sessionID)
 
         for session in snapshot.sessions {
             let state = sessionState(for: session.id)
             state.applySessionModel(session)
-            state.applyStatus(snapshot.statuses[session.id])
+            let previousStatus = previousStatusBySessionID[session.id]
+            let newStatus = snapshot.statuses[session.id]
+            state.applyStatus(newStatus)
+            notifyIfSessionStopped(sessionID: session.id, previousStatus: previousStatus, newStatus: newStatus, shouldNotify: shouldNotify)
+            updateTrackedStatus(newStatus, sessionID: session.id)
         }
-
-        let questionsBySession = Dictionary(grouping: snapshot.questions, by: \.sessionID)
-        let permissionsBySession = Dictionary(grouping: snapshot.permissions, by: \.sessionID)
 
         for sessionID in incomingSessionIDs {
             let state = sessionState(for: sessionID)
-            state.replaceQuestions(questionsBySession[sessionID, default: []])
-            state.replacePermissions(permissionsBySession[sessionID, default: []])
+            let questions = questionsBySession[sessionID, default: []]
+            let permissions = permissionsBySession[sessionID, default: []]
+            state.replaceQuestions(questions)
+            state.replacePermissions(permissions)
+            notifyForNewInteractions(sessionID: sessionID, questions: questions, permissions: permissions, shouldNotify: shouldNotify)
+            questionRequestIDsBySessionID[sessionID] = Set(questions.map(\.id))
+            permissionRequestIDsBySessionID[sessionID] = Set(permissions.map(\.id))
         }
 
         for sessionID in sessionStates.keys where !incomingSessionIDs.contains(sessionID) {
             sessionStates.removeValue(forKey: sessionID)
             paneStates.removeValue(forKey: sessionID)
+            previousStatusBySessionID.removeValue(forKey: sessionID)
+            questionRequestIDsBySessionID.removeValue(forKey: sessionID)
+            permissionRequestIDsBySessionID.removeValue(forKey: sessionID)
         }
 
         refreshSessionsList()
+        hasEstablishedNotificationBaseline = true
     }
 
     func applyPersistenceSnapshot(_ snapshot: PersistenceSnapshot) {
@@ -315,18 +357,32 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
 
         for (sessionID, questions) in snapshot.questionsBySession {
             sessionState(for: sessionID).replaceQuestions(questions)
+            questionRequestIDsBySessionID[sessionID] = Set(questions.map(\.id))
         }
 
         for (sessionID, permissions) in snapshot.permissionsBySession {
             sessionState(for: sessionID).replacePermissions(permissions)
+            permissionRequestIDsBySessionID[sessionID] = Set(permissions.map(\.id))
+        }
+
+        for session in snapshot.sessions {
+            if let status = session.status {
+                previousStatusBySessionID[session.id] = status
+            } else {
+                previousStatusBySessionID.removeValue(forKey: session.id)
+            }
         }
 
         for sessionID in sessionStates.keys where !incomingSessionIDs.contains(sessionID) {
             sessionStates.removeValue(forKey: sessionID)
             paneStates.removeValue(forKey: sessionID)
+            previousStatusBySessionID.removeValue(forKey: sessionID)
+            questionRequestIDsBySessionID.removeValue(forKey: sessionID)
+            permissionRequestIDsBySessionID.removeValue(forKey: sessionID)
         }
 
         refreshSessionsList()
+        hasEstablishedNotificationBaseline = true
     }
 
     func applySessionLifecycle(session: OpenCodeSession, lifecycle: SessionLifecycleEvent) {
@@ -343,13 +399,19 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
             )
             sessionStates.removeValue(forKey: session.id)
             paneStates.removeValue(forKey: session.id)
+            previousStatusBySessionID.removeValue(forKey: session.id)
+            questionRequestIDsBySessionID.removeValue(forKey: session.id)
+            permissionRequestIDsBySessionID.removeValue(forKey: session.id)
         }
 
         refreshSessionsList()
     }
 
     func applyStatus(sessionID: String, status: SessionStatus?) {
+        let previousStatus = previousStatusBySessionID[sessionID]
         sessionState(for: sessionID).applyStatus(status)
+        notifyIfSessionStopped(sessionID: sessionID, previousStatus: previousStatus, newStatus: status, shouldNotify: hasEstablishedNotificationBaseline)
+        updateTrackedStatus(status, sessionID: sessionID)
         refreshSessionsList()
     }
 
@@ -372,21 +434,31 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
         let state = sessionState(for: sessionID)
         state.replaceQuestions(questions)
         state.replacePermissions(permissions)
+        notifyForNewInteractions(sessionID: sessionID, questions: questions, permissions: permissions, shouldNotify: hasEstablishedNotificationBaseline)
+        questionRequestIDsBySessionID[sessionID] = Set(questions.map(\.id))
+        permissionRequestIDsBySessionID[sessionID] = Set(permissions.map(\.id))
         refreshSessionsList()
     }
 
     func applyInteractionSnapshot(_ snapshot: InteractionSnapshot) {
+        let shouldNotify = hasEstablishedNotificationBaseline
         let questionsBySession = Dictionary(grouping: snapshot.questions, by: \.sessionID)
         let permissionsBySession = Dictionary(grouping: snapshot.permissions, by: \.sessionID)
         let sessionIDs = Set(questionsBySession.keys).union(permissionsBySession.keys).union(sessionStates.keys)
 
         for sessionID in sessionIDs {
             let state = sessionState(for: sessionID)
-            state.replaceQuestions(questionsBySession[sessionID, default: []])
-            state.replacePermissions(permissionsBySession[sessionID, default: []])
+            let questions = questionsBySession[sessionID, default: []]
+            let permissions = permissionsBySession[sessionID, default: []]
+            state.replaceQuestions(questions)
+            state.replacePermissions(permissions)
+            notifyForNewInteractions(sessionID: sessionID, questions: questions, permissions: permissions, shouldNotify: shouldNotify)
+            questionRequestIDsBySessionID[sessionID] = Set(questions.map(\.id))
+            permissionRequestIDsBySessionID[sessionID] = Set(permissions.map(\.id))
         }
 
         refreshSessionsList()
+        hasEstablishedNotificationBaseline = true
     }
 
     @discardableResult
@@ -445,20 +517,90 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
             "Refresh sessions list count=\(self.sessions.count, privacy: .public) order=\(orderedSessionIDs, privacy: .public)"
         )
     }
+
+    private func updateTrackedStatus(_ status: SessionStatus?, sessionID: String) {
+        if let status {
+            previousStatusBySessionID[sessionID] = status
+        } else {
+            previousStatusBySessionID.removeValue(forKey: sessionID)
+        }
+    }
+
+    private func notifyIfSessionStopped(
+        sessionID: String,
+        previousStatus: SessionStatus?,
+        newStatus: SessionStatus?,
+        shouldNotify: Bool
+    ) {
+        guard shouldNotify,
+              previousStatus?.isThinkingActive == true,
+              newStatus?.isThinkingActive != true else { return }
+
+        let sessionTitle = sessionState(for: sessionID).sessionTitle
+        notifier.notify(.sessionStopped(sessionID: sessionID, sessionTitle: sessionTitle))
+    }
+
+    private func notifyForNewInteractions(
+        sessionID: String,
+        questions: [QuestionRequest],
+        permissions: [PermissionRequest],
+        shouldNotify: Bool
+    ) {
+        guard shouldNotify else { return }
+
+        let sessionTitle = sessionState(for: sessionID).sessionTitle
+        let previousPermissionIDs = permissionRequestIDsBySessionID[sessionID, default: []]
+        for permission in permissions where !previousPermissionIDs.contains(permission.id) {
+            notifier.notify(
+                .permissionRequested(
+                    sessionID: sessionID,
+                    sessionTitle: sessionTitle,
+                    permission: permission.permission
+                )
+            )
+        }
+
+        let previousQuestionIDs = questionRequestIDsBySessionID[sessionID, default: []]
+        for request in questions where !previousQuestionIDs.contains(request.id) {
+            let questionText = request.questions.first?.question ?? "Question requires an answer"
+            notifier.notify(
+                .questionAsked(
+                    sessionID: sessionID,
+                    sessionTitle: sessionTitle,
+                    question: questionText
+                )
+            )
+        }
+    }
 }
 
 actor WorkspaceLiveStoreRegistry {
     static let shared = WorkspaceLiveStoreRegistry()
 
     private var stores: [WorkspaceConnection: WorkspaceLiveStore] = [:]
+    private var notifier: any WorkspaceEventNotifying
+
+    init(notifier: any WorkspaceEventNotifying = NoopWorkspaceEventNotifier()) {
+        self.notifier = notifier
+    }
+
+    func configureNotifier(_ notifier: any WorkspaceEventNotifying) async {
+        self.notifier = notifier
+        for store in stores.values {
+            await MainActor.run {
+                store.setNotifier(notifier)
+            }
+        }
+    }
 
     func store(for connection: WorkspaceConnection) async -> WorkspaceLiveStore {
         if let existing = stores[connection] {
             return existing
         }
 
+        let notifier = self.notifier
         let store = await MainActor.run {
-            WorkspaceLiveStore(connection: connection)
+            WorkspaceLiveStore(connection: connection, notifier: notifier)
         }
         stores[connection] = store
         return store

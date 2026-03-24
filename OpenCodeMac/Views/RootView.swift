@@ -193,6 +193,7 @@ private struct SidebarView: View {
 private struct SessionListSection: View {
     @ObservedObject var liveStore: WorkspaceLiveStore
     let openSessionIDs: [String]
+    @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
 
     let onStopRequest: (SessionDisplay) -> Void
@@ -246,6 +247,14 @@ private struct SessionListSection: View {
             todoProgress: session.todoProgress
         )
         .contextMenu {
+            if openSessionIDSet.contains(session.id) {
+                Button("Close Session") {
+                    appState.closeSession(session.id)
+                }
+
+                Divider()
+            }
+
             if session.status?.isThinkingActive == true {
                 Button("Stop Session...", role: .destructive) {
                     onStopRequest(session)
@@ -257,96 +266,6 @@ private struct SessionListSection: View {
             }
         }
         .tag(session.id)
-    }
-}
-
-struct SessionListEscapeKeyEvent {
-    static func shouldRequestStop(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, isListFocused: Bool) -> Bool {
-        guard isListFocused else { return false }
-
-        let activeModifiers = modifiers.intersection(.deviceIndependentFlagsMask)
-        let disallowedModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
-        guard activeModifiers.intersection(disallowedModifiers).isEmpty else { return false }
-
-        return keyCode == 53
-    }
-}
-
-private struct SessionListEscapeKeyHandler: NSViewRepresentable {
-    let onEscape: () -> Void
-
-    func makeNSView(context: Context) -> SessionListEscapeKeyMonitorView {
-        let view = SessionListEscapeKeyMonitorView()
-        view.onEscape = onEscape
-        return view
-    }
-
-    func updateNSView(_ nsView: SessionListEscapeKeyMonitorView, context: Context) {
-        nsView.onEscape = onEscape
-    }
-}
-
-private final class SessionListEscapeKeyMonitorView: NSView {
-    var onEscape: (() -> Void)?
-
-    private var monitor: Any?
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        installMonitor()
-    }
-
-    override func viewWillMove(toWindow newWindow: NSWindow?) {
-        if newWindow == nil {
-            removeMonitor()
-        }
-        super.viewWillMove(toWindow: newWindow)
-    }
-
-    private func installMonitor() {
-        removeMonitor()
-
-        guard let window else { return }
-
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self, weak window] event in
-            guard let self, let window, event.window === window else { return event }
-
-            let shouldRequestStop = SessionListEscapeKeyEvent.shouldRequestStop(
-                keyCode: event.keyCode,
-                modifiers: event.modifierFlags,
-                isListFocused: isListFocused(in: window)
-            )
-
-            guard shouldRequestStop else { return event }
-            onEscape?()
-            return nil
-        }
-    }
-
-    private func removeMonitor() {
-        guard let monitor else { return }
-        NSEvent.removeMonitor(monitor)
-        self.monitor = nil
-    }
-
-    private func isListFocused(in window: NSWindow) -> Bool {
-        guard let firstResponder = window.firstResponder as? NSView else { return false }
-
-        if firstResponder is NSTableView || firstResponder is NSOutlineView {
-            return true
-        }
-
-        return firstResponder.enclosingTableView != nil || firstResponder.enclosingOutlineView != nil
-    }
-}
-
-private extension NSView {
-    var enclosingTableView: NSTableView? {
-        sequence(first: self as NSView?, next: { $0?.superview }).first { $0 is NSTableView } as? NSTableView
-    }
-
-    var enclosingOutlineView: NSOutlineView? {
-        sequence(first: self as NSView?, next: { $0?.superview }).first { $0 is NSOutlineView } as? NSOutlineView
     }
 }
 

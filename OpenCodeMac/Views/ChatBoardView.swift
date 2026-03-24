@@ -5,8 +5,11 @@ struct ChatBoardView: View {
     @EnvironmentObject private var appState: OpenCodeAppModel
     @State private var transientPaneWidths: [String: CGFloat] = [:]
     @State private var draggedSessionID: String?
+    @State private var draggedPaneOffset: CGFloat = 0
 
     let sessionIDs: [String]
+
+    private let paneSpacing: CGFloat = 18
 
     var body: some View {
         if sessionIDs.isEmpty {
@@ -22,14 +25,6 @@ struct ChatBoardView: View {
                         ForEach(sessionIDs, id: \.self) { sessionID in
                             paneView(for: sessionID, liveStore: liveStore)
                         }
-
-                        Color.clear
-                            .frame(width: 44)
-                            .contentShape(Rectangle())
-                            .dropDestination(for: String.self) { items, _ in
-                                handlePaneDropToEnd(items: items)
-                            } isTargeted: { _ in
-                            }
                     }
                     .padding(20)
                 }
@@ -45,12 +40,14 @@ struct ChatBoardView: View {
                     pruneTransientPaneWidths()
                     if let draggedSessionID, !sessionIDs.contains(draggedSessionID) {
                         self.draggedSessionID = nil
+                        draggedPaneOffset = 0
                     }
                 }
                 .onChange(of: sessionIDs) { _, _ in
                     pruneTransientPaneWidths()
                     if let draggedSessionID, !sessionIDs.contains(draggedSessionID) {
                         self.draggedSessionID = nil
+                        draggedPaneOffset = 0
                     }
                     scrollToFocusedSession(with: proxy)
                 }
@@ -72,12 +69,17 @@ struct ChatBoardView: View {
         SessionColumnView(
             sessionState: liveStore.sessionState(for: sessionID),
             sessionID: sessionID,
-            onPaneDragStarted: {
-                draggedSessionID = sessionID
+            onPaneDragChanged: { translation in
+                handlePaneDragChanged(sessionID: sessionID, translation: translation)
+            },
+            onPaneDragEnded: {
+                handlePaneDragEnded(sessionID: sessionID)
             }
         )
             .id(sessionID)
             .frame(width: width)
+            .offset(x: draggedSessionID == sessionID ? draggedPaneOffset : 0)
+            .zIndex(draggedSessionID == sessionID ? 1 : 0)
             .overlay(alignment: Alignment.trailing) {
                 PaneResizeHandle(
                     sessionID: sessionID,
@@ -92,10 +94,6 @@ struct ChatBoardView: View {
                     }
                 )
                 .offset(x: 9)
-            }
-            .dropDestination(for: String.self) { items, _ in
-                handlePaneDrop(items: items, before: sessionID)
-            } isTargeted: { _ in
             }
     }
 
@@ -119,32 +117,51 @@ struct ChatBoardView: View {
         transientPaneWidths = transientPaneWidths.filter { sessionIDs.contains($0.key) }
     }
 
-    private func handlePaneDrop(items: [String], before targetSessionID: String) -> Bool {
-        let sourceSessionID = items.first ?? draggedSessionID
-        guard let sourceSessionID,
-              sourceSessionID != targetSessionID,
-              sessionIDs.contains(sourceSessionID),
-              sessionIDs.contains(targetSessionID) else {
-            draggedSessionID = nil
-            return false
+    private func handlePaneDragChanged(sessionID: String, translation: CGFloat) {
+        if draggedSessionID != sessionID {
+            draggedSessionID = sessionID
         }
 
-        appState.moveOpenSession(sourceSessionID, before: targetSessionID)
-        draggedSessionID = nil
-        return true
+        draggedPaneOffset = translation
+
+        guard let sourceIndex = sessionIDs.firstIndex(of: sessionID) else { return }
+        let paneFrames = paneFrames(for: sessionIDs)
+        let draggedMidX = paneFrames[sourceIndex].midX + translation
+
+        if sourceIndex > 0, draggedMidX < paneFrames[sourceIndex - 1].midX {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                appState.moveOpenSession(sessionID, before: sessionIDs[sourceIndex - 1], persist: false, sync: false)
+            }
+            return
+        }
+
+        if sourceIndex < sessionIDs.count - 1, draggedMidX > paneFrames[sourceIndex + 1].midX {
+            let insertionIndex = sourceIndex + 2
+            let targetSessionID = sessionIDs.indices.contains(insertionIndex) ? sessionIDs[insertionIndex] : nil
+            withAnimation(.easeInOut(duration: 0.15)) {
+                appState.moveOpenSession(sessionID, before: targetSessionID, persist: false, sync: false)
+            }
+        }
     }
 
-    private func handlePaneDropToEnd(items: [String]) -> Bool {
-        let sourceSessionID = items.first ?? draggedSessionID
-        guard let sourceSessionID,
-              sessionIDs.contains(sourceSessionID) else {
-            draggedSessionID = nil
-            return false
-        }
+    private func handlePaneDragEnded(sessionID: String) {
+        guard draggedSessionID == sessionID else { return }
 
-        appState.moveOpenSession(sourceSessionID)
-        draggedSessionID = nil
-        return true
+        appState.commitOpenSessionOrder()
+        withAnimation(.easeInOut(duration: 0.15)) {
+            draggedSessionID = nil
+            draggedPaneOffset = 0
+        }
+    }
+
+    private func paneFrames(for sessionIDs: [String]) -> [CGRect] {
+        var nextMinX: CGFloat = 0
+
+        return sessionIDs.map { sessionID in
+            let frame = CGRect(x: nextMinX, y: 0, width: paneWidth(for: sessionID), height: 0)
+            nextMinX += frame.width + paneSpacing
+            return frame
+        }
     }
 
     private func scrollToFocusedSession(with proxy: ScrollViewProxy, animated: Bool = true) {
@@ -191,7 +208,7 @@ private struct PaneResizeHandle: View {
                     .onChanged { value in
                         if dragStartWidth == nil {
                             dragStartWidth = displayedWidth
-                            optionPressedAtDragStart = NSEvent.modifierFlags.contains(.option)
+                            optionPressedAtDragStart = MacModifierKeyState.isOptionPressed()
                             isDragging = true
                             updateCursor(active: true)
                         }
@@ -220,10 +237,10 @@ private struct PaneResizeHandle: View {
 
     private func updateCursor(active: Bool) {
         if active, !cursorPushed {
-            NSCursor.resizeLeftRight.push()
+            MacCursorStyle.pushPaneResize()
             cursorPushed = true
         } else if !active, cursorPushed {
-            NSCursor.pop()
+            MacCursorStyle.pop()
             cursorPushed = false
         }
     }

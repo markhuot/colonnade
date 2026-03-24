@@ -8,11 +8,6 @@ final class OpenCodeAppModel: ObservableObject {
     static let defaultThinkingLevel = "__default__"
     static let defaultServerURL = URL(string: "http://127.0.0.1:4096")!
 
-    enum ServerStartupWaitResult {
-        case reached
-        case timedOut(lastFailureDescription: String?)
-    }
-
     enum LaunchStage: Equatable {
         case checkingLocalServer
         case chooseServerMode
@@ -50,14 +45,12 @@ final class OpenCodeAppModel: ObservableObject {
     private let repository: PersistenceRepository
     private let syncRegistry: any WorkspaceSyncRegistryProtocol
     private let storeRegistry: WorkspaceLiveStoreRegistry
+    private let serverController: WorkspaceServerController
     private let persistsWorkspacePaneState: Bool
     private let restoresLastSelectedDirectory: Bool
     private let apiClientProvider: @Sendable (URL) -> any OpenCodeAPIClientProtocol
     private let workspaceServiceProvider: @Sendable (URL) -> any WorkspaceServiceProtocol
-    private let localServerStarter: @Sendable (String) throws -> LocalServerLaunchHandle
-    private let localServerExecutablePathProvider: @Sendable () -> String
     var directoryChooser: @MainActor () -> Void
-    private let serverWaiterOverride: (@Sendable (URL, Duration) async -> ServerStartupWaitResult)?
     private var preferredDefaultModelReferenceProvider: () -> ModelReference?
     private var preferredDefaultModelReferenceSetter: (ModelReference?) -> Void
 
@@ -126,15 +119,19 @@ final class OpenCodeAppModel: ObservableObject {
         let resolvedLocalServerExecutablePathProvider = localServerExecutablePathProvider ?? {
             NSString(string: LocalServerPreferencesController.loadOpencodeExecutablePath()).expandingTildeInPath
         }
-        self.localServerExecutablePathProvider = resolvedLocalServerExecutablePathProvider
-        self.localServerStarter = localServerStarter ?? { [logger] executablePath in
+        let resolvedLocalServerStarter = localServerStarter ?? { [logger] executablePath in
             try LocalServerLauncher.launch(opencodePath: executablePath, logger: logger)
         }
+        serverController = WorkspaceServerController(
+            apiClientProvider: apiClientProvider,
+            localServerStarter: resolvedLocalServerStarter,
+            localServerExecutablePathProvider: resolvedLocalServerExecutablePathProvider,
+            serverWaiter: serverWaiter
+        )
         self.preferredDefaultModelReferenceProvider = preferredDefaultModelReferenceProvider
         self.preferredDefaultModelReferenceSetter = preferredDefaultModelReferenceSetter
         preferredDefaultModelReference = preferredDefaultModelReferenceProvider()
         self.directoryChooser = directoryChooser
-        serverWaiterOverride = serverWaiter
     }
 
     var sessions: [SessionDisplay] {
@@ -276,25 +273,7 @@ final class OpenCodeAppModel: ObservableObject {
             errorMessage = nil
 
             do {
-                let isReachable = await isServerReachable(at: Self.defaultServerURL)
-                if !isReachable {
-                    let executablePath = localServerExecutablePathProvider()
-                    logger.notice("Starting local server from \(executablePath, privacy: .public)")
-                    localServerHandle = try localServerStarter(executablePath)
-                    let waitResult = if let serverWaiterOverride {
-                        await serverWaiterOverride(Self.defaultServerURL, .seconds(10))
-                    } else {
-                        await waitForServer(at: Self.defaultServerURL, timeout: .seconds(10))
-                    }
-
-                    switch waitResult {
-                    case .reached:
-                        break
-                    case let .timedOut(lastFailureDescription):
-                        throw StartupError.serverStartTimedOut(lastFailureDescription)
-                    }
-                }
-
+                localServerHandle = try await serverController.startLocalServerIfNeeded(at: Self.defaultServerURL) ?? localServerHandle
                 serverURL = Self.defaultServerURL
                 chooseDirectory()
             } catch {
@@ -313,16 +292,11 @@ final class OpenCodeAppModel: ObservableObject {
             errorMessage = nil
 
             do {
-                let resolvedURL = try normalizedServerURL(from: remoteServerURLText)
-                let client = apiClientProvider(resolvedURL)
-                let health = try await client.health()
-                guard health.healthy else {
-                    throw StartupError.serverUnhealthy
-                }
-
-                serverURL = resolvedURL
+                let connection = try await serverController.connectToRemoteServer(from: remoteServerURLText)
+                serverURL = connection.serverURL
+                remoteServerURLText = connection.normalizedURLText
                 launchStage = .remoteDirectoryEntry
-                await refreshRemoteProjectSuggestions()
+                remoteProjectSuggestions = connection.projectSuggestions
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -332,13 +306,7 @@ final class OpenCodeAppModel: ObservableObject {
     }
 
     func refreshRemoteProjectSuggestions() async {
-        do {
-            let projects = try await apiClientProvider(serverURL).projects()
-            remoteProjectSuggestions = projects.map(\.worktree).sorted()
-        } catch {
-            logger.notice("Project suggestions unavailable: \(error.localizedDescription, privacy: .public)")
-            remoteProjectSuggestions = []
-        }
+        remoteProjectSuggestions = await serverController.refreshRemoteProjectSuggestions(serverURL: serverURL)
     }
 
     func chooseRemoteProjectSuggestion(_ path: String) {
@@ -659,7 +627,12 @@ final class OpenCodeAppModel: ObservableObject {
         }
     }
 
-    func moveOpenSession(_ sessionID: String, before targetSessionID: String? = nil) {
+    func moveOpenSession(
+        _ sessionID: String,
+        before targetSessionID: String? = nil,
+        persist: Bool = true,
+        sync: Bool = true
+    ) {
         guard let sourceIndex = openSessionIDs.firstIndex(of: sessionID) else { return }
 
         var reorderedSessionIDs = openSessionIDs
@@ -678,6 +651,18 @@ final class OpenCodeAppModel: ObservableObject {
         guard reorderedSessionIDs != openSessionIDs else { return }
 
         openSessionIDs = reorderedSessionIDs
+        if persist {
+            persistPaneStateIfPossible()
+        }
+
+        if sync {
+            Task {
+                await syncOpenSessions()
+            }
+        }
+    }
+
+    func commitOpenSessionOrder() {
         persistPaneStateIfPossible()
 
         Task {
@@ -774,6 +759,7 @@ final class OpenCodeAppModel: ObservableObject {
                 try await workspaceService.stopSession(directory: selectedDirectory, sessionID: sessionID)
                 guard let workspaceConnection else { return }
                 let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
+                await coordinator.refreshStatus(sessionID: sessionID)
                 await coordinator.refreshMessages(sessionID: sessionID)
                 await coordinator.refreshInteractions(sessionID: sessionID)
             } catch {
@@ -1276,88 +1262,6 @@ final class OpenCodeAppModel: ObservableObject {
         selectedThinkingLevelBySession = [:]
     }
 
-    private func normalizedServerURL(from text: String) throws -> URL {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            throw StartupError.invalidServerURL
-        }
-
-        let candidate = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
-        guard var components = URLComponents(string: candidate),
-              let scheme = components.scheme?.lowercased(),
-              ["http", "https"].contains(scheme),
-              let host = components.host,
-              !host.isEmpty else {
-            throw StartupError.invalidServerURL
-        }
-
-        components.path = components.path.isEmpty ? "" : components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard let url = components.url else {
-            throw StartupError.invalidServerURL
-        }
-
-        remoteServerURLText = url.absoluteString
-        return url
-    }
-
-    private func isServerReachable(at url: URL) async -> Bool {
-        let status = await serverReachabilityStatus(at: url)
-        return status.isReachable
-    }
-
-    private func serverReachabilityStatus(at url: URL) async -> (isReachable: Bool, failureDescription: String?) {
-        do {
-            let health = try await apiClientProvider(url).health()
-            guard health.healthy else {
-                let detail = if health.version.isEmpty {
-                    "Health check reported an unhealthy server."
-                } else {
-                    "Health check reported an unhealthy server (version \(health.version))."
-                }
-                return (false, detail)
-            }
-
-            return (true, nil)
-        } catch {
-            return (false, describeServerReachabilityFailure(error, url: url))
-        }
-    }
-
-    private func waitForServer(at url: URL, timeout: Duration) async -> ServerStartupWaitResult {
-        let clock = ContinuousClock()
-        let start = clock.now
-        var lastFailureDescription: String?
-
-        while start.duration(to: clock.now) < timeout {
-            let status = await serverReachabilityStatus(at: url)
-            if status.isReachable {
-                return .reached
-            }
-
-            if let failureDescription = status.failureDescription {
-                lastFailureDescription = failureDescription
-            }
-
-            do {
-                try await Task.sleep(for: .milliseconds(250))
-            } catch {
-                return .timedOut(lastFailureDescription: lastFailureDescription)
-            }
-        }
-
-        return .timedOut(lastFailureDescription: lastFailureDescription)
-    }
-
-    private func describeServerReachabilityFailure(_ error: Error, url: URL) -> String {
-        let endpoint = url.appendingPathComponent("global/health").absoluteString
-        let description = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if description.isEmpty {
-            return "Health check at \(endpoint) failed with an unknown error."
-        }
-
-        return "Health check at \(endpoint) failed: \(description)"
-    }
 }
 
 struct SessionPromptFocusRequest: Equatable {
@@ -1380,26 +1284,5 @@ private struct PermissionPresentationKey: Hashable {
         always = request.always
         toolMessageID = request.tool?.messageID
         toolCallID = request.tool?.callID
-    }
-}
-
-private enum StartupError: LocalizedError {
-    case invalidServerURL
-    case serverUnhealthy
-    case serverStartTimedOut(String?)
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidServerURL:
-            return "Enter a valid http:// or https:// server URL."
-        case .serverUnhealthy:
-            return "The remote opencode server did not report as healthy."
-        case let .serverStartTimedOut(lastFailureDescription):
-            var message = "The local opencode server did not start on :4096 in time."
-            if let lastFailureDescription, !lastFailureDescription.isEmpty {
-                message += "\n\nLast health check: \(lastFailureDescription)"
-            }
-            return message
-        }
     }
 }

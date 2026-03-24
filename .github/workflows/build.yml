@@ -13,7 +13,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -28,16 +28,20 @@ jobs:
         run: ditto -c -k --sequesterRsrc --keepParent build/DerivedData/Build/Products/Release/Colonnade.app build/Colonnade-${{ github.run_number }}.zip
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: Colonnade-${{ github.run_number }}
           path: build/Colonnade-${{ github.run_number }}.zip
 
       - name: Create GitHub release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.run_number }}
-          name: Build ${{ github.run_number }}
-          files: build/Colonnade-${{ github.run_number }}.zip
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.run_number }}
+          ASSET_PATH: build/Colonnade-${{ github.run_number }}.zip
+        run: |
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" "$ASSET_PATH" --clobber
+          else
+            gh release create "$TAG_NAME" "$ASSET_PATH" --title "Build $TAG_NAME" --generate-notes
+          fi

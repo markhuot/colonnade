@@ -1,4 +1,3 @@
-import AppKit
 import OSLog
 import SwiftUI
 import Textual
@@ -55,65 +54,6 @@ private struct OpenCodeCodeBlockStyle: StructuredText.CodeBlockStyle {
     }
 }
 
-private struct SelectableToolTextView: NSViewRepresentable {
-    let text: String
-    let textColor: NSColor
-
-    private static let font = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
-    private static let verticalPadding: CGFloat = 6
-    private static let horizontalPadding: CGFloat = 2
-    private static let maxHeight: CGFloat = 110
-
-    func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
-        scrollView.hasVerticalScroller = false
-        scrollView.hasHorizontalScroller = true
-        scrollView.autohidesScrollers = true
-
-        let textView = NSTextView()
-        textView.drawsBackground = false
-        textView.isEditable = false
-        textView.isSelectable = true
-        textView.isRichText = false
-        textView.importsGraphics = false
-        textView.allowsUndo = false
-        textView.textContainerInset = NSSize(width: Self.horizontalPadding, height: Self.verticalPadding)
-        textView.textContainer?.lineFragmentPadding = 0
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = true
-        textView.autoresizingMask = [.width]
-        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        textView.textContainer?.widthTracksTextView = false
-
-        scrollView.documentView = textView
-        update(textView)
-        return scrollView
-    }
-
-    func updateNSView(_ nsView: NSScrollView, context: Context) {
-        guard let textView = nsView.documentView as? NSTextView else { return }
-        update(textView)
-    }
-
-    var idealHeight: CGFloat {
-        let lineHeight = ceil(NSLayoutManager().defaultLineHeight(for: Self.font))
-        let lineCount = max(text.split(separator: "\n", omittingEmptySubsequences: false).count, 1)
-        let contentHeight = lineHeight * CGFloat(lineCount) + (Self.verticalPadding * 2)
-        return min(max(contentHeight, lineHeight + (Self.verticalPadding * 2)), Self.maxHeight)
-    }
-
-    private func update(_ textView: NSTextView) {
-        if textView.string != text {
-            textView.string = text
-        }
-
-        textView.font = Self.font
-        textView.textColor = textColor
-    }
-}
-
 private extension View {
     @ViewBuilder
     func applyForegroundStyle(_ style: AnyShapeStyle?) -> some View {
@@ -146,7 +86,8 @@ struct SessionColumnView: View {
 
     let sessionID: String
     var chrome: SessionColumnChrome = .pane
-    var onPaneDragStarted: (() -> Void)? = nil
+    var onPaneDragChanged: ((CGFloat) -> Void)? = nil
+    var onPaneDragEnded: (() -> Void)? = nil
 
     var body: some View {
         let session = sessionState.session
@@ -168,7 +109,8 @@ struct SessionColumnView: View {
                     indicator: session?.indicator ?? SessionIndicator.resolve(status: nil, hasPendingPermission: false),
                     contextUsageText: session?.contextUsageText,
                     allowsPaneDrag: chrome == .pane,
-                    onPaneDragStarted: onPaneDragStarted
+                    onPaneDragChanged: onPaneDragChanged,
+                    onPaneDragEnded: onPaneDragEnded
                 )
                 Divider()
             }
@@ -265,7 +207,8 @@ private struct SessionHeaderView: View {
     let indicator: SessionIndicator
     let contextUsageText: String?
     var allowsPaneDrag = false
-    var onPaneDragStarted: (() -> Void)? = nil
+    var onPaneDragChanged: ((CGFloat) -> Void)? = nil
+    var onPaneDragEnded: (() -> Void)? = nil
 
     @State private var isHoveringStatusIcon = false
 
@@ -329,24 +272,31 @@ private struct SessionHeaderView: View {
         .padding(18)
         .modifier(SessionHeaderDragModifier(
             allowsPaneDrag: allowsPaneDrag,
-            sessionID: sessionID,
-            onPaneDragStarted: onPaneDragStarted
+            onPaneDragChanged: onPaneDragChanged,
+            onPaneDragEnded: onPaneDragEnded
         ))
     }
 }
 
 private struct SessionHeaderDragModifier: ViewModifier {
     let allowsPaneDrag: Bool
-    let sessionID: String
-    let onPaneDragStarted: (() -> Void)?
+    let onPaneDragChanged: ((CGFloat) -> Void)?
+    let onPaneDragEnded: (() -> Void)?
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if allowsPaneDrag {
-            content.onDrag {
-                onPaneDragStarted?()
-                return SessionPaneDrag.itemProvider(for: sessionID)
-            }
+            content
+                .contentShape(Rectangle())
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 6, coordinateSpace: .global)
+                        .onChanged { value in
+                            onPaneDragChanged?(value.translation.width)
+                        }
+                        .onEnded { _ in
+                            onPaneDragEnded?()
+                        }
+                )
         } else {
             content
         }
@@ -361,11 +311,24 @@ private struct SessionTimelineView: View {
     let questions: [QuestionRequest]
     let thinkingBannerTitle: String?
 
+    private var latestTodoToolPartID: String? {
+        messages
+            .reversed()
+            .compactMap { message in
+                message.toolParts.last(where: \ .isTodoWriteTool)?.id
+            }
+            .first
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
                 ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
-                    MessageCard(message: message, showsTimestamp: shouldShowTimestamp(for: index))
+                    MessageCard(
+                        message: message,
+                        showsTimestamp: shouldShowTimestamp(for: index),
+                        latestTodoToolPartID: latestTodoToolPartID
+                    )
                 }
 
                 ForEach(questions) { request in
@@ -434,7 +397,7 @@ private struct SessionComposerView: View {
     private var selectedModelKey: Binding<String> {
         Binding(
             get: { appState.selectedModelOption(for: sessionID)?.id ?? modelOptions.first?.id ?? "" },
-            set: { appState.setSelectedModel($0, for: sessionID, updateDefault: NSEvent.modifierFlags.contains(.option)) }
+            set: { appState.setSelectedModel($0, for: sessionID, updateDefault: MacModifierKeyState.isOptionPressed()) }
         )
     }
 
@@ -665,10 +628,21 @@ private enum TimelineMessageLayout {
 
 private struct MessageCard: View {
     @AppStorage("showsThinking") private var showsThinking = true
+    @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
 
     let message: MessageEnvelope
     let showsTimestamp: Bool
+    let latestTodoToolPartID: String?
+
+    private var subagentSessionsByPartID: [String: SessionDisplay] {
+        MessagePart.resolveSubagentSessions(
+            for: message.toolParts,
+            in: appState.sessions,
+            parentSessionID: message.info.sessionID,
+            baseReferenceTimeMS: message.info.time.created
+        )
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -713,7 +687,11 @@ private struct MessageCard: View {
             }
 
             ForEach(message.toolParts) { toolPart in
-                ToolPartView(part: toolPart)
+                ToolPartView(
+                    part: toolPart,
+                    subagentSession: subagentSessionsByPartID[toolPart.id],
+                    latestTodoToolPartID: latestTodoToolPartID
+                )
                     .padding(.leading, TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.toolCardPadding))
             }
         }
@@ -772,8 +750,12 @@ private struct MessageFinishView: View {
 }
 
 private struct ToolPartView: View {
+    @Environment(\.openWindow) private var openWindow
+    @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
     let part: MessagePart
+    let subagentSession: SessionDisplay?
+    let latestTodoToolPartID: String?
     @State private var isExpanded = false
 
     private var presentation: ToolPresentation {
@@ -784,7 +766,13 @@ private struct ToolPartView: View {
         presentation.statusLabel
     }
 
+    private var shouldAutoExpand: Bool {
+        part.isTodoWriteTool && part.id == latestTodoToolPartID
+    }
+
     var body: some View {
+        let cardShape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+
         VStack(alignment: .leading, spacing: 8) {
             Button {
                 withAnimation(.easeInOut(duration: 0.18)) {
@@ -802,6 +790,22 @@ private struct ToolPartView: View {
                             .foregroundStyle(theme.secondaryText)
                     }
 
+                    if let subagentSession {
+                        Button {
+                            guard let workspaceConnection = appState.workspaceConnection else { return }
+                            openWindow(
+                                id: "session-window",
+                                value: SessionWindowContext(connection: workspaceConnection, sessionID: subagentSession.id)
+                            )
+                        } label: {
+                            Image(systemName: "arrow.up.forward.square")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(theme.accent)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open subagent session")
+                    }
+
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(theme.secondaryText)
@@ -817,14 +821,26 @@ private struct ToolPartView: View {
         }
         .padding(10)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            cardShape
                 .fill(theme.toolCardBackground)
         )
+        .clipShape(cardShape)
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            cardShape
                 .stroke(theme.border.opacity(0.6), lineWidth: 1)
         )
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear {
+            guard part.isTodoWriteTool else { return }
+            isExpanded = shouldAutoExpand
+        }
+        .onChange(of: latestTodoToolPartID) { _, _ in
+            guard part.isTodoWriteTool else { return }
+
+            withAnimation(.easeInOut(duration: 0.18)) {
+                isExpanded = shouldAutoExpand
+            }
+        }
     }
 }
 
@@ -839,6 +855,8 @@ private struct ToolSummaryView: View {
             PatchToolSummaryView(summary: summary)
         case let .read(summary):
             ReadToolSummaryView(summary: summary)
+        case let .task(summary):
+            TaskToolSummaryView(summary: summary)
         }
     }
 }
@@ -953,6 +971,32 @@ private struct ReadToolSummaryView: View {
     }
 }
 
+private struct TaskToolSummaryView: View {
+    @Environment(\.openCodeTheme) private var theme
+    let summary: ToolTaskSummary
+
+    private var text: String {
+        summary.target ?? summary.title
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            ToolSummaryIcon(systemName: "square.stack.3d.up")
+
+            Text(summary.title)
+                .fontWeight(.semibold)
+
+            Text(verbatim: "`\(text)`")
+                .font(.caption.monospaced())
+                .foregroundStyle(theme.secondaryText)
+                .lineLimit(1)
+            .frame(maxWidth: 260, alignment: .leading)
+            .clipped()
+        }
+        .font(.caption)
+    }
+}
+
 private struct ToolPartDrawerView: View {
     @Environment(\.openCodeTheme) private var theme
     let part: MessagePart
@@ -976,9 +1020,11 @@ private struct ToolPartDrawerView: View {
                 EmptyView()
             case let .patch(detail):
                 PatchToolDetailView(detail: detail)
+            case let .todo(detail):
+                TodoToolDetailView(detail: detail)
             }
 
-            if let output = part.state?.output, !output.isEmpty {
+            if let output = part.state?.output, !output.isEmpty, !presentation.drawerStyle.hidesRawOutput {
                 ToolPartDetailSection(title: "Result", value: output)
             }
 
@@ -991,6 +1037,60 @@ private struct ToolPartDrawerView: View {
                     .font(.caption)
                     .foregroundStyle(theme.secondaryText)
             }
+        }
+    }
+}
+
+private struct TodoToolDetailView: View {
+    let detail: ToolTodoDetail
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(detail.items) { item in
+                TodoChecklistRow(item: item)
+            }
+        }
+    }
+}
+
+private struct TodoChecklistRow: View {
+    @Environment(\.openCodeTheme) private var theme
+    let item: ToolTodoItem
+
+    private var marker: String {
+        switch item.status {
+        case .completed:
+            return "[✓]"
+        case .inProgress:
+            return "[•]"
+        case .pending, .cancelled, .unknown:
+            return "[ ]"
+        }
+    }
+
+    private var foregroundStyle: AnyShapeStyle {
+        switch item.status {
+        case .completed:
+            return AnyShapeStyle(theme.secondaryText)
+        case .inProgress:
+            return AnyShapeStyle(theme.accent)
+        case .pending, .cancelled, .unknown:
+            return AnyShapeStyle(theme.primaryText)
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(marker)
+                .font(.caption.monospaced())
+                .foregroundStyle(foregroundStyle)
+
+            Text(item.content)
+                .font(.caption)
+                .foregroundStyle(foregroundStyle)
+                .strikethrough(item.status == .completed, color: theme.secondaryText)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

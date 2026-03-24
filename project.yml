@@ -22,7 +22,7 @@ targets:
     type: application
     platform: macOS
     resources:
-      - path: OpenCodeMac/ShikiThemes
+      - path: OpenCodeMac/TextMateThemes
       - path: OpenCodeMac/Assets.xcassets
     info:
       path: OpenCodeMac/Info.plist

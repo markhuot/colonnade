@@ -1,5 +1,5 @@
 import CoreData
-import Foundation
+@preconcurrency import Foundation
 import OSLog
 
 actor PersistenceRepository {
@@ -100,18 +100,237 @@ actor PersistenceRepository {
         }
     }
 
+    private final class StreamMutationBuffer: @unchecked Sendable {
+        private let persistence: PersistenceController
+        private let logger = Logger(subsystem: "ai.opencode.app", category: "persistence")
+        private let flushInterval = Duration.seconds(1)
+        private let lock = NSLock()
+
+        private var bufferedStreamMutations: [BufferedStreamMutation] = []
+        private var bufferedStreamFlushTask: Task<Void, Never>?
+        private var activeFlushTask: Task<Void, Never>?
+
+        init(persistence: PersistenceController) {
+            self.persistence = persistence
+        }
+
+        func enqueue(_ mutation: BufferedStreamMutation) {
+            lock.lock()
+            defer { lock.unlock() }
+
+            var mutation = mutation
+            var index = bufferedStreamMutations.count - 1
+
+            while index >= 0 {
+                let existing = bufferedStreamMutations[index]
+
+                guard existing.directory == mutation.directory, existing.sessionID == mutation.sessionID else {
+                    index -= 1
+                    continue
+                }
+
+                if let mergedMutation = existing.merged(with: mutation) {
+                    bufferedStreamMutations[index] = mergedMutation
+                    scheduleBufferedStreamFlushLocked()
+                    return
+                }
+
+                switch (existing, mutation) {
+                case let (.upsertMessagePart(directory, sessionID, part, _), .applyMessagePartDelta(_, _, partID, field, delta, modelContextLimits))
+                    where part.id == partID:
+                    var updatedPart = part
+                    updatedPart.apply(delta: delta, to: field)
+                    mutation = .upsertMessagePart(
+                        directory: directory,
+                        sessionID: sessionID,
+                        part: updatedPart,
+                        modelContextLimits: modelContextLimits
+                    )
+                    bufferedStreamMutations[index] = mutation
+                    scheduleBufferedStreamFlushLocked()
+                    return
+
+                case let (.applyMessagePartDelta(_, _, partID, field, delta, _), .upsertMessagePart(directory, sessionID, part, modelContextLimits))
+                    where part.id == partID:
+                    var updatedPart = part
+                    updatedPart.apply(delta: delta, to: field)
+                    mutation = .upsertMessagePart(
+                        directory: directory,
+                        sessionID: sessionID,
+                        part: updatedPart,
+                        modelContextLimits: modelContextLimits
+                    )
+                    bufferedStreamMutations.remove(at: index)
+
+                case let (.upsertMessagePart(_, _, part, _), .upsertMessagePart(directory, sessionID, newPart, modelContextLimits))
+                    where part.id == newPart.id:
+                    mutation = .upsertMessagePart(
+                        directory: directory,
+                        sessionID: sessionID,
+                        part: newPart,
+                        modelContextLimits: modelContextLimits
+                    )
+                    bufferedStreamMutations[index] = mutation
+                    scheduleBufferedStreamFlushLocked()
+                    return
+
+                case let (.upsertMessageInfo(_, _, info, _), .upsertMessageInfo(directory, sessionID, newInfo, modelContextLimits))
+                    where info.id == newInfo.id:
+                    mutation = .upsertMessageInfo(
+                        directory: directory,
+                        sessionID: sessionID,
+                        info: newInfo,
+                        modelContextLimits: modelContextLimits
+                    )
+                    bufferedStreamMutations[index] = mutation
+                    scheduleBufferedStreamFlushLocked()
+                    return
+
+                case let (_, .removeMessagePart(_, _, partID, _))
+                    where existing.partID == partID:
+                    bufferedStreamMutations.remove(at: index)
+
+                default:
+                    break
+                }
+
+                index -= 1
+            }
+
+            bufferedStreamMutations.append(mutation)
+            scheduleBufferedStreamFlushLocked()
+        }
+
+        func flushIfNeeded() async {
+            while let task = startFlushIfNeeded(cancelScheduledTask: true) {
+                await task.value
+            }
+        }
+
+        private func scheduleBufferedStreamFlushLocked() {
+            guard bufferedStreamFlushTask == nil else { return }
+
+            let flushInterval = flushInterval
+            bufferedStreamFlushTask = Task { [self] in
+                try? await Task.sleep(for: flushInterval)
+                await flushIfNeeded()
+            }
+        }
+
+        private func startFlushIfNeeded(cancelScheduledTask: Bool) -> Task<Void, Never>? {
+            lock.lock()
+            defer { lock.unlock() }
+
+            if cancelScheduledTask {
+                bufferedStreamFlushTask?.cancel()
+                bufferedStreamFlushTask = nil
+            }
+
+            if let activeFlushTask {
+                return activeFlushTask
+            }
+
+            guard !bufferedStreamMutations.isEmpty else {
+                return nil
+            }
+
+            let mutations = bufferedStreamMutations
+            bufferedStreamMutations.removeAll(keepingCapacity: true)
+
+            let flushTask = Task { [self, mutations] in
+                let saveSucceeded = flush(mutations)
+                finishFlush(mutations: mutations, saveSucceeded: saveSucceeded)
+            }
+            activeFlushTask = flushTask
+            return flushTask
+        }
+
+        private func finishFlush(mutations: [BufferedStreamMutation], saveSucceeded: Bool) {
+            lock.lock()
+            activeFlushTask = nil
+
+            if !saveSucceeded {
+                bufferedStreamMutations.insert(contentsOf: mutations, at: 0)
+            }
+
+            let shouldScheduleFlush = !bufferedStreamMutations.isEmpty && bufferedStreamFlushTask == nil
+            lock.unlock()
+
+            if shouldScheduleFlush {
+                lock.lock()
+                scheduleBufferedStreamFlushLocked()
+                lock.unlock()
+            }
+        }
+
+        private func flush(_ mutations: [BufferedStreamMutation]) -> Bool {
+            let streamWriteContext = persistence.newBackgroundContext()
+            return Self.performSync(on: streamWriteContext) { streamWriteContext in
+                var workspaceIDs: [String: String] = [:]
+                var affectedSessionIDsByDirectory: [String: Set<String>] = [:]
+                var latestModelContextLimitsByDirectory: [String: [ModelContextKey: Int]] = [:]
+
+                for mutation in mutations {
+                    let directory = mutation.directory
+                    let workspace = PersistenceRepository.findOrCreateWorkspace(directory: directory, context: streamWriteContext)
+                    let workspaceID = workspace.id ?? directory
+                    workspace.projectName = (directory as NSString).lastPathComponent
+                    workspaceIDs[directory] = workspaceID
+                    affectedSessionIDsByDirectory[directory, default: []].insert(mutation.sessionID)
+                    latestModelContextLimitsByDirectory[directory] = mutation.modelContextLimits
+
+                    switch mutation {
+                    case let .upsertMessageInfo(_, sessionID, info, _):
+                        PersistenceRepository.upsertMessageInfo(info, sessionID: sessionID, context: streamWriteContext)
+                    case let .upsertMessagePart(_, sessionID, part, _):
+                        PersistenceRepository.upsertMessagePart(part, sessionID: sessionID, context: streamWriteContext)
+                    case let .applyMessagePartDelta(_, _, partID, field, delta, _):
+                        PersistenceRepository.applyMessagePartDelta(partID: partID, field: field, delta: delta, context: streamWriteContext)
+                    case let .removeMessagePart(_, _, partID, _):
+                        PersistenceRepository.removeMessagePart(partID: partID, context: streamWriteContext)
+                    case let .removeMessage(_, _, messageID, _):
+                        PersistenceRepository.removeMessage(messageID: messageID, context: streamWriteContext)
+                    }
+                }
+
+                for (directory, sessionIDs) in affectedSessionIDsByDirectory {
+                    guard let workspaceID = workspaceIDs[directory] else { continue }
+                    PersistenceRepository.recomputeSessionDerivedState(
+                        workspaceID: workspaceID,
+                        modelContextLimits: latestModelContextLimitsByDirectory[directory] ?? [:],
+                        context: streamWriteContext,
+                        sessionIDs: Array(sessionIDs)
+                    )
+                }
+
+                do {
+                    if streamWriteContext.hasChanges {
+                        try streamWriteContext.save()
+                    }
+                    streamWriteContext.reset()
+                    return true
+                } catch {
+                    self.logger.error("Buffered stream mutation flush failed: \(error.localizedDescription, privacy: .public)")
+                    streamWriteContext.rollback()
+                    return false
+                }
+            }
+        }
+
+        private static func performSync<T>(on context: NSManagedObjectContext, _ work: @Sendable (NSManagedObjectContext) -> T) -> T {
+            context.performAndWait {
+                work(context)
+            }
+        }
+    }
+
     private let persistence: PersistenceController
     private let logger = Logger(subsystem: "ai.opencode.app", category: "persistence")
-    private let streamWriteContext: NSManagedObjectContext
-    private let streamFlushInterval = Duration.milliseconds(500)
-
-    private var bufferedStreamMutations: [BufferedStreamMutation] = []
-    private var bufferedStreamFlushTask: Task<Void, Never>?
-    private var isFlushingBufferedStreamMutations = false
+    private let streamMutationBuffer: StreamMutationBuffer
 
     init(persistence: PersistenceController = .shared) {
         self.persistence = persistence
-        streamWriteContext = persistence.newBackgroundContext()
+        streamMutationBuffer = StreamMutationBuffer(persistence: persistence)
     }
 
     nonisolated private static let logger = Logger(subsystem: "ai.opencode.app", category: "persistence")
@@ -343,8 +562,8 @@ actor PersistenceRepository {
         }
     }
 
-    func upsertMessagePart(directory: String, sessionID: String, part: MessagePart, modelContextLimits: [ModelContextKey: Int]) async {
-        await enqueueBufferedStreamMutation(
+    nonisolated func upsertMessagePart(directory: String, sessionID: String, part: MessagePart, modelContextLimits: [ModelContextKey: Int]) async {
+        streamMutationBuffer.enqueue(
             .upsertMessagePart(
                 directory: directory,
                 sessionID: sessionID,
@@ -354,8 +573,8 @@ actor PersistenceRepository {
         )
     }
 
-    func upsertMessageInfo(directory: String, sessionID: String, info: MessageInfo, modelContextLimits: [ModelContextKey: Int]) async {
-        await enqueueBufferedStreamMutation(
+    nonisolated func upsertMessageInfo(directory: String, sessionID: String, info: MessageInfo, modelContextLimits: [ModelContextKey: Int]) async {
+        streamMutationBuffer.enqueue(
             .upsertMessageInfo(
                 directory: directory,
                 sessionID: sessionID,
@@ -365,8 +584,8 @@ actor PersistenceRepository {
         )
     }
 
-    func applyMessagePartDelta(directory: String, sessionID: String, partID: String, field: MessagePartDeltaField, delta: String, modelContextLimits: [ModelContextKey: Int]) async {
-        await enqueueBufferedStreamMutation(
+    nonisolated func applyMessagePartDelta(directory: String, sessionID: String, partID: String, field: MessagePartDeltaField, delta: String, modelContextLimits: [ModelContextKey: Int]) async {
+        streamMutationBuffer.enqueue(
             .applyMessagePartDelta(
                 directory: directory,
                 sessionID: sessionID,
@@ -378,8 +597,8 @@ actor PersistenceRepository {
         )
     }
 
-    func removeMessagePart(directory: String, sessionID: String, partID: String, modelContextLimits: [ModelContextKey: Int]) async {
-        await enqueueBufferedStreamMutation(
+    nonisolated func removeMessagePart(directory: String, sessionID: String, partID: String, modelContextLimits: [ModelContextKey: Int]) async {
+        streamMutationBuffer.enqueue(
             .removeMessagePart(
                 directory: directory,
                 sessionID: sessionID,
@@ -389,8 +608,8 @@ actor PersistenceRepository {
         )
     }
 
-    func removeMessage(directory: String, sessionID: String, messageID: String, modelContextLimits: [ModelContextKey: Int]) async {
-        await enqueueBufferedStreamMutation(
+    nonisolated func removeMessage(directory: String, sessionID: String, messageID: String, modelContextLimits: [ModelContextKey: Int]) async {
+        streamMutationBuffer.enqueue(
             .removeMessage(
                 directory: directory,
                 sessionID: sessionID,
@@ -400,183 +619,12 @@ actor PersistenceRepository {
         )
     }
 
-    func flushBufferedStreamMutations() async {
-        guard !isFlushingBufferedStreamMutations else { return }
-        guard !bufferedStreamMutations.isEmpty else {
-            bufferedStreamFlushTask?.cancel()
-            bufferedStreamFlushTask = nil
-            return
-        }
-
-        bufferedStreamFlushTask?.cancel()
-        bufferedStreamFlushTask = nil
-
-        let mutations = bufferedStreamMutations
-        bufferedStreamMutations.removeAll(keepingCapacity: true)
-        isFlushingBufferedStreamMutations = true
-        let saveSucceeded = Self.performSync(on: streamWriteContext) { streamWriteContext in
-            var workspaceIDs: [String: String] = [:]
-            var affectedSessionIDsByDirectory: [String: Set<String>] = [:]
-            var latestModelContextLimitsByDirectory: [String: [ModelContextKey: Int]] = [:]
-
-            for mutation in mutations {
-                let directory = mutation.directory
-                let workspace = Self.findOrCreateWorkspace(directory: directory, context: streamWriteContext)
-                let workspaceID = workspace.id ?? directory
-                workspace.projectName = (directory as NSString).lastPathComponent
-                workspaceIDs[directory] = workspaceID
-                affectedSessionIDsByDirectory[directory, default: []].insert(mutation.sessionID)
-                latestModelContextLimitsByDirectory[directory] = mutation.modelContextLimits
-
-                switch mutation {
-                case let .upsertMessageInfo(_, sessionID, info, _):
-                    Self.upsertMessageInfo(info, sessionID: sessionID, context: streamWriteContext)
-                case let .upsertMessagePart(_, sessionID, part, _):
-                    Self.upsertMessagePart(part, sessionID: sessionID, context: streamWriteContext)
-                case let .applyMessagePartDelta(_, _, partID, field, delta, _):
-                    Self.applyMessagePartDelta(partID: partID, field: field, delta: delta, context: streamWriteContext)
-                case let .removeMessagePart(_, _, partID, _):
-                    Self.removeMessagePart(partID: partID, context: streamWriteContext)
-                case let .removeMessage(_, _, messageID, _):
-                    Self.removeMessage(messageID: messageID, context: streamWriteContext)
-                }
-            }
-
-            for (directory, sessionIDs) in affectedSessionIDsByDirectory {
-                guard let workspaceID = workspaceIDs[directory] else { continue }
-                Self.recomputeSessionDerivedState(
-                    workspaceID: workspaceID,
-                    modelContextLimits: latestModelContextLimitsByDirectory[directory] ?? [:],
-                    context: streamWriteContext,
-                    sessionIDs: Array(sessionIDs)
-                )
-            }
-
-            do {
-                if streamWriteContext.hasChanges {
-                    try streamWriteContext.save()
-                }
-                streamWriteContext.reset()
-                return true
-            } catch {
-                Self.logger.error("Buffered stream mutation flush failed: \(error.localizedDescription, privacy: .public)")
-                streamWriteContext.rollback()
-                return false
-            }
-        }
-
-        isFlushingBufferedStreamMutations = false
-
-        guard saveSucceeded else {
-            bufferedStreamMutations.insert(contentsOf: mutations, at: 0)
-            scheduleBufferedStreamFlush()
-            return
-        }
-
-        if !bufferedStreamMutations.isEmpty {
-            scheduleBufferedStreamFlush()
-        }
-    }
-
-    private func enqueueBufferedStreamMutation(_ mutation: BufferedStreamMutation) {
-        var mutation = mutation
-        var index = bufferedStreamMutations.count - 1
-
-        while index >= 0 {
-            let existing = bufferedStreamMutations[index]
-
-            guard existing.directory == mutation.directory, existing.sessionID == mutation.sessionID else {
-                index -= 1
-                continue
-            }
-
-            if let mergedMutation = existing.merged(with: mutation) {
-                bufferedStreamMutations[index] = mergedMutation
-                scheduleBufferedStreamFlush()
-                return
-            }
-
-            switch (existing, mutation) {
-            case let (.upsertMessagePart(directory, sessionID, part, _), .applyMessagePartDelta(_, _, partID, field, delta, modelContextLimits))
-                where part.id == partID:
-                var updatedPart = part
-                updatedPart.apply(delta: delta, to: field)
-                mutation = .upsertMessagePart(
-                    directory: directory,
-                    sessionID: sessionID,
-                    part: updatedPart,
-                    modelContextLimits: modelContextLimits
-                )
-                bufferedStreamMutations[index] = mutation
-                scheduleBufferedStreamFlush()
-                return
-
-            case let (.applyMessagePartDelta(_, _, partID, field, delta, _), .upsertMessagePart(directory, sessionID, part, modelContextLimits))
-                where part.id == partID:
-                var updatedPart = part
-                updatedPart.apply(delta: delta, to: field)
-                mutation = .upsertMessagePart(
-                    directory: directory,
-                    sessionID: sessionID,
-                    part: updatedPart,
-                    modelContextLimits: modelContextLimits
-                )
-                bufferedStreamMutations.remove(at: index)
-
-            case let (.upsertMessagePart(_, _, part, _), .upsertMessagePart(directory, sessionID, newPart, modelContextLimits))
-                where part.id == newPart.id:
-                mutation = .upsertMessagePart(
-                    directory: directory,
-                    sessionID: sessionID,
-                    part: newPart,
-                    modelContextLimits: modelContextLimits
-                )
-                bufferedStreamMutations[index] = mutation
-                scheduleBufferedStreamFlush()
-                return
-
-            case let (.upsertMessageInfo(_, _, info, _), .upsertMessageInfo(directory, sessionID, newInfo, modelContextLimits))
-                where info.id == newInfo.id:
-                mutation = .upsertMessageInfo(
-                    directory: directory,
-                    sessionID: sessionID,
-                    info: newInfo,
-                    modelContextLimits: modelContextLimits
-                )
-                bufferedStreamMutations[index] = mutation
-                scheduleBufferedStreamFlush()
-                return
-
-            case let (_, .removeMessagePart(_, _, partID, _))
-                where existing.partID == partID:
-                bufferedStreamMutations.remove(at: index)
-
-            default:
-                break
-            }
-
-            index -= 1
-        }
-
-        bufferedStreamMutations.append(mutation)
-
-        scheduleBufferedStreamFlush()
+    nonisolated func flushBufferedStreamMutations() async {
+        await streamMutationBuffer.flushIfNeeded()
     }
 
     private func flushBufferedStreamMutationsIfNeeded() async {
-        guard !bufferedStreamMutations.isEmpty else { return }
-        await flushBufferedStreamMutations()
-    }
-
-    private func scheduleBufferedStreamFlush() {
-        guard bufferedStreamFlushTask == nil else { return }
-
-        let repository = self
-        let flushInterval = streamFlushInterval
-        bufferedStreamFlushTask = Task {
-            try? await Task.sleep(for: flushInterval)
-            await repository.flushBufferedStreamMutations()
-        }
+        await streamMutationBuffer.flushIfNeeded()
     }
 
     private static func makeSnapshot(context: NSManagedObjectContext, directory: String?) -> PersistenceSnapshot {
@@ -673,6 +721,7 @@ actor PersistenceRepository {
         return SessionDisplay(
             id: id,
             title: entity.title ?? id,
+            createdAtMS: entity.createdAtMS?.doubleValue ?? 0,
             updatedAtMS: entity.sortUpdatedAtMS?.doubleValue ?? entity.updatedAtMS?.doubleValue ?? 0,
             parentID: entity.parentID,
             status: decodeStatus(entity),

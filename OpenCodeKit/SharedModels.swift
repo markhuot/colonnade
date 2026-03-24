@@ -673,6 +673,7 @@ struct SessionIndicator: Hashable {
 struct SessionDisplay: Identifiable, Hashable {
     let id: String
     let title: String
+    let createdAtMS: Double
     let updatedAtMS: Double
     let parentID: String?
     let status: SessionStatus?
@@ -766,15 +767,73 @@ struct ToolReadSummary: Hashable {
     let path: String?
 }
 
+struct ToolTaskSummary: Hashable {
+    let title: String
+    let target: String?
+}
+
+enum ToolTodoStatus: Hashable {
+    case completed
+    case inProgress
+    case pending
+    case cancelled
+    case unknown(String)
+
+    init(rawValue: String?) {
+        switch rawValue?.lowercased() {
+        case "completed":
+            self = .completed
+        case "in_progress", "in-progress", "running":
+            self = .inProgress
+        case "cancelled", "canceled":
+            self = .cancelled
+        case "pending", nil:
+            self = .pending
+        case let value?:
+            self = .unknown(value)
+        }
+    }
+}
+
+struct ToolTodoItem: Identifiable, Hashable {
+    let id: Int
+    let content: String
+    let status: ToolTodoStatus
+}
+
+struct ToolTodoDetail: Hashable {
+    let items: [ToolTodoItem]
+}
+
 enum ToolSummaryStyle: Hashable {
     case standard(ToolCallSummary)
     case patch(ToolPatchSummary)
     case read(ToolReadSummary)
+    case task(ToolTaskSummary)
 }
 
 enum ToolDrawerStyle: Hashable {
     case standard
     case patch(ToolPatchDetail)
+    case todo(ToolTodoDetail)
+
+    var hasVisibleContent: Bool {
+        switch self {
+        case .standard:
+            return false
+        case .patch, .todo:
+            return true
+        }
+    }
+
+    var hidesRawOutput: Bool {
+        switch self {
+        case .todo:
+            return true
+        case .standard, .patch:
+            return false
+        }
+    }
 }
 
 struct ToolDetailField: Identifiable, Hashable {
@@ -793,6 +852,12 @@ struct ToolPresentation: Hashable {
 }
 
 extension MessagePart {
+    struct SubagentInvocation: Hashable {
+        let taskID: String?
+        let sessionID: String?
+        let subagentType: String?
+    }
+
     var reasoningTitle: String? {
         guard type == .reasoning else { return nil }
 
@@ -814,10 +879,10 @@ extension MessagePart {
     }
 
     var toolDrawerTitle: String? {
-        guard let title = normalizedToolSupplementalText(state?.title) else { return nil }
+        guard let title = Self.normalizedToolSupplementalText(state?.title) else { return nil }
 
-        let output = normalizedToolSupplementalText(state?.output)
-        let error = normalizedToolSupplementalText(state?.error)
+        let output = Self.normalizedToolSupplementalText(state?.output)
+        let error = Self.normalizedToolSupplementalText(state?.error)
 
         if title == output || title == error {
             return nil
@@ -826,13 +891,53 @@ extension MessagePart {
         return title
     }
 
+    var isTodoWriteTool: Bool {
+        toolKey == "todowrite"
+    }
+
+    var subagentInvocation: SubagentInvocation? {
+        guard toolKey == "task" else { return nil }
+
+        let input = state?.input ?? [:]
+        let metadata = state?.metadata ?? [:]
+        let sessionID = Self.firstNonEmptyString([
+            Self.jsonString(input["sessionID"]),
+            Self.jsonString(input["sessionId"]),
+            Self.jsonString(input["subagentSessionID"]),
+            Self.jsonString(input["subagentSessionId"]),
+            Self.jsonString(metadata["sessionID"]),
+            Self.jsonString(metadata["sessionId"]),
+            Self.jsonString(metadata["subagentSessionID"]),
+            Self.jsonString(metadata["subagentSessionId"]),
+            state?.attachments?.compactMap(\.sessionID).first
+        ])
+
+        return SubagentInvocation(
+            taskID: Self.firstNonEmptyString([
+                Self.jsonString(input["task_id"]),
+                Self.jsonString(input["taskId"]),
+                Self.jsonString(metadata["task_id"]),
+                Self.jsonString(metadata["taskId"])
+            ]),
+            sessionID: sessionID,
+            subagentType: Self.firstNonEmptyString([
+                Self.jsonString(input["subagent_type"]),
+                Self.jsonString(input["subagentType"]),
+                Self.jsonString(metadata["subagent_type"]),
+                Self.jsonString(metadata["subagentType"]),
+                agent
+            ])
+        )
+    }
+
     var toolPresentation: ToolPresentation {
         let descriptor = toolDescriptor
         let statusLabel = state.flatMap { $0.status == .completed ? nil : $0.status.title }
         let hasSupplementalContent = !(state?.output?.isEmpty ?? true) || !(state?.error?.isEmpty ?? true)
+        let hasDescriptorContent = !descriptor.detailFields.isEmpty || descriptor.drawerStyle.hasVisibleContent
         let fallbackDetail: String?
 
-        if descriptor.detailFields.isEmpty, !hasSupplementalContent, state?.status != .completed {
+        if !hasDescriptorContent, !hasSupplementalContent, state?.status != .completed {
             fallbackDetail = state?.status.title ?? ToolExecutionStatus.pending.title
         } else {
             fallbackDetail = nil
@@ -942,6 +1047,7 @@ extension MessagePart {
                 detailFields: Self.detailField(title: "Command", value: command)
             )
         case "todowrite":
+            let todoDetail = Self.todoDetail(from: input["todos"])
             return ToolDescriptor(
                 summaryStyle: .standard(
                     ToolCallSummary(
@@ -952,7 +1058,27 @@ extension MessagePart {
                         deletions: nil
                     )
                 ),
-                detailFields: []
+                detailFields: [],
+                drawerStyle: todoDetail.map(ToolDrawerStyle.todo) ?? .standard
+            )
+        case "task":
+            let description = Self.normalizedToolSupplementalText(input["description"]?.stringValue)
+            let prompt = Self.normalizedToolSupplementalText(input["prompt"]?.stringValue)
+            let invocation = subagentInvocation
+            let target = description ?? invocation?.subagentType ?? invocation?.taskID
+
+            return ToolDescriptor(
+                summaryStyle: .task(
+                    ToolTaskSummary(
+                        title: "Subagent",
+                        target: target
+                    )
+                ),
+                detailFields: [
+                    Self.detailField(title: "Type", value: invocation?.subagentType),
+                    Self.detailField(title: "Task ID", value: invocation?.taskID),
+                    Self.detailField(title: "Prompt", value: prompt)
+                ].flatMap { $0 }
             )
         default:
             return ToolDescriptor(
@@ -980,7 +1106,119 @@ extension MessagePart {
         return [ToolDetailField(title: title, value: value)]
     }
 
-    private func normalizedToolSupplementalText(_ value: String?) -> String? {
+    private static func todoDetail(from value: JSONValue?) -> ToolTodoDetail? {
+        guard let todos = value?.arrayValue else { return nil }
+
+        let items = todos.enumerated().compactMap { index, entry -> ToolTodoItem? in
+            guard let object = entry.objectValue else { return nil }
+            guard let content = Self.normalizedToolSupplementalText(object["content"]?.stringValue) else { return nil }
+
+            return ToolTodoItem(
+                id: index,
+                content: content,
+                status: ToolTodoStatus(rawValue: object["status"]?.stringValue)
+            )
+        }
+
+        guard !items.isEmpty else { return nil }
+        return ToolTodoDetail(items: items)
+    }
+
+    static func resolveSubagentSession(
+        for invocation: SubagentInvocation,
+        in sessions: [SessionDisplay],
+        parentSessionID: String,
+        referenceTimeMS: Double?
+    ) -> SessionDisplay? {
+        let part = MessagePart(
+            id: "subagent-resolution",
+            sessionID: parentSessionID,
+            messageID: nil,
+            type: .tool,
+            text: nil,
+            synthetic: nil,
+            ignored: nil,
+            time: referenceTimeMS.map { .init(start: $0, end: nil, compacted: nil) },
+            metadata: nil,
+            callID: nil,
+            tool: "functions.task",
+            state: nil,
+            mime: nil,
+            filename: nil,
+            url: nil,
+            reason: nil,
+            cost: nil,
+            tokens: nil,
+            prompt: nil,
+            description: nil,
+            agent: invocation.subagentType,
+            model: nil,
+            command: nil,
+            name: nil,
+            source: nil,
+            hash: nil,
+            files: nil,
+            snapshot: nil
+        )
+
+        let resolutions = resolveSubagentSessions(
+            for: [part],
+            in: sessions,
+            parentSessionID: parentSessionID,
+            baseReferenceTimeMS: referenceTimeMS,
+            invocationOverrides: [part.id: invocation]
+        )
+
+        return resolutions[part.id]
+    }
+
+    static func resolveSubagentSessions(
+        for parts: [MessagePart],
+        in sessions: [SessionDisplay],
+        parentSessionID: String,
+        baseReferenceTimeMS: Double?,
+        invocationOverrides: [String: SubagentInvocation] = [:]
+    ) -> [String: SessionDisplay] {
+        let childSessions = sessions
+            .filter { $0.parentID == parentSessionID }
+            .sorted(by: subagentSessionSort)
+
+        guard !childSessions.isEmpty else { return [:] }
+
+        var assignments: [String: SessionDisplay] = [:]
+        var remainingChildren = childSessions
+        let allSessionsByID = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        let candidates = parts.compactMap { part -> (partID: String, invocation: SubagentInvocation, referenceTimeMS: Double?)? in
+            let invocation = invocationOverrides[part.id] ?? part.subagentInvocation
+            guard let invocation else { return nil }
+            return (part.id, invocation, part.time?.start ?? baseReferenceTimeMS)
+        }
+
+        for candidate in candidates {
+            guard let sessionID = candidate.invocation.sessionID else { continue }
+
+            if let childIndex = remainingChildren.firstIndex(where: { $0.id == sessionID }) {
+                assignments[candidate.partID] = remainingChildren.remove(at: childIndex)
+                continue
+            }
+
+            if let session = allSessionsByID[sessionID] {
+                assignments[candidate.partID] = session
+            }
+        }
+
+        for candidate in candidates where assignments[candidate.partID] == nil {
+            guard let childIndex = bestSubagentSessionIndex(in: remainingChildren, referenceTimeMS: candidate.referenceTimeMS) else {
+                continue
+            }
+
+            assignments[candidate.partID] = remainingChildren.remove(at: childIndex)
+        }
+
+        return assignments
+    }
+
+    private static func normalizedToolSupplementalText(_ value: String?) -> String? {
         guard let value else { return nil }
 
         let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1050,6 +1288,41 @@ extension MessagePart {
         guard let first = paths.first else { return nil }
         guard paths.count == 1 else { return "\(first) +\(paths.count - 1)" }
         return first
+    }
+
+    private static func firstNonEmptyString(_ candidates: [String?]) -> String? {
+        candidates
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+    }
+
+    private static func jsonString(_ value: JSONValue?) -> String? {
+        value?.stringValue
+    }
+
+    private static var subagentSessionSort: (SessionDisplay, SessionDisplay) -> Bool {
+        { lhs, rhs in
+            if lhs.createdAtMS == rhs.createdAtMS {
+                return lhs.id < rhs.id
+            }
+            return lhs.createdAtMS < rhs.createdAtMS
+        }
+    }
+
+    private static func bestSubagentSessionIndex(in sessions: [SessionDisplay], referenceTimeMS: Double?) -> Int? {
+        guard !sessions.isEmpty else { return nil }
+        guard let referenceTimeMS else { return 0 }
+
+        return sessions.indices.min { lhs, rhs in
+            let lhsDistance = abs(sessions[lhs].createdAtMS - referenceTimeMS)
+            let rhsDistance = abs(sessions[rhs].createdAtMS - referenceTimeMS)
+
+            if lhsDistance == rhsDistance {
+                return subagentSessionSort(sessions[lhs], sessions[rhs])
+            }
+
+            return lhsDistance < rhsDistance
+        }
     }
 
     private static func patchPaths(from patchText: String?) -> [String] {

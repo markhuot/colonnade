@@ -1,3 +1,4 @@
+import CoreData
 import Foundation
 import OSLog
 import XCTest
@@ -175,7 +176,7 @@ final class ThemeControllerTests: XCTestCase {
         let defaults = UserDefaults(suiteName: #function)!
         defaults.removePersistentDomain(forName: #function)
 
-        let controller = ThemeController(defaults: defaults)
+        let controller = ThemeController(defaults: defaults, supportsTheme: { _ in true })
 
         XCTAssertEqual(controller.selectedThemeID, .native)
         XCTAssertEqual(controller.selectedTheme.id, .native)
@@ -187,13 +188,36 @@ final class ThemeControllerTests: XCTestCase {
         defaults.removePersistentDomain(forName: #function)
         defaults.set(OpenCodeThemeID.githubDark.rawValue, forKey: ThemeController.Constants.selectedThemeKey)
 
-        let controller = ThemeController(defaults: defaults)
+        let controller = ThemeController(defaults: defaults, supportsTheme: { _ in true })
         XCTAssertEqual(controller.selectedThemeID, .githubDark)
 
         controller.selectTheme(.nord)
 
         XCTAssertEqual(controller.selectedThemeID, .nord)
         XCTAssertEqual(defaults.string(forKey: ThemeController.Constants.selectedThemeKey), OpenCodeThemeID.nord.rawValue)
+    }
+
+    @MainActor
+    func testThemeControllerFallsBackWhenStoredThemeIsUnsupported() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        defaults.set(OpenCodeThemeID.githubDark.rawValue, forKey: ThemeController.Constants.selectedThemeKey)
+
+        let controller = ThemeController(defaults: defaults, supportsTheme: { $0 == .native })
+
+        XCTAssertEqual(controller.selectedThemeID, .native)
+    }
+
+    @MainActor
+    func testThemeControllerIgnoresUnsupportedSelection() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+
+        let controller = ThemeController(defaults: defaults, supportsTheme: { $0 == .native })
+        controller.selectTheme(.githubDark)
+
+        XCTAssertEqual(controller.selectedThemeID, .native)
+        XCTAssertNil(defaults.string(forKey: ThemeController.Constants.selectedThemeKey))
     }
 }
 
@@ -465,6 +489,273 @@ final class MessagePartToolPresentationTests: XCTestCase {
         XCTAssertEqual(summary.iconSystemName, "pin")
     }
 
+    func testTodoPresentationUsesChecklistDrawer() {
+        let part = makeToolMessagePart(
+            tool: "functions.todowrite",
+            input: [
+                "todos": .array([
+                    .object([
+                        "content": .string("Ship the thing"),
+                        "status": .string("completed")
+                    ]),
+                    .object([
+                        "content": .string("Verify the thing"),
+                        "status": .string("in_progress")
+                    ]),
+                    .object([
+                        "content": .string("Document the thing"),
+                        "status": .string("pending")
+                    ])
+                ])
+            ],
+            output: "raw todo json"
+        )
+
+        let presentation = part.toolPresentation
+
+        guard case let .todo(detail) = presentation.drawerStyle else {
+            return XCTFail("Expected todo drawer style")
+        }
+
+        XCTAssertEqual(
+            detail.items,
+            [
+                ToolTodoItem(id: 0, content: "Ship the thing", status: .completed),
+                ToolTodoItem(id: 1, content: "Verify the thing", status: .inProgress),
+                ToolTodoItem(id: 2, content: "Document the thing", status: .pending)
+            ]
+        )
+        XCTAssertTrue(presentation.drawerStyle.hidesRawOutput)
+    }
+
+    func testTaskPresentationUsesSubagentSummaryStyle() {
+        let part = makeToolMessagePart(
+            tool: "functions.task",
+            input: [
+                "description": .string("Inspect repo"),
+                "subagent_type": .string("explore"),
+                "task_id": .string("task-1")
+            ]
+        )
+
+        let presentation = part.toolPresentation
+
+        guard case let .task(summary) = presentation.summaryStyle else {
+            return XCTFail("Expected task summary style")
+        }
+
+        XCTAssertEqual(summary.title, "Subagent")
+        XCTAssertEqual(summary.target, "Inspect repo")
+        XCTAssertEqual(
+            presentation.detailFields,
+            [
+                ToolDetailField(title: "Type", value: "explore"),
+                ToolDetailField(title: "Task ID", value: "task-1")
+            ]
+        )
+    }
+
+    func testSubagentInvocationPrefersAttachmentSessionID() {
+        let part = makeToolMessagePart(
+            tool: "functions.task",
+            input: [
+                "task_id": .string("task-1"),
+                "subagent_type": .string("explore")
+            ],
+            attachments: [
+                .init(
+                    id: "attachment-1",
+                    sessionID: "session-subagent",
+                    messageID: "message-1",
+                    type: nil,
+                    mime: nil,
+                    filename: nil,
+                    url: nil
+                )
+            ]
+        )
+
+        XCTAssertEqual(
+            part.subagentInvocation,
+            MessagePart.SubagentInvocation(taskID: "task-1", sessionID: "session-subagent", subagentType: "explore")
+        )
+    }
+
+    func testResolveSubagentSessionPrefersExplicitSessionID() {
+        let target = SessionDisplay(
+            id: "session-subagent",
+            title: "Subagent",
+            createdAtMS: 1_050,
+            updatedAtMS: 1_400,
+            parentID: "parent-1",
+            status: nil,
+            hasPendingPermission: false,
+            todoProgress: nil,
+            contextUsageText: nil,
+            isArchived: false
+        )
+        let sibling = SessionDisplay(
+            id: "session-sibling",
+            title: "Sibling",
+            createdAtMS: 1_060,
+            updatedAtMS: 1_500,
+            parentID: "parent-1",
+            status: nil,
+            hasPendingPermission: false,
+            todoProgress: nil,
+            contextUsageText: nil,
+            isArchived: false
+        )
+
+        let resolved = MessagePart.resolveSubagentSession(
+            for: .init(taskID: "task-1", sessionID: "session-subagent", subagentType: "explore"),
+            in: [sibling, target],
+            parentSessionID: "parent-1",
+            referenceTimeMS: 1_055
+        )
+
+        XCTAssertEqual(resolved?.id, target.id)
+    }
+
+    func testResolveSubagentSessionFallsBackToClosestChildByCreationTime() {
+        let early = SessionDisplay(
+            id: "session-early",
+            title: "Early",
+            createdAtMS: 1_010,
+            updatedAtMS: 1_200,
+            parentID: "parent-1",
+            status: nil,
+            hasPendingPermission: false,
+            todoProgress: nil,
+            contextUsageText: nil,
+            isArchived: false
+        )
+        let closest = SessionDisplay(
+            id: "session-closest",
+            title: "Closest",
+            createdAtMS: 1_090,
+            updatedAtMS: 1_300,
+            parentID: "parent-1",
+            status: nil,
+            hasPendingPermission: false,
+            todoProgress: nil,
+            contextUsageText: nil,
+            isArchived: false
+        )
+
+        let resolved = MessagePart.resolveSubagentSession(
+            for: .init(taskID: "task-1", sessionID: nil, subagentType: "explore"),
+            in: [early, closest],
+            parentSessionID: "parent-1",
+            referenceTimeMS: 1_100
+        )
+
+        XCTAssertEqual(resolved?.id, closest.id)
+    }
+
+    func testResolveSubagentSessionsAssignsDistinctConcurrentChildren() {
+        let firstPart = makeToolMessagePart(
+            tool: "functions.task",
+            input: [
+                "description": .string("First"),
+                "task_id": .string("task-1")
+            ]
+        )
+        let secondPart = makeToolMessagePart(
+            tool: "functions.task",
+            input: [
+                "description": .string("Second"),
+                "task_id": .string("task-2")
+            ]
+        )
+
+        let firstChild = SessionDisplay(
+            id: "session-first",
+            title: "First child",
+            createdAtMS: 1_005,
+            updatedAtMS: 1_100,
+            parentID: "parent-1",
+            status: nil,
+            hasPendingPermission: false,
+            todoProgress: nil,
+            contextUsageText: nil,
+            isArchived: false
+        )
+        let secondChild = SessionDisplay(
+            id: "session-second",
+            title: "Second child",
+            createdAtMS: 1_015,
+            updatedAtMS: 1_200,
+            parentID: "parent-1",
+            status: nil,
+            hasPendingPermission: false,
+            todoProgress: nil,
+            contextUsageText: nil,
+            isArchived: false
+        )
+
+        let resolutions = MessagePart.resolveSubagentSessions(
+            for: [firstPart, secondPart],
+            in: [firstChild, secondChild],
+            parentSessionID: "parent-1",
+            baseReferenceTimeMS: 1_010
+        )
+
+        XCTAssertEqual(resolutions[firstPart.id]?.id, firstChild.id)
+        XCTAssertEqual(resolutions[secondPart.id]?.id, secondChild.id)
+    }
+
+    func testResolveSubagentSessionsStillHonorsExplicitSessionIDs() {
+        let firstPart = makeToolMessagePart(
+            tool: "functions.task",
+            input: [
+                "task_id": .string("task-1"),
+                "sessionID": .string("session-second")
+            ]
+        )
+        let secondPart = makeToolMessagePart(
+            tool: "functions.task",
+            input: [
+                "task_id": .string("task-2")
+            ]
+        )
+
+        let firstChild = SessionDisplay(
+            id: "session-first",
+            title: "First child",
+            createdAtMS: 1_005,
+            updatedAtMS: 1_100,
+            parentID: "parent-1",
+            status: nil,
+            hasPendingPermission: false,
+            todoProgress: nil,
+            contextUsageText: nil,
+            isArchived: false
+        )
+        let secondChild = SessionDisplay(
+            id: "session-second",
+            title: "Second child",
+            createdAtMS: 1_015,
+            updatedAtMS: 1_200,
+            parentID: "parent-1",
+            status: nil,
+            hasPendingPermission: false,
+            todoProgress: nil,
+            contextUsageText: nil,
+            isArchived: false
+        )
+
+        let resolutions = MessagePart.resolveSubagentSessions(
+            for: [firstPart, secondPart],
+            in: [firstChild, secondChild],
+            parentSessionID: "parent-1",
+            baseReferenceTimeMS: 1_010
+        )
+
+        XCTAssertEqual(resolutions[firstPart.id]?.id, secondChild.id)
+        XCTAssertEqual(resolutions[secondPart.id]?.id, firstChild.id)
+    }
+
     func testWebFetchPresentationUsesGlobeIcon() {
         let part = makeToolMessagePart(
             tool: "functions.webfetch",
@@ -660,6 +951,8 @@ final class OpenCodeAppModelTests: XCTestCase {
         try await waitForAsyncWork()
 
         XCTAssertEqual(workspaceService.stopSessionCalls, [.init(directory: directory, sessionID: session.id)])
+        let refreshedStatuses = await coordinator.refreshedStatusSessionIDsSnapshot()
+        XCTAssertEqual(refreshedStatuses, [session.id])
         let refreshedMessages = await coordinator.refreshedMessageSessionIDsSnapshot()
         XCTAssertEqual(refreshedMessages.suffix(1), [session.id])
         let refreshedInteractions = await coordinator.refreshedInteractionsCountSnapshot()
@@ -732,6 +1025,18 @@ final class OpenCodeAppModelTests: XCTestCase {
 
         XCTAssertEqual(appState.openSessionIDs, [])
         XCTAssertNil(appState.focusedSessionID)
+        XCTAssertNil(appState.promptFocusRequest)
+    }
+
+    func testCloseUnfocusedSessionPreservesFocusedPane() {
+        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
+        appState.openSessionIDs = ["session-1", "session-2", "session-3"]
+        appState.focusedSessionID = "session-2"
+
+        appState.closeSession("session-1")
+
+        XCTAssertEqual(appState.openSessionIDs, ["session-2", "session-3"])
+        XCTAssertEqual(appState.focusedSessionID, "session-2")
         XCTAssertNil(appState.promptFocusRequest)
     }
 
@@ -1372,6 +1677,49 @@ final class OpenCodeAppModelTests: XCTestCase {
         XCTAssertEqual(appState.permissionForSession(session.id).count, 1)
     }
 
+    func testWorkspaceLiveStoreNotifiesWhenRunningSessionStops() async {
+        let connection = WorkspaceConnection(serverURL: OpenCodeAppModel.defaultServerURL, directory: "/tmp/project")
+        let notifier = MockWorkspaceEventNotifier()
+        let store = WorkspaceLiveStore(connection: connection, notifier: notifier)
+        let session = makeSession(id: "session-1", directory: connection.directory)
+
+        store.applyWorkspaceSnapshot(
+            WorkspaceSnapshot(sessions: [session], statuses: [session.id: .busy], questions: [], permissions: [])
+        )
+        XCTAssertEqual(notifier.eventsSnapshot(), [])
+
+        store.applyStatus(sessionID: session.id, status: .idle)
+
+        XCTAssertEqual(
+            notifier.eventsSnapshot(),
+            [.sessionStopped(sessionID: session.id, sessionTitle: session.title)]
+        )
+    }
+
+    func testWorkspaceLiveStoreNotifiesForNewPermissionAndQuestionRequests() async {
+        let connection = WorkspaceConnection(serverURL: OpenCodeAppModel.defaultServerURL, directory: "/tmp/project")
+        let notifier = MockWorkspaceEventNotifier()
+        let store = WorkspaceLiveStore(connection: connection, notifier: notifier)
+        let session = makeSession(id: "session-1", directory: connection.directory)
+        let question = makeQuestion(id: "question-1", sessionID: session.id)
+        let permission = makePermission(id: "permission-1", sessionID: session.id)
+
+        store.applyWorkspaceSnapshot(
+            WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
+        )
+
+        store.replaceInteractions(sessionID: session.id, questions: [question], permissions: [permission])
+        store.replaceInteractions(sessionID: session.id, questions: [question], permissions: [permission])
+
+        XCTAssertEqual(
+            notifier.eventsSnapshot(),
+            [
+                .permissionRequested(sessionID: session.id, sessionTitle: session.title, permission: permission.permission),
+                .questionAsked(sessionID: session.id, sessionTitle: session.title, question: question.questions[0].question)
+            ]
+        )
+    }
+
     func testLoadPrefersRecentModelAndNormalizesThinkingLevelSelection() async throws {
         let directory = try makeTemporaryDirectory()
         let persistence = PersistenceController(inMemory: true)
@@ -1640,6 +1988,25 @@ final class SessionListEscapeKeyEventTests: XCTestCase {
         XCTAssertFalse(SessionListEscapeKeyEvent.shouldRequestStop(keyCode: 53, modifiers: [.command], isListFocused: true))
         XCTAssertFalse(SessionListEscapeKeyEvent.shouldRequestStop(keyCode: 53, modifiers: [], isListFocused: false))
         XCTAssertFalse(SessionListEscapeKeyEvent.shouldRequestStop(keyCode: 115, modifiers: [], isListFocused: true))
+    }
+}
+
+final class FocusedSessionTimelineKeyEventTests: XCTestCase {
+    func testHomeAndEndTriggerScrollDirectionWithoutModifiers() {
+        XCTAssertEqual(
+            FocusedSessionTimelineKeyEvent.scrollDirection(keyCode: 115, modifiers: [], isTextInputActive: false),
+            .top
+        )
+        XCTAssertEqual(
+            FocusedSessionTimelineKeyEvent.scrollDirection(keyCode: 119, modifiers: [], isTextInputActive: false),
+            .bottom
+        )
+    }
+
+    func testScrollDirectionIgnoresModifiedKeysAndTextInput() {
+        XCTAssertNil(FocusedSessionTimelineKeyEvent.scrollDirection(keyCode: 115, modifiers: [.command], isTextInputActive: false))
+        XCTAssertNil(FocusedSessionTimelineKeyEvent.scrollDirection(keyCode: 115, modifiers: [], isTextInputActive: true))
+        XCTAssertNil(FocusedSessionTimelineKeyEvent.scrollDirection(keyCode: 53, modifiers: [], isTextInputActive: false))
     }
 }
 
@@ -2035,6 +2402,62 @@ final class WorkspaceSyncCoordinatorTests: XCTestCase {
 
         XCTAssertNil(snapshot.messagesBySession[session.id])
     }
+
+    func testBufferedStreamingWritesReturnImmediatelyBeforeExplicitFlush() async throws {
+        let directory = "/tmp/project"
+        let session = makeSession(id: "session-1", directory: directory)
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+
+        await repository.applyWorkspaceSnapshot(
+            directory: directory,
+            snapshot: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: []),
+            modelContextLimits: [:],
+            openSessionIDs: [session.id]
+        )
+
+        await repository.upsertMessageInfo(
+            directory: directory,
+            sessionID: session.id,
+            info: MessageInfo(
+                id: "message-1",
+                sessionID: session.id,
+                role: .assistant,
+                time: .init(created: 2_000, completed: nil),
+                parentID: nil,
+                agent: nil,
+                model: nil,
+                modelID: nil,
+                providerID: nil,
+                mode: nil,
+                path: nil,
+                cost: nil,
+                tokens: nil,
+                finish: nil,
+                summary: nil,
+                error: nil
+            ),
+            modelContextLimits: [:]
+        )
+
+        let beforeFlushContext = persistence.newBackgroundContext()
+        let beforeFlushCount = beforeFlushContext.performAndWait { () -> Int in
+            let request = MessageEntity.fetchRequest()
+            request.predicate = NSPredicate(format: "sessionID == %@", session.id)
+            return ((try? beforeFlushContext.fetch(request)) ?? []).count
+        }
+        XCTAssertEqual(beforeFlushCount, 0)
+
+        await repository.flushBufferedStreamMutations()
+
+        let afterFlushContext = persistence.newBackgroundContext()
+        let afterFlushCount = afterFlushContext.performAndWait { () -> Int in
+            let request = MessageEntity.fetchRequest()
+            request.predicate = NSPredicate(format: "sessionID == %@", session.id)
+            return ((try? afterFlushContext.fetch(request)) ?? []).count
+        }
+        XCTAssertEqual(afterFlushCount, 1)
+    }
 }
 
 private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked Sendable {
@@ -2224,6 +2647,7 @@ private actor MockWorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
     private(set) var startedCalls: [([ModelContextKey: Int], [String], Bool)] = []
     private(set) var updatedModelContextLimits: [[ModelContextKey: Int]] = []
     private(set) var updatedOpenSessionIDs: [[String]] = []
+    private(set) var refreshedStatusSessionIDs: [String] = []
     private(set) var refreshedMessageSessionIDs: [String] = []
     private(set) var refreshedTodosSessionIDs: [String] = []
     private(set) var refreshedInteractionsCount = 0
@@ -2242,6 +2666,10 @@ private actor MockWorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
 
     func refreshAll() async throws {}
 
+    func refreshStatus(sessionID: String) async {
+        refreshedStatusSessionIDs.append(sessionID)
+    }
+
     func refreshMessages(sessionID: String) async {
         refreshedMessageSessionIDs.append(sessionID)
     }
@@ -2256,6 +2684,10 @@ private actor MockWorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
 
     func refreshedMessageSessionIDsSnapshot() -> [String] {
         refreshedMessageSessionIDs
+    }
+
+    func refreshedStatusSessionIDsSnapshot() -> [String] {
+        refreshedStatusSessionIDs
     }
 
     func refreshedTodosSessionIDsSnapshot() -> [String] {
@@ -2321,6 +2753,24 @@ private actor TestWorkspaceSyncRegistry: WorkspaceSyncRegistryProtocol {
 
 private final class PreferenceRecorder: @unchecked Sendable {
     var value: ModelReference?
+}
+
+private final class MockWorkspaceEventNotifier: WorkspaceEventNotifying, @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [WorkspaceEventNotification] = []
+
+    func notify(_ event: WorkspaceEventNotification) {
+        lock.lock()
+        events.append(event)
+        lock.unlock()
+    }
+
+    func eventsSnapshot() -> [WorkspaceEventNotification] {
+        lock.lock()
+        let snapshot = events
+        lock.unlock()
+        return snapshot
+    }
 }
 
 private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked Sendable {
@@ -2715,7 +3165,8 @@ private func makeToolMessagePart(
     metadata: [String: JSONValue]? = nil,
     output: String? = nil,
     error: String? = nil,
-    title: String? = nil
+    title: String? = nil,
+    attachments: [MessagePart.FileAttachment]? = nil
 ) -> MessagePart {
     MessagePart(
         id: UUID().uuidString,
@@ -2738,7 +3189,7 @@ private func makeToolMessagePart(
             metadata: metadata,
             error: error,
             time: nil,
-            attachments: nil
+            attachments: attachments
         ),
         mime: nil,
         filename: nil,
