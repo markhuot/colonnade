@@ -106,7 +106,31 @@ jobs:
               --issuer "$APPLE_NOTARY_ISSUER_ID" \
               --key-id "$APPLE_NOTARY_KEY_ID" \
               --key "$NOTARY_KEY_PATH" \
-              --wait
+              --wait \
+              --output-format json > build/notary-result.json
+
+            NOTARY_SUBMISSION_ID="$(python3 - <<'PY'
+import json
+with open('build/notary-result.json', 'r', encoding='utf-8') as f:
+    result = json.load(f)
+print(result.get('id', ''))
+PY
+            )"
+            NOTARY_STATUS="$(python3 - <<'PY'
+import json
+with open('build/notary-result.json', 'r', encoding='utf-8') as f:
+    result = json.load(f)
+print(result.get('status', ''))
+PY
+            )"
+
+            if [ "$NOTARY_STATUS" != "Accepted" ]; then
+              xcrun notarytool log "$NOTARY_SUBMISSION_ID" \
+                --issuer "$APPLE_NOTARY_ISSUER_ID" \
+                --key-id "$APPLE_NOTARY_KEY_ID" \
+                --key "$NOTARY_KEY_PATH"
+              exit 1
+            fi
 
             xcrun stapler staple "$APP_PATH"
             rm -f "$ARTIFACT_PATH"
