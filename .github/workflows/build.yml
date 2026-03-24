@@ -67,33 +67,6 @@ jobs:
         if: github.event_name == 'pull_request'
         run: xcodebuild -project "$PROJECT_PATH" -scheme "$SCHEME" -configuration Release -destination 'platform=macOS' -derivedDataPath "$DERIVED_DATA_PATH" CURRENT_PROJECT_VERSION=${{ github.run_number }} CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
 
-      - name: Create export options plist
-        if: github.event_name != 'pull_request'
-        env:
-          APPLE_DEVELOPER_TEAM_ID: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
-        run: |
-          if [ -z "$APPLE_DEVELOPER_TEAM_ID" ]; then
-            echo "APPLE_DEVELOPER_TEAM_ID must be configured for signed builds." >&2
-            exit 1
-          fi
-
-          cat > build/ExportOptions.plist <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>developer-id</string>
-            <key>signingCertificate</key>
-            <string>Developer ID Application</string>
-            <key>signingStyle</key>
-            <string>automatic</string>
-            <key>teamID</key>
-            <string>$APPLE_DEVELOPER_TEAM_ID</string>
-          </dict>
-          </plist>
-          EOF
-
       - name: Archive signed app
         if: github.event_name != 'pull_request'
         env:
@@ -110,18 +83,6 @@ jobs:
             CODE_SIGN_STYLE=Automatic \
             OTHER_CODE_SIGN_FLAGS="--keychain $APPLE_SIGNING_KEYCHAIN"
 
-      - name: Export signed app
-        if: github.event_name != 'pull_request'
-        run: |
-          security unlock-keychain -p "$APPLE_SIGNING_KEYCHAIN_PASSWORD" "$APPLE_SIGNING_KEYCHAIN"
-          security default-keychain -d user -s "$APPLE_SIGNING_KEYCHAIN"
-          security list-keychains -d user -s "$APPLE_SIGNING_KEYCHAIN"
-
-          xcodebuild -exportArchive \
-            -archivePath "$ARCHIVE_PATH" \
-            -exportPath "$EXPORT_PATH" \
-            -exportOptionsPlist build/ExportOptions.plist
-
       - name: Package app bundle
         env:
           APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
@@ -134,7 +95,7 @@ jobs:
             exit 0
           fi
 
-          APP_PATH="$EXPORT_PATH/$APP_NAME.app"
+          APP_PATH="$ARCHIVE_PATH/Products/Applications/$APP_NAME.app"
           ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ARTIFACT_PATH"
 
           if [ -n "$APPLE_NOTARY_ISSUER_ID" ] && [ -n "$APPLE_NOTARY_KEY_ID" ] && [ -n "$APPLE_NOTARY_KEY_BASE64" ]; then
