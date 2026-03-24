@@ -7,6 +7,15 @@ on:
 permissions:
   contents: write
 
+env:
+  APP_NAME: Colonnade
+  PROJECT_PATH: OpenCode.xcodeproj
+  SCHEME: OpenCode
+  DERIVED_DATA_PATH: build/DerivedData
+  ARCHIVE_PATH: build/Colonnade.xcarchive
+  EXPORT_PATH: build/export
+  ARTIFACT_PATH: build/Colonnade-${{ github.run_number }}.zip
+
 jobs:
   build:
     runs-on: macos-latest
@@ -21,24 +30,142 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Build release app
-        run: xcodebuild -project OpenCode.xcodeproj -scheme OpenCode -configuration Release -destination 'platform=macOS' -derivedDataPath build/DerivedData CURRENT_PROJECT_VERSION=${{ github.run_number }} CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: Prepare build directories
+        run: mkdir -p build "$EXPORT_PATH"
+
+      - name: Install signing certificate
+        if: github.event_name != 'pull_request'
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE_P12_BASE64" ]; then
+            echo "APPLE_CERTIFICATE_P12_BASE64 must be configured for signed builds." >&2
+            exit 1
+          fi
+
+          CERTIFICATE_PATH="$RUNNER_TEMP/apple-certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+
+          printf '%s' "$APPLE_CERTIFICATE_P12_BASE64" | base64 -D > "$CERTIFICATE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "${APPLE_CERTIFICATE_PASSWORD:-}" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security default-keychain -d user -s "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+
+          {
+            echo "APPLE_SIGNING_KEYCHAIN=$KEYCHAIN_PATH"
+            echo "APPLE_SIGNING_KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      - name: Build unsigned app for pull requests
+        if: github.event_name == 'pull_request'
+        run: xcodebuild -project "$PROJECT_PATH" -scheme "$SCHEME" -configuration Release -destination 'platform=macOS' -derivedDataPath "$DERIVED_DATA_PATH" CURRENT_PROJECT_VERSION=${{ github.run_number }} CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+
+      - name: Create export options plist
+        if: github.event_name != 'pull_request'
+        env:
+          APPLE_DEVELOPER_TEAM_ID: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+        run: |
+          if [ -z "$APPLE_DEVELOPER_TEAM_ID" ]; then
+            echo "APPLE_DEVELOPER_TEAM_ID must be configured for signed builds." >&2
+            exit 1
+          fi
+
+          cat > build/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>developer-id</string>
+            <key>signingCertificate</key>
+            <string>Developer ID Application</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>teamID</key>
+            <string>$APPLE_DEVELOPER_TEAM_ID</string>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Archive signed app
+        if: github.event_name != 'pull_request'
+        env:
+          APPLE_DEVELOPER_TEAM_ID: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+        run: |
+          xcodebuild archive \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -archivePath "$ARCHIVE_PATH" \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            DEVELOPMENT_TEAM="$APPLE_DEVELOPER_TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_IDENTITY="Developer ID Application" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $APPLE_SIGNING_KEYCHAIN"
+
+      - name: Export signed app
+        if: github.event_name != 'pull_request'
+        run: xcodebuild -exportArchive -archivePath "$ARCHIVE_PATH" -exportPath "$EXPORT_PATH" -exportOptionsPlist build/ExportOptions.plist
 
       - name: Package app bundle
-        run: ditto -c -k --sequesterRsrc --keepParent build/DerivedData/Build/Products/Release/Colonnade.app build/Colonnade-${{ github.run_number }}.zip
+        env:
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            APP_PATH="$DERIVED_DATA_PATH/Build/Products/Release/$APP_NAME.app"
+            ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ARTIFACT_PATH"
+            exit 0
+          fi
+
+          APP_PATH="$EXPORT_PATH/$APP_NAME.app"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ARTIFACT_PATH"
+
+          if [ -n "$APPLE_NOTARY_ISSUER_ID" ] && [ -n "$APPLE_NOTARY_KEY_ID" ] && [ -n "$APPLE_NOTARY_KEY_BASE64" ]; then
+            NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey_$APPLE_NOTARY_KEY_ID.p8"
+            printf '%s' "$APPLE_NOTARY_KEY_BASE64" | base64 -D > "$NOTARY_KEY_PATH"
+
+            xcrun notarytool submit "$ARTIFACT_PATH" \
+              --issuer "$APPLE_NOTARY_ISSUER_ID" \
+              --key-id "$APPLE_NOTARY_KEY_ID" \
+              --key "$NOTARY_KEY_PATH" \
+              --wait
+
+            xcrun stapler staple "$APP_PATH"
+            rm -f "$ARTIFACT_PATH"
+            ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ARTIFACT_PATH"
+          else
+            echo "Skipping notarization because APPLE_NOTARY_ISSUER_ID, APPLE_NOTARY_KEY_ID, or APPLE_NOTARY_KEY_BASE64 is not set."
+          fi
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v6
         with:
           name: Colonnade-${{ github.run_number }}
-          path: build/Colonnade-${{ github.run_number }}.zip
+          path: ${{ env.ARTIFACT_PATH }}
+
+      - name: Clean up signing keychain
+        if: always() && github.event_name != 'pull_request'
+        run: |
+          if [ -n "$APPLE_SIGNING_KEYCHAIN" ] && [ -f "$APPLE_SIGNING_KEYCHAIN" ]; then
+            security delete-keychain "$APPLE_SIGNING_KEYCHAIN"
+          fi
 
       - name: Create GitHub release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.run_number }}
-          ASSET_PATH: build/Colonnade-${{ github.run_number }}.zip
+          ASSET_PATH: ${{ env.ARTIFACT_PATH }}
         run: |
           if gh release view "$TAG_NAME" >/dev/null 2>&1; then
             gh release upload "$TAG_NAME" "$ASSET_PATH" --clobber
