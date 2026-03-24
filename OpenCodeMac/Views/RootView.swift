@@ -100,6 +100,9 @@ private struct SidebarView: View {
                 }
             }
         }
+        .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(theme.mutedSurfaceBackground.ignoresSafeArea())
         .background(
             SessionListEscapeKeyHandler {
                 requestStopForFocusedSession()

@@ -3,7 +3,9 @@ import SwiftUI
 
 struct WorkspaceRootContainer: View {
     @EnvironmentObject private var modelPreferencesController: ModelPreferencesController
+    @Environment(\.openCodeTheme) private var theme
     @StateObject private var appState: OpenCodeAppModel
+    @State private var workspaceWindow: NSWindow?
     @SceneStorage("workspace-root-restored-server-url") private var restoredServerURLText = ""
     @SceneStorage("workspace-root-restored-directory") private var restoredDirectory = ""
 
@@ -34,8 +36,16 @@ struct WorkspaceRootContainer: View {
                 restoredServerURLText = newConnection?.serverURL.absoluteString ?? ""
                 restoredDirectory = newConnection?.directory ?? ""
             }
+            .onChange(of: appState.projectName) { _, _ in
+                configureWindow(workspaceWindow)
+            }
+            .onChange(of: theme.id) { _, _ in
+                configureWindow(workspaceWindow)
+            }
             .background(
-                WindowObserver { window in
+                WindowObserver(notifyOnUpdate: false) { window in
+                    workspaceWindow = window
+                    configureWindow(window)
                     WorkspaceCommandCenter.shared.registerWorkspaceWindow(window, appState: appState)
                 }
             )
@@ -49,10 +59,24 @@ struct WorkspaceRootContainer: View {
         let serverURL = URL(string: trimmedServerURLText) ?? OpenCodeAppModel.defaultServerURL
         return WorkspaceConnection(serverURL: serverURL, directory: trimmedDirectory)
     }
+
+    private func configureWindow(_ window: NSWindow?) {
+        guard let window else { return }
+
+        window.title = appState.projectName ?? "Choose Project"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
+        window.toolbarStyle = .unified
+        window.isMovableByWindowBackground = true
+        window.styleMask.insert(.fullSizeContentView)
+        window.backgroundColor = theme.windowBackgroundColor
+    }
 }
 
 struct SessionWindowContainer: View {
     @EnvironmentObject private var modelPreferencesController: ModelPreferencesController
+    @Environment(\.openCodeTheme) private var theme
     let context: SessionWindowContext
     @StateObject private var appState: OpenCodeAppModel
     @State private var titlebarAccessoryController = SessionWindowTitlebarAccessoryController()
@@ -99,9 +123,12 @@ struct SessionWindowContainer: View {
         window.title = session?.title ?? context.sessionID
         window.subtitle = ""
         window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = false
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
         window.toolbarStyle = .unified
         window.isMovableByWindowBackground = true
+        window.styleMask.insert(.fullSizeContentView)
+        window.backgroundColor = theme.windowBackgroundColor
     }
 }
 
@@ -179,7 +206,13 @@ private final class SessionWindowTitlebarAccessoryController {
 }
 
 struct WindowObserver: NSViewRepresentable {
+    let notifyOnUpdate: Bool
     let onWindowChange: (NSWindow?) -> Void
+
+    init(notifyOnUpdate: Bool = true, onWindowChange: @escaping (NSWindow?) -> Void) {
+        self.notifyOnUpdate = notifyOnUpdate
+        self.onWindowChange = onWindowChange
+    }
 
     func makeNSView(context: Context) -> WindowObserverView {
         let view = WindowObserverView()
@@ -189,7 +222,9 @@ struct WindowObserver: NSViewRepresentable {
 
     func updateNSView(_ nsView: WindowObserverView, context: Context) {
         nsView.onWindowChange = onWindowChange
-        nsView.notifyWindowChange()
+        if notifyOnUpdate {
+            nsView.notifyWindowChange()
+        }
     }
 }
 
