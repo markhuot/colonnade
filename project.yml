@@ -46,8 +46,14 @@ targets:
       base:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ""
-        ENABLE_HARDENED_RUNTIME: YES
         SWIFT_EMIT_LOC_STRINGS: NO
+      configs:
+        Debug:
+          ENABLE_HARDENED_RUNTIME: NO
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Developer ID Application
+          ENABLE_HARDENED_RUNTIME: YES
     scheme:
       testTargets:
         - OpenCodeTests
