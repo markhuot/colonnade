@@ -112,7 +112,15 @@ jobs:
 
       - name: Export signed app
         if: github.event_name != 'pull_request'
-        run: xcodebuild -exportArchive -archivePath "$ARCHIVE_PATH" -exportPath "$EXPORT_PATH" -exportOptionsPlist build/ExportOptions.plist
+        run: |
+          security unlock-keychain -p "$APPLE_SIGNING_KEYCHAIN_PASSWORD" "$APPLE_SIGNING_KEYCHAIN"
+          security default-keychain -d user -s "$APPLE_SIGNING_KEYCHAIN"
+          security list-keychains -d user -s "$APPLE_SIGNING_KEYCHAIN"
+
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$EXPORT_PATH" \
+            -exportOptionsPlist build/ExportOptions.plist
 
       - name: Package app bundle
         env:
