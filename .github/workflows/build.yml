@@ -108,7 +108,6 @@ jobs:
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             DEVELOPMENT_TEAM="$APPLE_DEVELOPER_TEAM_ID" \
             CODE_SIGN_STYLE=Automatic \
-            CODE_SIGN_IDENTITY="Developer ID Application" \
             OTHER_CODE_SIGN_FLAGS="--keychain $APPLE_SIGNING_KEYCHAIN"
 
       - name: Export signed app
