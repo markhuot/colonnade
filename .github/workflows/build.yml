@@ -109,20 +109,8 @@ jobs:
               --wait \
               --output-format json > build/notary-result.json
 
-            NOTARY_SUBMISSION_ID="$(python3 - <<'PY'
-            import json
-            with open('build/notary-result.json', 'r', encoding='utf-8') as f:
-                result = json.load(f)
-            print(result.get('id', ''))
-            PY
-            )"
-            NOTARY_STATUS="$(python3 - <<'PY'
-            import json
-            with open('build/notary-result.json', 'r', encoding='utf-8') as f:
-                result = json.load(f)
-            print(result.get('status', ''))
-            PY
-            )"
+            NOTARY_SUBMISSION_ID="$(python3 -c 'import json; print(json.load(open("build/notary-result.json", encoding="utf-8")).get("id", ""))')"
+            NOTARY_STATUS="$(python3 -c 'import json; print(json.load(open("build/notary-result.json", encoding="utf-8")).get("status", ""))')"
 
             if [ "$NOTARY_STATUS" != "Accepted" ]; then
               xcrun notarytool log "$NOTARY_SUBMISSION_ID" \
