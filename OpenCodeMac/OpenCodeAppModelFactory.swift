@@ -1,20 +1,22 @@
 import AppKit
 @preconcurrency import UserNotifications
 
-@MainActor
 enum OpenCodeAppModelFactory {
+    @MainActor
     static let localServerPreferencesController = LocalServerPreferencesController()
     static let workspaceEventNotifier = NativeWorkspaceEventNotifier.shared
     static let liveStoreRegistry = WorkspaceLiveStoreRegistry(notifier: workspaceEventNotifier)
+    static let workspaceSyncRegistry = WorkspaceSyncRegistry(storeRegistry: liveStoreRegistry)
 
-    private nonisolated static func resolvedLocalServerExecutablePath() -> String {
+    private static func resolvedLocalServerExecutablePath() -> String {
         NSString(string: LocalServerPreferencesController.loadOpencodeExecutablePath()).expandingTildeInPath
     }
 
+    @MainActor
     static func makeRootAppModel(
         build: @MainActor () -> OpenCodeAppModel = {
             OpenCodeAppModel(
-                storeRegistry: liveStoreRegistry,
+                syncRegistry: workspaceSyncRegistry,
                 restoresLastSelectedDirectory: false,
                 localServerExecutablePathProvider: {
                     resolvedLocalServerExecutablePath()
@@ -28,12 +30,13 @@ enum OpenCodeAppModelFactory {
         return appState
     }
 
+    @MainActor
     static func makeSessionWindowAppModel(
         context: SessionWindowContext,
         directoryChooserFactory: @escaping @MainActor (OpenCodeAppModel) -> (@MainActor () -> Void) = makeDirectoryChooser(for:)
     ) -> OpenCodeAppModel {
         let appState = OpenCodeAppModel(
-            storeRegistry: liveStoreRegistry,
+            syncRegistry: workspaceSyncRegistry,
             persistsWorkspacePaneState: false,
             initialServerURL: context.connection.serverURL,
             initialDirectory: context.connection.directory,
@@ -43,9 +46,10 @@ enum OpenCodeAppModelFactory {
         return appState
     }
 
+    @MainActor
     static func makePreferencesAppModel(connection: WorkspaceConnection? = WorkspaceCommandCenter.shared.currentConnection) -> OpenCodeAppModel {
         OpenCodeAppModel(
-            storeRegistry: liveStoreRegistry,
+            syncRegistry: workspaceSyncRegistry,
             restoresLastSelectedDirectory: connection == nil,
             initialServerURL: connection?.serverURL ?? OpenCodeAppModel.defaultServerURL,
             initialDirectory: connection?.directory,
@@ -56,6 +60,7 @@ enum OpenCodeAppModelFactory {
         )
     }
 
+    @MainActor
     static func makeDirectoryChooser(for appState: OpenCodeAppModel) -> @MainActor () -> Void {
         {
             let panel = NSOpenPanel()

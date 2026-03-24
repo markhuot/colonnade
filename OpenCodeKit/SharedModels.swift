@@ -1665,17 +1665,33 @@ extension MessageEnvelope {
         Date(timeIntervalSince1970: info.time.created / 1000)
     }
 
+    var isCompleted: Bool {
+        info.time.completed != nil || stepFinish != nil
+    }
+
+    var shouldRenderMarkdown: Bool {
+        !info.role.isAssistant || isCompleted
+    }
+
+    var textParts: [MessagePart] {
+        parts.filter { $0.type == .text }
+    }
+
+    var reasoningParts: [MessagePart] {
+        parts.filter { $0.type == .reasoning }
+    }
+
     var totalTokens: Int? {
         info.tokens?.total ?? stepFinish?.tokens?.total
     }
 
     var visibleText: String {
-        let textParts = parts.filter { $0.type == .text }.compactMap(\.text)
+        let textParts = textParts.compactMap(\.text)
         return textParts.joined(separator: "\n\n")
     }
 
     var reasoningText: String {
-        parts.filter { $0.type == .reasoning }.compactMap(\.text).joined(separator: "\n\n")
+        reasoningParts.compactMap(\.text).joined(separator: "\n\n")
     }
 
     var latestReasoningTitle: String? {
@@ -1688,6 +1704,16 @@ extension MessageEnvelope {
 
     var stepFinish: MessagePart? {
         parts.last(where: { $0.type == .stepFinish })
+    }
+}
+
+extension MessagePart {
+    var isCompleted: Bool {
+        time?.end != nil
+    }
+
+    func shouldRenderMarkdown(for role: MessageRole, messageIsCompleted: Bool) -> Bool {
+        !role.isAssistant || messageIsCompleted || isCompleted
     }
 }
 

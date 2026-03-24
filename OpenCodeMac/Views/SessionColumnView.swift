@@ -1,11 +1,13 @@
 import OSLog
 import SwiftUI
 import Textual
+
 private struct MarkdownContentView: View {
     @Environment(\.openCodeTheme) private var theme
 
     let text: String
     let messageRole: MessageRole
+    var rendersMarkdown: Bool = true
     var baseFont: Font? = nil
     var foregroundStyle: AnyShapeStyle? = nil
 
@@ -14,20 +16,26 @@ private struct MarkdownContentView: View {
     }
 
     var body: some View {
-        StructuredText(markdown: text)
-            .font(baseFont)
-            .applyForegroundStyle(foregroundStyle)
-            .textual.textSelection(.enabled)
-            .textual.structuredTextStyle(.gitHub)
-            .textual.highlighterTheme(theme.highlighterTheme)
-            .textual.codeBlockStyle(
-                OpenCodeCodeBlockStyle(
-                    foregroundStyle: foregroundStyle,
-                    backgroundColor: messageRole.isAssistant ? theme.codeBlockBackground : theme.userBubble,
-                    alignment: contentAlignment
-                )
-            )
-            .frame(maxWidth: .infinity, alignment: contentAlignment)
+        Group {
+            if rendersMarkdown {
+                StructuredText(markdown: text)
+                    .textual.structuredTextStyle(.gitHub)
+                    .textual.highlighterTheme(theme.highlighterTheme)
+                    .textual.codeBlockStyle(
+                        OpenCodeCodeBlockStyle(
+                            foregroundStyle: foregroundStyle,
+                            backgroundColor: messageRole.isAssistant ? theme.codeBlockBackground : theme.userBubble,
+                            alignment: contentAlignment
+                        )
+                    )
+            } else {
+                Text(verbatim: text)
+            }
+        }
+        .font(baseFont)
+        .applyForegroundStyle(foregroundStyle)
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: contentAlignment)
     }
 }
 
@@ -82,8 +90,6 @@ struct SessionColumnView: View {
     @Environment(\.openCodeTheme) private var theme
     @ObservedObject var sessionState: SessionLiveState
 
-    private let logger = Logger(subsystem: "ai.opencode.app", category: "ui-sync")
-
     let sessionID: String
     var chrome: SessionColumnChrome = .pane
     var onPaneDragChanged: ((CGFloat) -> Void)? = nil
@@ -123,22 +129,12 @@ struct SessionColumnView: View {
             Divider()
             SessionComposerView(sessionID: sessionID, permissions: permissions, sessionState: sessionState)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(backgroundView)
         .overlay { overlayView }
         .contentShape(Rectangle())
         .onTapGesture {
             appState.focusSession(sessionID)
-        }
-        .onAppear {
-            let partCount = messages.reduce(0) { $0 + $1.parts.count }
-            logger.notice("Session column appear sessionID=\(sessionID, privacy: .public) messages=\(messages.count, privacy: .public) parts=\(partCount, privacy: .public)")
-        }
-        .onChange(of: messages) { _, newMessages in
-            let lastMessageID = newMessages.last?.id ?? "nil"
-            let partCount = newMessages.reduce(0) { $0 + $1.parts.count }
-            logger.notice(
-                "Session column messages changed sessionID=\(sessionID, privacy: .public) count=\(newMessages.count, privacy: .public) parts=\(partCount, privacy: .public) lastMessageID=\(lastMessageID, privacy: .public)"
-            )
         }
     }
 
@@ -174,7 +170,7 @@ struct SessionColumnView: View {
     private var overlayView: some View {
         if chrome == .pane {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(borderColor, lineWidth: appState.focusedSessionID == sessionID ? 2 : 1)
+                .strokeBorder(borderColor, lineWidth: appState.focusedSessionID == sessionID ? 2 : 1)
         }
     }
 
@@ -439,13 +435,15 @@ private struct SessionComposerView: View {
                             appState.focusSession(sessionID)
                         },
                         onSubmit: {
-                            appState.sendMessage(sessionID: sessionID)
+                            if appState.sendMessage(sessionID: sessionID) {
+                                promptHeight = PromptTextView.defaultHeight
+                            }
                         }
                     )
                     .frame(height: promptHeight)
                     .padding(4)
 
-                    HStack(spacing: 8) {
+                    HStack(spacing: 16) {
                         if !agentOptions.isEmpty {
                             Picker("Agent", selection: selectedAgentKey) {
                                 ForEach(agentOptions) { option in
@@ -454,7 +452,6 @@ private struct SessionComposerView: View {
                             }
                             .labelsHidden()
                             .pickerStyle(.menu)
-                            .frame(maxWidth: 240, alignment: .leading)
                         }
 
                         if !modelOptions.isEmpty {
@@ -465,7 +462,6 @@ private struct SessionComposerView: View {
                             }
                             .labelsHidden()
                             .pickerStyle(.menu)
-                            .frame(maxWidth: 320, alignment: .leading)
 
                             if let selectedModel = appState.selectedModelOption(for: sessionID), selectedModel.supportsReasoning {
                                 Picker("Thinking", selection: selectedThinkingLevel) {
@@ -475,7 +471,6 @@ private struct SessionComposerView: View {
                                 }
                                 .labelsHidden()
                                 .pickerStyle(.menu)
-                                .frame(width: 140)
                             }
                         }
 
@@ -484,15 +479,12 @@ private struct SessionComposerView: View {
                     .padding(.leading, 0)
                     .padding(.trailing, 6)
                 }
-            } else {
-                VStack(alignment: .leading, spacing: 12) {
-                    if let request = activePermission {
-                        PermissionPromptView(request: request)
-                    }
-                }
+                .padding(18)
+            } else if let request = activePermission {
+                PermissionPromptView(request: request)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(18)
     }
 }
 
@@ -652,21 +644,40 @@ private struct MessageCard: View {
 
             if showsMessageBubble {
                 VStack(alignment: .leading, spacing: 10) {
-                    if !message.visibleText.isEmpty {
-                        MarkdownContentView(text: message.visibleText, messageRole: message.info.role)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    if !message.textParts.isEmpty {
+                        ForEach(message.textParts) { part in
+                            if let text = part.text, !text.isEmpty {
+                                MarkdownContentView(
+                                    text: text,
+                                    messageRole: message.info.role,
+                                    rendersMarkdown: part.shouldRenderMarkdown(
+                                        for: message.info.role,
+                                        messageIsCompleted: message.isCompleted
+                                    )
+                                )
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
                     }
 
-                    if showsThinking, !message.reasoningText.isEmpty {
-                        MarkdownContentView(
-                            text: message.reasoningText,
-                            messageRole: message.info.role,
-                            baseFont: .callout,
-                            foregroundStyle: AnyShapeStyle(.secondary)
-                        )
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    if showsThinking, !message.reasoningParts.isEmpty {
+                        ForEach(message.reasoningParts) { part in
+                            if let text = part.text, !text.isEmpty {
+                                MarkdownContentView(
+                                    text: text,
+                                    messageRole: message.info.role,
+                                    rendersMarkdown: part.shouldRenderMarkdown(
+                                        for: message.info.role,
+                                        messageIsCompleted: message.isCompleted
+                                    ),
+                                    baseFont: .callout,
+                                    foregroundStyle: AnyShapeStyle(.secondary)
+                                )
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
                     }
 
                     if let finish = message.stepFinish, finish.reason?.localizedCaseInsensitiveCompare("tool-calls") != .orderedSame {
@@ -1304,13 +1315,9 @@ private struct PermissionPromptView: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(theme.errorBackground)
-        )
-        .padding(.leading, TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.promptCardPadding))
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.errorBackground)
     }
 }
 

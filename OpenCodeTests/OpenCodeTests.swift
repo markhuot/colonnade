@@ -1,3 +1,4 @@
+import Combine
 import CoreData
 import Foundation
 import OSLog
@@ -2252,6 +2253,147 @@ final class WorkspaceSyncCoordinatorTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testAppModelUsesStoreOwnedBySyncRegistry() async throws {
+        let directory = "/tmp/project"
+        let connection = WorkspaceConnection(serverURL: OpenCodeAppModel.defaultServerURL, directory: directory)
+        let sharedStore = WorkspaceLiveStore(connection: connection)
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator, store: sharedStore)
+
+        let appState = OpenCodeAppModel(
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false,
+            initialDirectory: directory
+        )
+
+        await appState.load(directory: directory)
+
+        XCTAssertTrue(appState.liveStore === sharedStore)
+    }
+
+    @MainActor
+    func testStreamingMutationsPublishMessageUpdatesImmediately() async throws {
+        let state = SessionLiveState(id: "session-1")
+        let messageInfo = MessageInfo(
+            id: "message-1",
+            sessionID: "session-1",
+            role: .assistant,
+            time: .init(created: 2_000, completed: nil),
+            parentID: nil,
+            agent: nil,
+            model: nil,
+            modelID: nil,
+            providerID: nil,
+            mode: nil,
+            path: nil,
+            cost: nil,
+            tokens: nil,
+            finish: nil,
+            summary: nil,
+            error: nil
+        )
+        let part = makeMessagePart(id: "part-1", sessionID: "session-1", messageID: "message-1")
+
+        var messageSnapshots: [[MessageEnvelope]] = []
+        var cancellables = Set<AnyCancellable>()
+
+        state.$messages
+            .dropFirst()
+            .sink { messageSnapshots.append($0) }
+            .store(in: &cancellables)
+
+        state.upsertMessageInfo(messageInfo)
+        _ = state.applyMessagePart(part)
+        _ = state.applyMessagePartDelta(partID: part.id, field: .text, delta: "Hello")
+
+        XCTAssertEqual(messageSnapshots.count, 3)
+        XCTAssertEqual(messageSnapshots[0].map(\.id), ["message-1"])
+        XCTAssertEqual(messageSnapshots[1].first?.parts.count, 1)
+        XCTAssertEqual(messageSnapshots[2].first?.visibleText, "Hello")
+    }
+
+    func testAssistantMessageDefersMarkdownUntilMessageCompletion() {
+        let message = MessageEnvelope(
+            info: MessageInfo(
+                id: "message-1",
+                sessionID: "session-1",
+                role: .assistant,
+                time: .init(created: 2_000, completed: nil),
+                parentID: nil,
+                agent: nil,
+                model: nil,
+                modelID: nil,
+                providerID: nil,
+                mode: nil,
+                path: nil,
+                cost: nil,
+                tokens: nil,
+                finish: nil,
+                summary: nil,
+                error: nil
+            ),
+            parts: [makeMessagePart(id: "part-1", sessionID: "session-1", messageID: "message-1", text: "# Hello")]
+        )
+
+        XCTAssertFalse(message.shouldRenderMarkdown)
+        XCTAssertFalse(message.textParts[0].shouldRenderMarkdown(for: message.info.role, messageIsCompleted: message.isCompleted))
+    }
+
+    func testAssistantMessageRendersMarkdownAfterCompletion() {
+        let message = MessageEnvelope(
+            info: MessageInfo(
+                id: "message-1",
+                sessionID: "session-1",
+                role: .assistant,
+                time: .init(created: 2_000, completed: 2_100),
+                parentID: nil,
+                agent: nil,
+                model: nil,
+                modelID: nil,
+                providerID: nil,
+                mode: nil,
+                path: nil,
+                cost: nil,
+                tokens: nil,
+                finish: nil,
+                summary: nil,
+                error: nil
+            ),
+            parts: [makeMessagePart(id: "part-1", sessionID: "session-1", messageID: "message-1", text: "# Hello")]
+        )
+
+        XCTAssertTrue(message.shouldRenderMarkdown)
+        XCTAssertTrue(message.textParts[0].shouldRenderMarkdown(for: message.info.role, messageIsCompleted: message.isCompleted))
+    }
+
+    func testUserMessageRendersMarkdownImmediately() {
+        let message = MessageEnvelope(
+            info: MessageInfo(
+                id: "message-1",
+                sessionID: "session-1",
+                role: .user,
+                time: .init(created: 2_000, completed: nil),
+                parentID: nil,
+                agent: nil,
+                model: nil,
+                modelID: nil,
+                providerID: nil,
+                mode: nil,
+                path: nil,
+                cost: nil,
+                tokens: nil,
+                finish: nil,
+                summary: nil,
+                error: nil
+            ),
+            parts: [makeMessagePart(id: "part-1", sessionID: "session-1", messageID: "message-1", text: "# Hello")]
+        )
+
+        XCTAssertTrue(message.shouldRenderMarkdown)
+        XCTAssertTrue(message.textParts[0].shouldRenderMarkdown(for: message.info.role, messageIsCompleted: message.isCompleted))
+    }
+
     func testLoadSnapshotFlushesBufferedStreamingDeltas() async throws {
         let directory = "/tmp/project"
         let session = makeSession(id: "session-1", directory: directory)
@@ -2741,13 +2883,25 @@ private actor LocalServerProbe {
 
 private actor TestWorkspaceSyncRegistry: WorkspaceSyncRegistryProtocol {
     private let coordinatorInstance: any WorkspaceSyncCoordinating
+    private let storeInstance: WorkspaceLiveStore?
 
-    init(coordinator: any WorkspaceSyncCoordinating) {
+    init(coordinator: any WorkspaceSyncCoordinating, store: WorkspaceLiveStore? = nil) {
         coordinatorInstance = coordinator
+        storeInstance = store
     }
 
     func coordinator(for connection: WorkspaceConnection) -> any WorkspaceSyncCoordinating {
         coordinatorInstance
+    }
+
+    func store(for connection: WorkspaceConnection) async -> WorkspaceLiveStore {
+        if let storeInstance {
+            return storeInstance
+        }
+
+        return await MainActor.run {
+            WorkspaceLiveStore(connection: connection)
+        }
     }
 }
 

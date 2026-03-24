@@ -41,10 +41,8 @@ final class OpenCodeAppModel: ObservableObject {
     @Published private(set) var snapshot: PersistenceSnapshot = .empty
 
     private let logger = Logger(subsystem: "ai.opencode.app", category: "workspace")
-    private let uiSyncLogger = Logger(subsystem: "ai.opencode.app", category: "ui-sync")
     private let repository: PersistenceRepository
     private let syncRegistry: any WorkspaceSyncRegistryProtocol
-    private let storeRegistry: WorkspaceLiveStoreRegistry
     private let serverController: WorkspaceServerController
     private let persistsWorkspacePaneState: Bool
     private let restoresLastSelectedDirectory: Bool
@@ -72,7 +70,6 @@ final class OpenCodeAppModel: ObservableObject {
         workspaceService: (any WorkspaceServiceProtocol)? = nil,
         repository: PersistenceRepository = .shared,
         syncRegistry: any WorkspaceSyncRegistryProtocol = WorkspaceSyncRegistry.shared,
-        storeRegistry: WorkspaceLiveStoreRegistry = .shared,
         persistsWorkspacePaneState: Bool = true,
         restoresLastSelectedDirectory: Bool = false,
         initialServerURL: URL = OpenCodeAppModel.defaultServerURL,
@@ -89,7 +86,6 @@ final class OpenCodeAppModel: ObservableObject {
     ) {
         self.repository = repository
         self.syncRegistry = syncRegistry
-        self.storeRegistry = storeRegistry
         self.persistsWorkspacePaneState = persistsWorkspacePaneState
         self.restoresLastSelectedDirectory = restoresLastSelectedDirectory
         self.initialServerURL = initialServerURL
@@ -349,7 +345,7 @@ final class OpenCodeAppModel: ObservableObject {
         isLoading = true
         errorMessage = nil
 
-        let liveStore = await storeRegistry.store(for: connection)
+        let liveStore = await syncRegistry.store(for: connection)
         bindLiveStore(liveStore)
 
         do {
@@ -848,10 +844,11 @@ final class OpenCodeAppModel: ObservableObject {
         selectedThinkingLevelBySession[sessionID] = level
     }
 
-    func sendMessage(sessionID: String) {
-        guard let selectedDirectory else { return }
+    @discardableResult
+    func sendMessage(sessionID: String) -> Bool {
+        guard let selectedDirectory else { return false }
         let draft = drafts[sessionID, default: ""].trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !draft.isEmpty else { return }
+        guard !draft.isEmpty else { return false }
 
         reconcileModelSelection(for: sessionID)
         reconcileAgentSelection(for: sessionID)
@@ -892,6 +889,8 @@ final class OpenCodeAppModel: ObservableObject {
                 errorMessage = error.localizedDescription
             }
         }
+
+        return true
     }
 
     func setDraft(_ draft: String, for sessionID: String) {
@@ -985,7 +984,7 @@ final class OpenCodeAppModel: ObservableObject {
         let loadMS = durationMilliseconds(startedAt.duration(to: loadedAt))
         let publishMS = durationMilliseconds(loadedAt.duration(to: publishedAt))
         let totalMS = durationMilliseconds(startedAt.duration(to: publishedAt))
-        uiSyncLogger.notice(
+        logger.notice(
             "Reloaded snapshot directory=\((resolvedDirectory ?? loadedSnapshot.selectedDirectory ?? "nil"), privacy: .public) sessions=\(loadedSnapshot.sessions.count, privacy: .public) messageSessions=\(loadedSnapshot.messagesBySession.count, privacy: .public) messages=\(totalMessages, privacy: .public) focusedSession=\(focusedSession, privacy: .public) focusedMessages=\(focusedMessageCount, privacy: .public) loadMS=\(loadMS, privacy: .public) publishMS=\(publishMS, privacy: .public) totalMS=\(totalMS, privacy: .public)"
         )
     }

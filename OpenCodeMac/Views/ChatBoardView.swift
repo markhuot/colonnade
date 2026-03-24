@@ -10,7 +10,6 @@ struct ChatBoardView: View {
     let sessionIDs: [String]
 
     private let paneSpacing: CGFloat = 18
-
     var body: some View {
         if sessionIDs.isEmpty {
             ContentUnavailableView(
@@ -65,9 +64,10 @@ struct ChatBoardView: View {
     @ViewBuilder
     private func paneView(for sessionID: String, liveStore: WorkspaceLiveStore) -> some View {
         let width = paneWidth(for: sessionID)
+        let state = liveStore.sessionState(for: sessionID)
 
         SessionColumnView(
-            sessionState: liveStore.sessionState(for: sessionID),
+            sessionState: state,
             sessionID: sessionID,
             onPaneDragChanged: { translation in
                 handlePaneDragChanged(sessionID: sessionID, translation: translation)

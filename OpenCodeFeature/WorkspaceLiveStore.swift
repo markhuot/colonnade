@@ -76,13 +76,18 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
     }
 
     func upsertMessageInfo(_ info: MessageInfo) {
-        if let messageIndex = messages.firstIndex(where: { $0.id == info.id }) {
-            let existingParts = messages[messageIndex].parts
-            messages[messageIndex] = MessageEnvelope(info: info, parts: existingParts)
+        var updatedMessages = messages
+        if let messageIndex = updatedMessages.firstIndex(where: { $0.id == info.id }) {
+            let existingParts = updatedMessages[messageIndex].parts
+            updatedMessages[messageIndex] = MessageEnvelope(info: info, parts: existingParts)
         } else {
-            messages.append(MessageEnvelope(info: info, parts: []))
-            messages.sort { $0.info.time.created < $1.info.time.created }
+            updatedMessages.append(MessageEnvelope(info: info, parts: []))
+            updatedMessages.sort { $0.info.time.created < $1.info.time.created }
         }
+        messages = updatedMessages
+        logger.notice(
+            "Published message info sessionID=\(self.id, privacy: .public) messageID=\(info.id, privacy: .public) totalMessages=\(updatedMessages.count, privacy: .public)"
+        )
     }
 
     func applyMessagePart(_ part: MessagePart) -> MessagePart? {
@@ -93,28 +98,35 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
             return nil
         }
 
-        ensureMessageShell(messageID: messageID, createdAtMS: resolvedPart.time?.start)
+        var updatedMessages = messages
+        ensureMessageShell(in: &updatedMessages, messageID: messageID, createdAtMS: resolvedPart.time?.start)
 
-        guard let messageIndex = messages.firstIndex(where: { $0.id == messageID }) else {
+        guard let messageIndex = updatedMessages.firstIndex(where: { $0.id == messageID }) else {
             logger.notice(
-                "Direct part apply miss sessionID=\(self.id, privacy: .public) messageID=\(messageID, privacy: .public) partID=\(resolvedPart.id, privacy: .public) reason=message-not-loaded loadedMessages=\(self.messages.count, privacy: .public)"
+                "Direct part apply miss sessionID=\(self.id, privacy: .public) messageID=\(messageID, privacy: .public) partID=\(resolvedPart.id, privacy: .public) reason=message-not-loaded loadedMessages=\(updatedMessages.count, privacy: .public)"
             )
             return nil
         }
 
-        var message = messages[messageIndex]
+        var message = updatedMessages[messageIndex]
         if let partIndex = message.parts.firstIndex(where: { $0.id == resolvedPart.id }) {
             message.parts[partIndex] = resolvedPart
         } else {
             message.parts.append(resolvedPart)
             message.parts.sort(by: Self.partSort)
         }
-        messages[messageIndex] = message
+        updatedMessages[messageIndex] = message
+        messages = updatedMessages
+        logger.notice(
+            "Published message part sessionID=\(self.id, privacy: .public) messageID=\(messageID, privacy: .public) partID=\(resolvedPart.id, privacy: .public) partType=\(resolvedPart.type.rawString, privacy: .public) messageParts=\(message.parts.count, privacy: .public)"
+        )
         return resolvedPart
     }
 
     func applyMessagePartDelta(partID: String, field: MessagePartDeltaField, delta: String) -> Bool {
-        guard let messageIndex = messages.firstIndex(where: { message in
+        var updatedMessages = messages
+
+        guard let messageIndex = updatedMessages.firstIndex(where: { message in
             message.parts.contains(where: { $0.id == partID })
         }) else {
             pendingPartDeltas[partID, default: []].append(BufferedPartDelta(field: field, delta: delta))
@@ -124,7 +136,7 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
             return true
         }
 
-        var message = messages[messageIndex]
+        var message = updatedMessages[messageIndex]
         guard let partIndex = message.parts.firstIndex(where: { $0.id == partID }) else {
             return false
         }
@@ -132,33 +144,42 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
         var part = message.parts[partIndex]
         part.apply(delta: delta, to: field)
         message.parts[partIndex] = part
-        messages[messageIndex] = message
+        updatedMessages[messageIndex] = message
+        messages = updatedMessages
+        logger.notice(
+            "Published part delta sessionID=\(self.id, privacy: .public) partID=\(partID, privacy: .public) field=\(field.rawString, privacy: .public) visibleTextBytes=\(message.visibleText.utf8.count, privacy: .public)"
+        )
         return true
     }
 
     func removeMessagePart(partID: String) -> Bool {
         let hadBufferedDeltas = pendingPartDeltas.removeValue(forKey: partID) != nil
-        guard let messageIndex = messages.firstIndex(where: { message in
+        var updatedMessages = messages
+
+        guard let messageIndex = updatedMessages.firstIndex(where: { message in
             message.parts.contains(where: { $0.id == partID })
         }) else {
             return hadBufferedDeltas
         }
 
-        var message = messages[messageIndex]
+        var message = updatedMessages[messageIndex]
         let originalCount = message.parts.count
         message.parts.removeAll { $0.id == partID }
         guard message.parts.count != originalCount else { return hadBufferedDeltas }
-        messages[messageIndex] = message
+        updatedMessages[messageIndex] = message
+        messages = updatedMessages
         return true
     }
 
     func removeMessage(messageID: String) -> Bool {
         let originalCount = messages.count
-        messages.removeAll { $0.id == messageID }
-        return messages.count != originalCount
+        let updatedMessages = messages.filter { $0.id != messageID }
+        guard updatedMessages.count != originalCount else { return false }
+        messages = updatedMessages
+        return true
     }
 
-    private func ensureMessageShell(messageID: String, createdAtMS: Double?) {
+    private func ensureMessageShell(in messages: inout [MessageEnvelope], messageID: String, createdAtMS: Double?) {
         guard !messages.contains(where: { $0.id == messageID }) else { return }
 
         let created = createdAtMS ?? Date().timeIntervalSince1970 * 1000

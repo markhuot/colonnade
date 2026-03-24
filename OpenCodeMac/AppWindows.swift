@@ -55,7 +55,7 @@ struct SessionWindowContainer: View {
     @EnvironmentObject private var modelPreferencesController: ModelPreferencesController
     let context: SessionWindowContext
     @StateObject private var appState: OpenCodeAppModel
-    @State private var toolbarController = SessionWindowToolbarController()
+    @State private var titlebarAccessoryController = SessionWindowTitlebarAccessoryController()
 
     private static let toolbarIdentifier = NSToolbar.Identifier("ai.opencode.session-window-toolbar")
 
@@ -69,6 +69,7 @@ struct SessionWindowContainer: View {
     var body: some View {
         SessionWindowView(sessionID: context.sessionID)
             .environmentObject(appState)
+            .defaultScrollAnchor(.bottom)
             .task {
                 appState.configurePreferredDefaultModelPersistence(
                     provider: { modelPreferencesController.preferredDefaultModelReference },
@@ -92,8 +93,8 @@ struct SessionWindowContainer: View {
     private func configureWindow(_ window: NSWindow?, session: SessionDisplay?) {
         guard let window else { return }
 
-        toolbarController.attach(to: window, identifier: Self.toolbarIdentifier)
-        toolbarController.update(title: session?.title ?? context.sessionID, contextUsageText: session?.contextUsageText)
+        titlebarAccessoryController.attach(to: window, identifier: Self.toolbarIdentifier)
+        titlebarAccessoryController.update(title: session?.title ?? context.sessionID, contextUsageText: session?.contextUsageText)
 
         window.title = session?.title ?? context.sessionID
         window.subtitle = ""
@@ -120,41 +121,50 @@ private struct SessionWindowToolbarContent: View {
                 .lineLimit(1)
         }
         .multilineTextAlignment(.leading)
-        .frame(minWidth: 220, maxWidth: 360)
+        .frame(minWidth: 220, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
         .padding(.vertical, 2)
     }
 }
 
 @MainActor
-private final class SessionWindowToolbarController: NSObject, NSToolbarDelegate {
-    private static let infoItemIdentifier = NSToolbarItem.Identifier("ai.opencode.session-window-toolbar.info")
-
+private final class SessionWindowTitlebarAccessoryController {
     private let hostingView = NSHostingView(rootView: SessionWindowToolbarContent(title: "", contextUsageText: nil))
-    private let infoItem = NSToolbarItem(itemIdentifier: infoItemIdentifier)
-    private lazy var widthConstraint = hostingView.widthAnchor.constraint(equalToConstant: 220)
     private lazy var heightConstraint = hostingView.heightAnchor.constraint(equalToConstant: 30)
+    private let accessoryViewController = NSTitlebarAccessoryViewController()
     private var toolbar: NSToolbar?
+    private weak var window: NSWindow?
 
-    override init() {
-        super.init()
+    init() {
         hostingView.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([widthConstraint, heightConstraint])
-        infoItem.view = hostingView
+        NSLayoutConstraint.activate([heightConstraint])
+        accessoryViewController.view = hostingView
+        accessoryViewController.layoutAttribute = .bottom
+        accessoryViewController.automaticallyAdjustsSize = false
     }
 
     func attach(to window: NSWindow, identifier: NSToolbar.Identifier) {
-        if let toolbar, window.toolbar === toolbar {
+        if self.window === window {
             return
         }
 
-        let toolbar = NSToolbar(identifier: identifier)
-        toolbar.delegate = self
-        toolbar.displayMode = .iconOnly
-        toolbar.allowsUserCustomization = false
-        toolbar.autosavesConfiguration = false
+        if let existingWindow = self.window,
+           let index = existingWindow.titlebarAccessoryViewControllers.firstIndex(of: accessoryViewController) {
+            existingWindow.removeTitlebarAccessoryViewController(at: index)
+        }
 
-        self.toolbar = toolbar
+        self.window = window
+        let toolbar = self.toolbar ?? {
+            let toolbar = NSToolbar(identifier: identifier)
+            toolbar.displayMode = .iconOnly
+            toolbar.allowsUserCustomization = false
+            toolbar.autosavesConfiguration = false
+            self.toolbar = toolbar
+            return toolbar
+        }()
         window.toolbar = toolbar
+        window.addTitlebarAccessoryViewController(accessoryViewController)
     }
 
     func update(title: String, contextUsageText: String?) {
@@ -162,28 +172,9 @@ private final class SessionWindowToolbarController: NSObject, NSToolbarDelegate 
         hostingView.layoutSubtreeIfNeeded()
 
         let fittingSize = hostingView.fittingSize
-        let width = min(max(fittingSize.width, 220), 360)
         let height = max(fittingSize.height, 30)
 
-        widthConstraint.constant = width
         heightConstraint.constant = height
-    }
-
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.infoItemIdentifier]
-    }
-
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.infoItemIdentifier]
-    }
-
-    func toolbar(
-        _ toolbar: NSToolbar,
-        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
-        willBeInsertedIntoToolbar flag: Bool
-    ) -> NSToolbarItem? {
-        guard itemIdentifier == Self.infoItemIdentifier else { return nil }
-        return infoItem
     }
 }
 

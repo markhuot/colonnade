@@ -14,6 +14,7 @@ protocol WorkspaceSyncCoordinating: Sendable {
 
 protocol WorkspaceSyncRegistryProtocol: Actor {
     func coordinator(for connection: WorkspaceConnection) -> any WorkspaceSyncCoordinating
+    func store(for connection: WorkspaceConnection) async -> WorkspaceLiveStore
 }
 
 private enum MessageMutationFallback: Sendable {
@@ -24,11 +25,16 @@ actor WorkspaceSyncRegistry: WorkspaceSyncRegistryProtocol {
     static let shared = WorkspaceSyncRegistry()
 
     private var coordinators: [WorkspaceConnection: WorkspaceSyncCoordinator] = [:]
-    private let coordinatorFactory: @Sendable (WorkspaceConnection) -> WorkspaceSyncCoordinator
+    private let storeRegistry: WorkspaceLiveStoreRegistry
+    private let coordinatorFactory: @Sendable (WorkspaceConnection, WorkspaceLiveStoreRegistry) -> WorkspaceSyncCoordinator
 
-    init(coordinatorFactory: @escaping @Sendable (WorkspaceConnection) -> WorkspaceSyncCoordinator = { connection in
-        WorkspaceSyncCoordinator(connection: connection)
-    }) {
+    init(
+        storeRegistry: WorkspaceLiveStoreRegistry = .shared,
+        coordinatorFactory: @escaping @Sendable (WorkspaceConnection, WorkspaceLiveStoreRegistry) -> WorkspaceSyncCoordinator = { connection, storeRegistry in
+            WorkspaceSyncCoordinator(connection: connection, storeRegistry: storeRegistry)
+        }
+    ) {
+        self.storeRegistry = storeRegistry
         self.coordinatorFactory = coordinatorFactory
     }
 
@@ -37,9 +43,13 @@ actor WorkspaceSyncRegistry: WorkspaceSyncRegistryProtocol {
             return existing
         }
 
-        let coordinator = coordinatorFactory(connection)
+        let coordinator = coordinatorFactory(connection, storeRegistry)
         coordinators[connection] = coordinator
         return coordinator
+    }
+
+    func store(for connection: WorkspaceConnection) async -> WorkspaceLiveStore {
+        await storeRegistry.store(for: connection)
     }
 }
 
@@ -104,6 +114,10 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
         self.modelContextLimits = modelContextLimits
         self.openSessionIDs = openSessionIDs
 
+        logger.notice(
+            "Coordinator start directory=\(self.directory, privacy: .public) performInitialSync=\(performInitialSync, privacy: .public) openSessions=\(openSessionIDs.joined(separator: ","), privacy: .public) alreadyStarted=\(self.didStart, privacy: .public)"
+        )
+
         if performInitialSync {
             try await refreshAll()
         }
@@ -119,6 +133,9 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
 
     func updateOpenSessionIDs(_ openSessionIDs: [String]) {
         self.openSessionIDs = openSessionIDs
+        logger.notice(
+            "Coordinator open sessions updated directory=\(self.directory, privacy: .public) openSessions=\(openSessionIDs.joined(separator: ","), privacy: .public)"
+        )
     }
 
     func refreshAll() async throws {
