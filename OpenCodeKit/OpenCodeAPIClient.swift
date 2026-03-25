@@ -79,7 +79,14 @@ struct OpenCodeAPIClient: @unchecked Sendable {
     }
 
     func messages(directory: String, sessionID: String) async throws -> [MessageEnvelope] {
-        try await get("/session/\(sessionID)/message", directory: directory)
+        do {
+            return try await get("/session/\(sessionID)/message", directory: directory)
+        } catch {
+            logger.error(
+                "Load messages failed directory=\(directory, privacy: .public) sessionID=\(sessionID, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
+            throw error
+        }
     }
 
     func todos(directory: String, sessionID: String) async throws -> [SessionTodo] {
@@ -330,7 +337,7 @@ struct OpenCodeAPIClient: @unchecked Sendable {
 
         let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data, requestURL: request.url)
-        return try decoder.decode(T.self, from: data)
+        return try decodeResponse(T.self, from: data, requestURL: request.url)
     }
 
     private func send<Body: Encodable, Response: Decodable>(
@@ -365,7 +372,44 @@ struct OpenCodeAPIClient: @unchecked Sendable {
             return empty
         }
 
-        return try decoder.decode(Response.self, from: data)
+        return try decodeResponse(Response.self, from: data, requestURL: request.url)
+    }
+
+    private func decodeResponse<Response: Decodable>(
+        _ type: Response.Type,
+        from data: Data,
+        requestURL: URL?
+    ) throws -> Response {
+        do {
+            return try decoder.decode(Response.self, from: data)
+        } catch {
+            let path = requestURL?.path ?? "unknown"
+            let snippet = responseBodySnippet(from: data) ?? "<empty>"
+            let detail = decodingFailureDescription(error)
+            logger.error(
+                "Decode response failed path=\(path, privacy: .public) type=\(String(describing: Response.self), privacy: .public) detail=\(detail, privacy: .public) body=\(snippet, privacy: .public)"
+            )
+            throw APIError.decoding(path: path, type: String(describing: Response.self), detail: detail, bodySnippet: snippet)
+        }
+    }
+
+    private func decodingFailureDescription(_ error: Error) -> String {
+        switch error {
+        case let DecodingError.keyNotFound(key, context):
+            let codingPath = (context.codingPath + [key]).map(\.stringValue).joined(separator: ".")
+            return "keyNotFound path=\(codingPath) debug=\(context.debugDescription)"
+        case let DecodingError.valueNotFound(_, context):
+            let codingPath = context.codingPath.map(\.stringValue).joined(separator: ".")
+            return "valueNotFound path=\(codingPath) debug=\(context.debugDescription)"
+        case let DecodingError.typeMismatch(_, context):
+            let codingPath = context.codingPath.map(\.stringValue).joined(separator: ".")
+            return "typeMismatch path=\(codingPath) debug=\(context.debugDescription)"
+        case let DecodingError.dataCorrupted(context):
+            let codingPath = context.codingPath.map(\.stringValue).joined(separator: ".")
+            return "dataCorrupted path=\(codingPath) debug=\(context.debugDescription)"
+        default:
+            return String(describing: error)
+        }
     }
 
     private func url(path: String, directory: String) -> URL {
@@ -410,6 +454,7 @@ extension OpenCodeAPIClient: OpenCodeAPIClientProtocol {}
 enum APIError: LocalizedError {
     case invalidResponse
     case httpStatus(code: Int, path: String?, bodySnippet: String?)
+    case decoding(path: String, type: String, detail: String, bodySnippet: String?)
 
     var errorDescription: String? {
         switch self {
@@ -419,6 +464,9 @@ enum APIError: LocalizedError {
             let pathSegment = path.map { " for \($0)" } ?? ""
             let bodySegment = bodySnippet.map { " Response: \($0)" } ?? ""
             return "The opencode server returned HTTP \(statusCode)\(pathSegment).\(bodySegment)"
+        case let .decoding(path, type, detail, bodySnippet):
+            let bodySegment = bodySnippet.map { " Response: \($0)" } ?? ""
+            return "The opencode server response for \(path) could not decode as \(type). \(detail).\(bodySegment)"
         }
     }
 }

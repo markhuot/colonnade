@@ -8,6 +8,7 @@ struct WorkspaceRootContainer: View {
     @State private var workspaceWindow: NSWindow?
     @SceneStorage("workspace-root-restored-server-url") private var restoredServerURLText = ""
     @SceneStorage("workspace-root-restored-directory") private var restoredDirectory = ""
+    @State private var bootstrapStart: ContinuousClock.Instant?
 
     init() {
         _appState = StateObject(
@@ -18,7 +19,15 @@ struct WorkspaceRootContainer: View {
     var body: some View {
         RootView()
             .environmentObject(appState)
+            .performanceLayoutProbe("WorkspaceRootContainer") {
+                "project=\(appState.projectName ?? "nil") selectedDirectory=\(appState.selectedDirectory ?? "nil") isLoading=\(appState.isLoading)"
+            }
             .task {
+                let start = PerformanceInstrumentation.begin(
+                    "workspace-bootstrap",
+                    details: "restoredDirectory=\(restoredDirectory.isEmpty ? "nil" : restoredDirectory)"
+                )
+                bootstrapStart = start
                 let restoredConnection = restoredWorkspaceConnection
                 appState.configureBootstrapRestoredConnection(restoredConnection)
                 if let restoredConnection {
@@ -31,6 +40,28 @@ struct WorkspaceRootContainer: View {
                 )
                 WorkspaceCommandCenter.shared.bind(appState: appState)
                 await appState.bootstrapIfNeeded()
+                PerformanceInstrumentation.end(
+                    "workspace-bootstrap",
+                    from: start,
+                    details: "selectedDirectory=\(appState.selectedDirectory ?? "nil") openSessions=\(appState.openSessionIDs.count)",
+                    thresholdMS: 1
+                )
+            }
+            .onAppear {
+                PerformanceInstrumentation.log(
+                    "workspace-root-appear restoredDirectory=\(restoredDirectory.isEmpty ? "nil" : restoredDirectory)"
+                )
+            }
+            .onChange(of: appState.isLoading) { oldValue, newValue in
+                PerformanceInstrumentation.log("workspace-root-is-loading old=\(oldValue) new=\(newValue)")
+                guard oldValue, !newValue, let bootstrapStart else { return }
+                PerformanceInstrumentation.end(
+                    "workspace-first-visible-content",
+                    from: bootstrapStart,
+                    details: "selectedDirectory=\(appState.selectedDirectory ?? "nil") openSessions=\(appState.openSessionIDs.count)",
+                    thresholdMS: 1
+                )
+                self.bootstrapStart = nil
             }
             .onChange(of: appState.workspaceConnection) { _, newConnection in
                 restoredServerURLText = newConnection?.serverURL.absoluteString ?? ""
@@ -80,6 +111,7 @@ struct SessionWindowContainer: View {
     let context: SessionWindowContext
     @StateObject private var appState: OpenCodeAppModel
     @State private var titlebarAccessoryController = SessionWindowTitlebarAccessoryController()
+    @State private var bootstrapStart: ContinuousClock.Instant?
 
     private static let toolbarIdentifier = NSToolbar.Identifier("ai.opencode.session-window-toolbar")
 
@@ -94,13 +126,37 @@ struct SessionWindowContainer: View {
         SessionWindowView(sessionID: context.sessionID)
             .environmentObject(appState)
             .defaultScrollAnchor(.bottom)
+            .performanceLayoutProbe("SessionWindowContainer") {
+                "sessionID=\(context.sessionID) selectedDirectory=\(appState.selectedDirectory ?? "nil") isLoading=\(appState.isLoading)"
+            }
             .task {
+                let start = PerformanceInstrumentation.begin(
+                    "session-window-bootstrap",
+                    details: "sessionID=\(context.sessionID) directory=\(context.connection.directory)"
+                )
+                bootstrapStart = start
                 appState.configurePreferredDefaultModelPersistence(
                     provider: { modelPreferencesController.preferredDefaultModelReference },
                     setter: { modelPreferencesController.setPreferredDefaultModelReference($0) }
                 )
                 WorkspaceCommandCenter.shared.bindSessionWindow(appState: appState, sessionID: context.sessionID)
                 await appState.bootstrapIfNeeded()
+                PerformanceInstrumentation.end(
+                    "session-window-bootstrap",
+                    from: start,
+                    details: "sessionID=\(context.sessionID) selectedDirectory=\(appState.selectedDirectory ?? "nil")",
+                    thresholdMS: 1
+                )
+            }
+            .onChange(of: appState.isLoading) { oldValue, newValue in
+                guard oldValue, !newValue, let bootstrapStart else { return }
+                PerformanceInstrumentation.end(
+                    "session-window-first-visible-content",
+                    from: bootstrapStart,
+                    details: "sessionID=\(context.sessionID)",
+                    thresholdMS: 1
+                )
+                self.bootstrapStart = nil
             }
             .background(
                 WindowObserver { window in

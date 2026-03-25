@@ -5,6 +5,36 @@ import OSLog
 actor PersistenceRepository {
     static let shared = PersistenceRepository()
 
+    private struct SnapshotLoadMetrics {
+        var flushMS: Double = 0
+        var workspaceFetchMS: Double = 0
+        var sessionFetchMS: Double = 0
+        var messageFetchMS: Double = 0
+        var partFetchMS: Double = 0
+        var partGroupingMS: Double = 0
+        var messageDecodeMS: Double = 0
+        var questionFetchMS: Double = 0
+        var permissionFetchMS: Double = 0
+        var paneFetchMS: Double = 0
+        var totalMS: Double = 0
+
+        var workspaceCount = 0
+        var sessionEntityCount = 0
+        var messageEntityCount = 0
+        var partEntityCount = 0
+        var questionEntityCount = 0
+        var permissionEntityCount = 0
+        var paneEntityCount = 0
+        var decodedMessageCount = 0
+        var messageSessionCount = 0
+        var totalMessageCount = 0
+        var totalPartCount = 0
+    }
+
+    struct TranscriptSnapshot: Sendable {
+        let messagesBySession: [String: [MessageEnvelope]]
+    }
+
     private enum BufferedStreamMutation {
         case upsertMessageInfo(directory: String, sessionID: String, info: MessageInfo, modelContextLimits: [ModelContextKey: Int])
         case upsertMessagePart(directory: String, sessionID: String, part: MessagePart, modelContextLimits: [ModelContextKey: Int])
@@ -341,18 +371,32 @@ actor PersistenceRepository {
         }
     }
 
-    func loadSnapshot(directory: String?) async -> PersistenceSnapshot {
+    func loadSnapshot(
+        directory: String?,
+        preferredMessageSessionIDs: Set<String> = [],
+        decodeOnlyPreferredSessions: Bool = false
+    ) async -> PersistenceSnapshot {
+        let totalStart = ContinuousClock.now
+        let flushStart = ContinuousClock.now
         await flushBufferedStreamMutationsIfNeeded()
         let context = persistence.newBackgroundContext()
-        let startedAt = ContinuousClock.now
-        let snapshot = Self.performSync(on: context) { context in
-            Self.makeSnapshot(context: context, directory: directory)
+        let flushMS = Self.durationMilliseconds(flushStart.duration(to: .now))
+        let (snapshot, metrics) = Self.performSync(on: context) { context in
+            Self.makeSnapshot(
+                context: context,
+                directory: directory,
+                preferredMessageSessionIDs: preferredMessageSessionIDs,
+                decodeOnlyPreferredSessions: decodeOnlyPreferredSessions
+            )
         }
-        let duration = startedAt.duration(to: .now)
+        let duration = totalStart.duration(to: .now)
 
         let openMessageCount = snapshot.messagesBySession.values.reduce(0) { $0 + $1.count }
         logger.notice(
             "Loaded snapshot directory=\((directory ?? snapshot.selectedDirectory ?? "nil"), privacy: .public) sessions=\(snapshot.sessions.count, privacy: .public) messageSessions=\(snapshot.messagesBySession.count, privacy: .public) messages=\(openMessageCount, privacy: .public) durationMS=\(duration.milliseconds, privacy: .public)"
+        )
+        PerformanceInstrumentation.log(
+            "persistence-snapshot-load directory=\(directory ?? snapshot.selectedDirectory ?? "nil") flushMS=\(Self.formatMilliseconds(flushMS)) workspaceFetchMS=\(Self.formatMilliseconds(metrics.workspaceFetchMS)) sessionFetchMS=\(Self.formatMilliseconds(metrics.sessionFetchMS)) messageFetchMS=\(Self.formatMilliseconds(metrics.messageFetchMS)) partFetchMS=\(Self.formatMilliseconds(metrics.partFetchMS)) partGroupingMS=\(Self.formatMilliseconds(metrics.partGroupingMS)) messageDecodeMS=\(Self.formatMilliseconds(metrics.messageDecodeMS)) questionFetchMS=\(Self.formatMilliseconds(metrics.questionFetchMS)) permissionFetchMS=\(Self.formatMilliseconds(metrics.permissionFetchMS)) paneFetchMS=\(Self.formatMilliseconds(metrics.paneFetchMS)) totalMS=\(Self.formatMilliseconds(Self.durationMilliseconds(duration))) sessions=\(snapshot.sessions.count) messageSessions=\(metrics.messageSessionCount) messages=\(metrics.totalMessageCount) parts=\(metrics.totalPartCount) sessionEntities=\(metrics.sessionEntityCount) messageEntities=\(metrics.messageEntityCount) partEntities=\(metrics.partEntityCount) questions=\(metrics.questionEntityCount) permissions=\(metrics.permissionEntityCount) panes=\(metrics.paneEntityCount) preferredSessionsOnly=\(decodeOnlyPreferredSessions) preferredSessionCount=\(preferredMessageSessionIDs.count)"
         )
         return snapshot
     }
@@ -421,6 +465,10 @@ actor PersistenceRepository {
         openSessionIDs: [String]
     ) async {
         await flushBufferedStreamMutationsIfNeeded()
+        let openSessionIDSet = Set(openSessionIDs)
+        let openMessageCountsStart = ContinuousClock.now
+        let beforeOpenMessageCounts = await loadOpenSessionMessageCounts(directory: directory, sessionIDs: openSessionIDs)
+        let openMessageCountsLoadMS = Self.durationMilliseconds(openMessageCountsStart.duration(to: .now))
         logger.notice(
             "Applying workspace snapshot directory=\(directory, privacy: .public) sessions=\(snapshot.sessions.count, privacy: .public) statuses=\(snapshot.statuses.count, privacy: .public) openSessions=\(openSessionIDs.count, privacy: .public)"
         )
@@ -450,6 +498,19 @@ actor PersistenceRepository {
             Self.recomputeSessionDerivedState(workspaceID: workspaceID, modelContextLimits: modelContextLimits, context: context)
             try? context.save()
         }
+        let afterOpenMessageCountsStart = ContinuousClock.now
+        let afterOpenMessageCounts = await loadOpenSessionMessageCounts(directory: directory, sessionIDs: openSessionIDs)
+        let afterOpenMessageCountsLoadMS = Self.durationMilliseconds(afterOpenMessageCountsStart.duration(to: .now))
+        let openSessionMessageChanges = openSessionIDs.compactMap { sessionID -> String? in
+            let oldValue = beforeOpenMessageCounts[sessionID, default: 0]
+            let newValue = afterOpenMessageCounts[sessionID, default: 0]
+            guard oldValue != newValue else { return nil }
+            return "\(sessionID):\(oldValue)->\(newValue)"
+        }
+        let insertedOpenSessions = snapshot.sessions.filter { openSessionIDSet.contains($0.id) && beforeOpenMessageCounts[$0.id] == nil }.count
+        PerformanceInstrumentation.log(
+            "persistence-apply-workspace-snapshot directory=\(directory) openSessions=\(openSessionIDs.count) insertedOpenSessions=\(insertedOpenSessions) openMessageChanges=\(openSessionMessageChanges.isEmpty ? "none" : openSessionMessageChanges.joined(separator: ",")) preCountLoadMS=\(Self.formatMilliseconds(openMessageCountsLoadMS)) postCountLoadMS=\(Self.formatMilliseconds(afterOpenMessageCountsLoadMS))"
+        )
         logger.notice("Applied workspace snapshot directory=\(directory, privacy: .public)")
     }
 
@@ -470,6 +531,9 @@ actor PersistenceRepository {
         await flushBufferedStreamMutationsIfNeeded()
         let partCount = messages.reduce(0) { $0 + $1.parts.count }
         let lastMessageID = messages.last?.id ?? "nil"
+        let beforeCountsStart = ContinuousClock.now
+        let previousCounts = await loadMessageCounts(directory: directory, sessionID: sessionID)
+        let beforeCountsLoadMS = Self.durationMilliseconds(beforeCountsStart.duration(to: .now))
         logger.notice(
             "Replacing messages sessionID=\(sessionID, privacy: .public) count=\(messages.count, privacy: .public) parts=\(partCount, privacy: .public) lastMessageID=\(lastMessageID, privacy: .public)"
         )
@@ -481,6 +545,12 @@ actor PersistenceRepository {
             Self.recomputeSessionDerivedState(workspaceID: workspaceID, modelContextLimits: modelContextLimits, context: context, sessionIDs: [sessionID])
             try? context.save()
         }
+        let afterCountsStart = ContinuousClock.now
+        let updatedCounts = await loadMessageCounts(directory: directory, sessionID: sessionID)
+        let afterCountsLoadMS = Self.durationMilliseconds(afterCountsStart.duration(to: .now))
+        PerformanceInstrumentation.log(
+            "persistence-replace-messages sessionID=\(sessionID) oldMessages=\(previousCounts.messages) newMessages=\(updatedCounts.messages) oldParts=\(previousCounts.parts) newParts=\(updatedCounts.parts) payloadMessages=\(messages.count) payloadParts=\(partCount) preCountLoadMS=\(Self.formatMilliseconds(beforeCountsLoadMS)) postCountLoadMS=\(Self.formatMilliseconds(afterCountsLoadMS))"
+        )
         logger.notice(
             "Replaced messages sessionID=\(sessionID, privacy: .public) count=\(messages.count, privacy: .public) parts=\(partCount, privacy: .public)"
         )
@@ -619,6 +689,17 @@ actor PersistenceRepository {
         )
     }
 
+    func loadMessagePartDetail(partID: String) async -> MessagePart? {
+        let context = persistence.newBackgroundContext()
+        return Self.performSync(on: context) { context in
+            let request = MessagePartEntity.fetchRequest()
+            request.fetchLimit = 1
+            request.predicate = NSPredicate(format: "id == %@", partID)
+            guard let entity = try? context.fetch(request).first else { return nil }
+            return Self.decodeDetailedPart(entity)
+        }
+    }
+
     nonisolated func flushBufferedStreamMutations() async {
         await streamMutationBuffer.flushIfNeeded()
     }
@@ -627,7 +708,14 @@ actor PersistenceRepository {
         await streamMutationBuffer.flushIfNeeded()
     }
 
-    private static func makeSnapshot(context: NSManagedObjectContext, directory: String?) -> PersistenceSnapshot {
+    private static func makeSnapshot(
+        context: NSManagedObjectContext,
+        directory: String?,
+        preferredMessageSessionIDs: Set<String>,
+        decodeOnlyPreferredSessions: Bool
+    ) -> (PersistenceSnapshot, SnapshotLoadMetrics) {
+        var metrics = SnapshotLoadMetrics()
+
         let workspaceRequest = WorkspaceEntity.fetchRequest()
         if let directory {
             workspaceRequest.predicate = NSPredicate(format: "directory == %@", directory)
@@ -636,57 +724,33 @@ actor PersistenceRepository {
         }
         workspaceRequest.fetchLimit = 1
 
-        guard let workspace = try? context.fetch(workspaceRequest).first,
+        let workspaceFetchStart = ContinuousClock.now
+        let workspace = try? context.fetch(workspaceRequest).first
+        metrics.workspaceFetchMS = durationMilliseconds(workspaceFetchStart.duration(to: .now))
+        metrics.workspaceCount = workspace == nil ? 0 : 1
+
+        guard let workspace,
               let workspaceID = workspace.id else {
-            return .empty
+            metrics.totalMS = metrics.workspaceFetchMS
+            return (.empty, metrics)
         }
 
         let sessionRequest = SessionEntity.fetchRequest()
         sessionRequest.predicate = NSPredicate(format: "workspaceID == %@", workspaceID)
         sessionRequest.sortDescriptors = [NSSortDescriptor(key: "sortUpdatedAtMS", ascending: false)]
+        let sessionFetchStart = ContinuousClock.now
         let sessionEntities = (try? context.fetch(sessionRequest)) ?? []
+        metrics.sessionFetchMS = durationMilliseconds(sessionFetchStart.duration(to: .now))
+        metrics.sessionEntityCount = sessionEntities.count
         let sessions = sessionEntities.compactMap(Self.makeSessionDisplay)
-
-        let messageRequest = MessageEntity.fetchRequest()
-        messageRequest.predicate = NSPredicate(format: "sessionID IN %@", sessions.map(\.id))
-        messageRequest.sortDescriptors = [
-            NSSortDescriptor(key: "sessionID", ascending: true),
-            NSSortDescriptor(key: "createdAtMS", ascending: true)
-        ]
-        let messageEntities = (try? context.fetch(messageRequest)) ?? []
-
-        let partRequest = MessagePartEntity.fetchRequest()
-        partRequest.predicate = NSPredicate(format: "sessionID IN %@", sessions.map(\.id))
-        let partEntities = (try? context.fetch(partRequest)) ?? []
-        let partsByMessageID = Dictionary(grouping: partEntities, by: { $0.messageID ?? "" })
-
-        let messagesBySession = Dictionary(grouping: messageEntities.compactMap { entity -> (String, MessageEnvelope)? in
-            guard let sessionID = entity.sessionID,
-                  let message = decodeMessage(entity, partsByMessageID: partsByMessageID) else { return nil }
-            return (sessionID, message)
-        }, by: \.0).mapValues { items in
-            items.map(\.1)
-        }
-
-        let questionRequest = QuestionEntity.fetchRequest()
-        questionRequest.predicate = NSPredicate(format: "workspaceID == %@", workspaceID)
-        let questions = ((try? context.fetch(questionRequest)) ?? []).compactMap { entity -> (String, QuestionRequest)? in
-            guard let sessionID = entity.sessionID,
-                  let question = PersistenceCoders.decode(QuestionRequest.self, from: entity.payloadJSON) else { return nil }
-            return (sessionID, question)
-        }
-
-        let permissionRequest = PermissionEntity.fetchRequest()
-        permissionRequest.predicate = NSPredicate(format: "workspaceID == %@", workspaceID)
-        let permissions = ((try? context.fetch(permissionRequest)) ?? []).compactMap { entity -> (String, PermissionRequest)? in
-            guard let sessionID = entity.sessionID,
-                  let permission = PersistenceCoders.decode(PermissionRequest.self, from: entity.payloadJSON) else { return nil }
-            return (sessionID, permission)
-        }
 
         let paneRequest = SessionPaneEntity.fetchRequest()
         paneRequest.predicate = NSPredicate(format: "workspaceID == %@", workspaceID)
-        let panes = ((try? context.fetch(paneRequest)) ?? []).reduce(into: [String: SessionPaneState]()) { result, entity in
+        let paneFetchStart = ContinuousClock.now
+        let paneEntities = (try? context.fetch(paneRequest)) ?? []
+        metrics.paneFetchMS = durationMilliseconds(paneFetchStart.duration(to: .now))
+        metrics.paneEntityCount = paneEntities.count
+        let panes = paneEntities.reduce(into: [String: SessionPaneState]()) { result, entity in
             guard let sessionID = entity.sessionID else { return }
             result[sessionID] = SessionPaneState(
                 sessionID: sessionID,
@@ -696,16 +760,182 @@ actor PersistenceRepository {
             )
         }
 
+        let decodedSessionIDs = resolvedDecodedSessionIDs(
+            preferredMessageSessionIDs: preferredMessageSessionIDs,
+            decodeOnlyPreferredSessions: decodeOnlyPreferredSessions,
+            sessions: sessions,
+            paneStates: panes
+        )
+
+        let messagesBySession: [String: [MessageEnvelope]]
+        if decodedSessionIDs.isEmpty {
+            messagesBySession = [:]
+        } else {
+            let messageRequest = MessageEntity.fetchRequest()
+            messageRequest.predicate = NSPredicate(format: "sessionID IN %@", Array(decodedSessionIDs))
+            messageRequest.sortDescriptors = [
+                NSSortDescriptor(key: "sessionID", ascending: true),
+                NSSortDescriptor(key: "createdAtMS", ascending: true)
+            ]
+            let messageFetchStart = ContinuousClock.now
+            let messageEntities = (try? context.fetch(messageRequest)) ?? []
+            metrics.messageFetchMS = durationMilliseconds(messageFetchStart.duration(to: .now))
+            metrics.messageEntityCount = messageEntities.count
+
+            let partRequest = MessagePartEntity.fetchRequest()
+            partRequest.predicate = NSPredicate(format: "sessionID IN %@", Array(decodedSessionIDs))
+            let partFetchStart = ContinuousClock.now
+            let partEntities = (try? context.fetch(partRequest)) ?? []
+            metrics.partFetchMS = durationMilliseconds(partFetchStart.duration(to: .now))
+            metrics.partEntityCount = partEntities.count
+
+            let partGroupingStart = ContinuousClock.now
+            let partsByMessageID = Dictionary(grouping: partEntities, by: { $0.messageID ?? "" })
+            metrics.partGroupingMS = durationMilliseconds(partGroupingStart.duration(to: .now))
+
+            let messageDecodeStart = ContinuousClock.now
+            let decodedMessages: [(String, MessageEnvelope)] = messageEntities.compactMap { entity in
+                guard let sessionID = entity.sessionID,
+                      let message = makeProjectedMessage(entity, partsByMessageID: partsByMessageID) else { return nil }
+                return (sessionID, message)
+            }
+            metrics.messageDecodeMS = durationMilliseconds(messageDecodeStart.duration(to: .now))
+            metrics.decodedMessageCount = decodedMessages.count
+
+            messagesBySession = Dictionary(grouping: decodedMessages, by: \.0).mapValues { items in
+                items.map(\.1)
+            }
+        }
+        metrics.messageSessionCount = messagesBySession.count
+        metrics.totalMessageCount = messagesBySession.values.reduce(0) { $0 + $1.count }
+        metrics.totalPartCount = messagesBySession.values.reduce(0) { partialResult, messages in
+            partialResult + messages.reduce(0) { $0 + $1.parts.count }
+        }
+
+        let questionRequest = QuestionEntity.fetchRequest()
+        questionRequest.predicate = NSPredicate(format: "workspaceID == %@", workspaceID)
+        let questionFetchStart = ContinuousClock.now
+        let questionEntities = (try? context.fetch(questionRequest)) ?? []
+        metrics.questionFetchMS = durationMilliseconds(questionFetchStart.duration(to: .now))
+        metrics.questionEntityCount = questionEntities.count
+        let questions = questionEntities.compactMap { entity -> (String, QuestionRequest)? in
+            guard let sessionID = entity.sessionID,
+                  let question = PersistenceCoders.decode(QuestionRequest.self, from: entity.payloadJSON) else { return nil }
+            return (sessionID, question)
+        }
+
+        let permissionRequest = PermissionEntity.fetchRequest()
+        permissionRequest.predicate = NSPredicate(format: "workspaceID == %@", workspaceID)
+        let permissionFetchStart = ContinuousClock.now
+        let permissionEntities = (try? context.fetch(permissionRequest)) ?? []
+        metrics.permissionFetchMS = durationMilliseconds(permissionFetchStart.duration(to: .now))
+        metrics.permissionEntityCount = permissionEntities.count
+        let permissions = permissionEntities.compactMap { entity -> (String, PermissionRequest)? in
+            guard let sessionID = entity.sessionID,
+                  let permission = PersistenceCoders.decode(PermissionRequest.self, from: entity.payloadJSON) else { return nil }
+            return (sessionID, permission)
+        }
+
+        let deferredMessageSessionIDs = Set(sessions.map(\.id)).subtracting(decodedSessionIDs)
+
         let snapshot = PersistenceSnapshot(
             sessions: sessions,
             messagesBySession: messagesBySession,
+            deferredMessageSessionIDs: deferredMessageSessionIDs,
             questionsBySession: Dictionary(grouping: questions, by: \.0).mapValues { $0.map(\.1) },
             permissionsBySession: Dictionary(grouping: permissions, by: \.0).mapValues { $0.map(\.1) },
             selectedDirectory: workspace.directory,
             paneStates: panes
         )
 
-        return snapshot
+        metrics.totalMS = metrics.workspaceFetchMS
+            + metrics.sessionFetchMS
+            + metrics.messageFetchMS
+            + metrics.partFetchMS
+            + metrics.partGroupingMS
+            + metrics.messageDecodeMS
+            + metrics.questionFetchMS
+            + metrics.permissionFetchMS
+            + metrics.paneFetchMS
+
+        return (snapshot, metrics)
+    }
+
+    private func loadOpenSessionMessageCounts(directory: String, sessionIDs: [String]) async -> [String: Int] {
+        guard !sessionIDs.isEmpty else { return [:] }
+        let context = persistence.newBackgroundContext()
+        return Self.performSync(on: context) { context in
+            let workspace = Self.findOrCreateWorkspace(directory: directory, context: context)
+            let workspaceID = workspace.id ?? directory
+            let sessionRequest = SessionEntity.fetchRequest()
+            sessionRequest.predicate = NSPredicate(format: "workspaceID == %@ AND id IN %@", workspaceID, sessionIDs)
+            let sessionEntities = (try? context.fetch(sessionRequest)) ?? []
+            let knownSessionIDs = sessionEntities.compactMap(\.id)
+
+            let messageRequest = MessageEntity.fetchRequest()
+            messageRequest.predicate = NSPredicate(format: "sessionID IN %@", knownSessionIDs)
+            let messageEntities = (try? context.fetch(messageRequest)) ?? []
+            return Dictionary(grouping: messageEntities, by: { $0.sessionID ?? "" }).mapValues(\.count)
+        }
+    }
+
+    private func loadMessageCounts(directory: String, sessionID: String) async -> (messages: Int, parts: Int) {
+        let context = persistence.newBackgroundContext()
+        return Self.performSync(on: context) { context in
+            _ = Self.findOrCreateWorkspace(directory: directory, context: context)
+
+            let messageRequest = MessageEntity.fetchRequest()
+            messageRequest.predicate = NSPredicate(format: "sessionID == %@", sessionID)
+            let messageCount = (try? context.count(for: messageRequest)) ?? 0
+
+            let partRequest = MessagePartEntity.fetchRequest()
+            partRequest.predicate = NSPredicate(format: "sessionID == %@", sessionID)
+            let partCount = (try? context.count(for: partRequest)) ?? 0
+
+            return (messageCount, partCount)
+        }
+    }
+
+    private nonisolated static func durationMilliseconds(_ duration: Duration) -> Double {
+        let components = duration.components
+        let secondsMS = Double(components.seconds) * 1000
+        let attosecondsMS = Double(components.attoseconds) / 1_000_000_000_000_000
+        return secondsMS + attosecondsMS
+    }
+
+    private nonisolated static func formatMilliseconds(_ value: Double) -> String {
+        String(format: "%.2f", value)
+    }
+
+    private nonisolated static func resolvedDecodedSessionIDs(
+        preferredMessageSessionIDs: Set<String>,
+        decodeOnlyPreferredSessions: Bool,
+        sessions: [SessionDisplay],
+        paneStates: [String: SessionPaneState]
+    ) -> Set<String> {
+        let availableSessionIDs = Set(sessions.map(\.id))
+        guard decodeOnlyPreferredSessions else {
+            return availableSessionIDs
+        }
+
+        let visiblePaneSessionIDs = paneStates.values
+            .filter { !$0.isHidden }
+            .sorted { lhs, rhs in
+                if lhs.position == rhs.position {
+                    return lhs.sessionID < rhs.sessionID
+                }
+                return lhs.position < rhs.position
+            }
+            .map(\.sessionID)
+
+        var decodedSessionIDs = preferredMessageSessionIDs.intersection(availableSessionIDs)
+        decodedSessionIDs.formUnion(visiblePaneSessionIDs.filter(availableSessionIDs.contains))
+
+        if decodedSessionIDs.isEmpty, let fallbackSessionID = sessions.first?.id {
+            decodedSessionIDs.insert(fallbackSessionID)
+        }
+
+        return decodedSessionIDs
     }
 
     private static func makeSessionDisplay(_ entity: SessionEntity) -> SessionDisplay? {
@@ -750,12 +980,12 @@ actor PersistenceRepository {
         }
     }
 
-    private static func decodeMessage(_ entity: MessageEntity, partsByMessageID: [String: [MessagePartEntity]]) -> MessageEnvelope? {
+    private static func makeProjectedMessage(_ entity: MessageEntity, partsByMessageID: [String: [MessagePartEntity]]) -> MessageEnvelope? {
         guard let id = entity.id,
               let sessionID = entity.sessionID,
               let roleRaw = entity.roleRaw else { return nil }
 
-        let fallbackInfo = MessageInfo(
+        let info = MessageInfo(
             id: id,
             sessionID: sessionID,
             role: MessageRole(rawString: roleRaw),
@@ -776,56 +1006,16 @@ actor PersistenceRepository {
                 cache: .init(read: entity.tokenCacheRead?.intValue, write: entity.tokenCacheWrite?.intValue)
             ),
             finish: entity.finish,
-            summary: PersistenceCoders.decode(JSONValue.self, from: entity.summaryJSON),
-            error: PersistenceCoders.decode(JSONValue.self, from: entity.errorJSON)
+            summary: nil,
+            error: entity.errorText.map(JSONValue.string)
         )
 
-        let info: MessageInfo
-        let decodedParts: [MessagePart]
+        let parts = (partsByMessageID[id] ?? []).compactMap(makeProjectedPart).sorted(by: partEntitySort)
 
-        if let decoded = PersistenceCoders.decode(MessageEnvelope.self, from: entity.payloadJSON) {
-            var decodedInfo = decoded.info
-
-            if decodedInfo.model == nil, let model = fallbackInfo.model {
-                decodedInfo = MessageInfo(
-                    id: decodedInfo.id,
-                    sessionID: decodedInfo.sessionID,
-                    role: decodedInfo.role,
-                    time: decodedInfo.time,
-                    parentID: decodedInfo.parentID,
-                    agent: decodedInfo.agent,
-                    model: model,
-                    modelID: fallbackInfo.modelID,
-                    providerID: fallbackInfo.providerID,
-                    mode: decodedInfo.mode,
-                    path: decodedInfo.path,
-                    cost: decodedInfo.cost,
-                    tokens: decodedInfo.tokens,
-                    finish: decodedInfo.finish,
-                    summary: decodedInfo.summary,
-                    error: decodedInfo.error
-                )
-            }
-
-            info = decodedInfo
-            decodedParts = decoded.parts
-        } else {
-            info = fallbackInfo
-            decodedParts = []
-        }
-
-        let parts = (partsByMessageID[id] ?? []).compactMap(decodePart).sorted {
-            ($0.time?.start ?? 0) < ($1.time?.start ?? 0)
-        }
-
-        return MessageEnvelope(info: info, parts: parts.isEmpty ? decodedParts : parts)
+        return MessageEnvelope(info: info, parts: parts)
     }
 
-    private static func decodePart(_ entity: MessagePartEntity) -> MessagePart? {
-        if let decoded = PersistenceCoders.decode(MessagePart.self, from: entity.payloadJSON) {
-            return decoded
-        }
-
+    private static func makeProjectedPart(_ entity: MessagePartEntity) -> MessagePart? {
         guard let id = entity.id, let typeRaw = entity.typeRaw else { return nil }
         return MessagePart(
             id: id,
@@ -836,10 +1026,10 @@ actor PersistenceRepository {
             synthetic: entity.synthetic?.boolValue,
             ignored: entity.ignored?.boolValue,
             time: .init(start: entity.startAtMS?.doubleValue, end: entity.endAtMS?.doubleValue, compacted: entity.compactedAtMS?.doubleValue),
-            metadata: PersistenceCoders.decode([String: JSONValue].self, from: entity.metadataJSON),
+            metadata: nil,
             callID: entity.callID,
             tool: entity.tool,
-            state: decodeToolState(entity),
+            state: projectedToolState(entity),
             mime: entity.mime,
             filename: entity.filename,
             url: entity.url,
@@ -860,24 +1050,62 @@ actor PersistenceRepository {
             name: entity.name,
             source: (entity.sourceValue != nil) ? .init(value: entity.sourceValue!, start: entity.sourceStart?.intValue ?? 0, end: entity.sourceEnd?.intValue ?? 0) : nil,
             hash: entity.hashString,
-            files: PersistenceCoders.decode([String].self, from: entity.filesJSON),
-            snapshot: entity.snapshot
+            files: nil,
+            snapshot: entity.snapshot,
+            summaryProjection: toolSummaryProjection(from: entity),
+            hasDeferredDetail: entity.hasDeferredDetail?.boolValue ?? false
         )
     }
 
-    private static func decodeToolState(_ entity: MessagePartEntity) -> MessagePart.ToolState? {
+    private static func decodeDetailedPart(_ entity: MessagePartEntity) -> MessagePart? {
+        if let decoded = PersistenceCoders.decode(MessagePart.self, from: entity.payloadJSON) {
+            return decoded
+        }
+
+        return makeProjectedPart(entity)
+    }
+
+    private static func projectedToolState(_ entity: MessagePartEntity) -> MessagePart.ToolState? {
         guard let status = entity.stateStatus else { return nil }
         return .init(
             status: ToolExecutionStatus(rawString: status),
-            input: PersistenceCoders.decode([String: JSONValue].self, from: entity.stateInputJSON),
+            input: nil,
             raw: entity.stateRaw,
             output: entity.stateOutput,
             title: entity.stateTitle,
-            metadata: PersistenceCoders.decode([String: JSONValue].self, from: entity.stateMetadataJSON),
+            metadata: nil,
             error: entity.stateError,
             time: nil,
-            attachments: PersistenceCoders.decode([MessagePart.FileAttachment].self, from: entity.stateAttachmentsJSON)
+            attachments: nil
         )
+    }
+
+    private static func toolSummaryProjection(from entity: MessagePartEntity) -> ToolSummaryProjection? {
+        guard let kindRaw = entity.summaryKind,
+              let kind = ToolSummaryProjectionKind(rawValue: kindRaw),
+              let action = entity.summaryAction else {
+            return nil
+        }
+
+        return ToolSummaryProjection(
+            kind: kind,
+            iconSystemName: entity.summaryIconSystemName,
+            action: action,
+            target: entity.summaryTarget,
+            additions: entity.summaryAdditions?.intValue,
+            deletions: entity.summaryDeletions?.intValue,
+            statusLabel: entity.summaryStatusLabel,
+            drawerTitle: entity.summaryDrawerTitle
+        )
+    }
+
+    private static func partEntitySort(_ lhs: MessagePart, _ rhs: MessagePart) -> Bool {
+        let lhsStart = lhs.time?.start ?? .leastNormalMagnitude
+        let rhsStart = rhs.time?.start ?? .leastNormalMagnitude
+        if lhsStart == rhsStart {
+            return lhs.id < rhs.id
+        }
+        return lhsStart < rhsStart
     }
 
     private static func findOrCreateWorkspace(directory: String, context: NSManagedObjectContext) -> WorkspaceEntity {
@@ -991,6 +1219,7 @@ actor PersistenceRepository {
             messageEntity.finish = message.info.finish
             messageEntity.summaryJSON = PersistenceCoders.encode(message.info.summary)
             messageEntity.errorJSON = PersistenceCoders.encode(message.info.error)
+            messageEntity.errorText = message.info.error?.prettyDescription
 
             for part in message.parts {
                 let partEntity: MessagePartEntity = insertEntity(in: context)
@@ -1040,6 +1269,7 @@ actor PersistenceRepository {
                 partEntity.hashString = part.hash
                 partEntity.filesJSON = PersistenceCoders.encode(part.files)
                 partEntity.snapshot = part.snapshot
+                applySummaryProjection(for: part, to: partEntity)
             }
         }
     }
@@ -1099,6 +1329,7 @@ actor PersistenceRepository {
         partEntity.hashString = part.hash
         partEntity.filesJSON = PersistenceCoders.encode(part.files)
         partEntity.snapshot = part.snapshot
+        applySummaryProjection(for: part, to: partEntity)
     }
 
     private static func upsertMessageInfo(_ info: MessageInfo, sessionID: String, context: NSManagedObjectContext) {
@@ -1161,6 +1392,51 @@ actor PersistenceRepository {
         entity.finish = info.finish
         entity.summaryJSON = PersistenceCoders.encode(info.summary)
         entity.errorJSON = PersistenceCoders.encode(info.error)
+        entity.errorText = info.error?.prettyDescription
+    }
+
+    private static func applySummaryProjection(for part: MessagePart, to entity: MessagePartEntity) {
+        entity.summaryKind = nil
+        entity.summaryIconSystemName = nil
+        entity.summaryAction = nil
+        entity.summaryTarget = nil
+        entity.summaryAdditions = nil
+        entity.summaryDeletions = nil
+        entity.summaryStatusLabel = nil
+        entity.summaryDrawerTitle = part.toolDrawerTitle
+        entity.hasDeferredDetail = NSNumber(value: part.type == .tool)
+
+        guard part.type == .tool else { return }
+
+        let presentation = part.toolPresentation
+        entity.summaryStatusLabel = presentation.statusLabel
+
+        switch presentation.summaryStyle {
+        case let .standard(summary):
+            entity.summaryKind = ToolSummaryProjectionKind.standard.rawValue
+            entity.summaryIconSystemName = summary.iconSystemName
+            entity.summaryAction = summary.action
+            entity.summaryTarget = summary.target
+            entity.summaryAdditions = summary.additions.map(NSNumber.init(value:))
+            entity.summaryDeletions = summary.deletions.map(NSNumber.init(value:))
+        case let .patch(summary):
+            entity.summaryKind = ToolSummaryProjectionKind.patch.rawValue
+            entity.summaryIconSystemName = "pencil"
+            entity.summaryAction = "Patch"
+            entity.summaryTarget = summary.target
+            entity.summaryAdditions = summary.additions.map(NSNumber.init(value:))
+            entity.summaryDeletions = summary.deletions.map(NSNumber.init(value:))
+        case let .read(summary):
+            entity.summaryKind = ToolSummaryProjectionKind.read.rawValue
+            entity.summaryIconSystemName = "eyeglasses"
+            entity.summaryAction = "Read"
+            entity.summaryTarget = summary.fileName ?? summary.path
+        case let .task(summary):
+            entity.summaryKind = ToolSummaryProjectionKind.task.rawValue
+            entity.summaryIconSystemName = "square.stack.3d.up"
+            entity.summaryAction = summary.title
+            entity.summaryTarget = summary.target
+        }
     }
 
     private static func applyMessagePartDelta(partID: String, field: MessagePartDeltaField, delta: String, context: NSManagedObjectContext) {

@@ -6,6 +6,9 @@ struct RootView: View {
     @Environment(\.openCodeTheme) private var theme
 
     var body: some View {
+        let selectedDirectoryText = appState.selectedDirectory ?? "nil"
+        let openSessionIDs = appState.openSessionIDs
+
         NavigationSplitView {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 260, ideal: 310)
@@ -14,7 +17,7 @@ struct RootView: View {
                 if appState.selectedDirectory == nil {
                     ProjectSelectorView()
                 } else {
-                    ChatBoardView(sessionIDs: appState.openSessionIDs)
+                    ChatBoardView(sessionIDs: openSessionIDs)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -22,6 +25,9 @@ struct RootView: View {
         }
         .navigationTitle(appState.projectName ?? "Choose Project")
         .foregroundStyle(theme.primaryText)
+        .performanceLayoutProbe("RootView") {
+            "selectedDirectory=\(selectedDirectoryText) openSessions=\(appState.openSessionIDs.count) isLoading=\(appState.isLoading) launchStage=\(String(describing: appState.launchStage))"
+        }
         .alert("Colonnade Error", isPresented: Binding(
             get: { appState.errorMessage != nil },
             set: { isPresented in
@@ -38,6 +44,21 @@ struct RootView: View {
         }
         .background(theme.windowBackground)
         .themedWindow(theme)
+        .onAppear {
+            PerformanceInstrumentation.log(
+                "root-view-appear selectedDirectory=\(selectedDirectoryText) openSessions=\(appState.openSessionIDs.count) isLoading=\(appState.isLoading)"
+            )
+        }
+        .onChange(of: appState.selectedDirectory) { _, newValue in
+            let selectedDirectoryText = newValue ?? "nil"
+            PerformanceInstrumentation.log("root-selected-directory value=\(selectedDirectoryText)")
+        }
+        .onChange(of: appState.isLoading) { oldValue, newValue in
+            PerformanceInstrumentation.log("root-is-loading old=\(oldValue) new=\(newValue)")
+        }
+        .onChange(of: appState.openSessionIDs.count) { oldValue, newValue in
+            PerformanceInstrumentation.log("root-open-session-count old=\(oldValue) new=\(newValue)")
+        }
     }
 }
 

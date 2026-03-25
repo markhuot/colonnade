@@ -35,6 +35,7 @@
 		57F1B54ADE79B823689FC118 /* FocusedSessionTimelineKeyHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCA1F9B8C2DF46A5E5798462 /* FocusedSessionTimelineKeyHandler.swift */; };
 		59A9723F536A64E2BF752692 /* github-dark.json in Resources */ = {isa = PBXBuildFile; fileRef = 9202654BBC3150149FCBE6E5 /* github-dark.json */; };
 		5CEEB06CA5B719E961ACD6DE /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFD943C72B4EB9338475E9B7 /* AppPreferences.swift */; };
+		5D09AB14D01FCA111D536D4A /* PerformanceInstrumentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662582779335C66695B0F4C7 /* PerformanceInstrumentation.swift */; };
 		5D24FEE5B189A27CA4CE68D1 /* OpenCodeAppModelFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70B3F81C3353D0F2407AC3F /* OpenCodeAppModelFactory.swift */; };
 		5E9D0519FDD50DA52DEB8F7B /* plastic.json in Resources */ = {isa = PBXBuildFile; fileRef = 3D518BF612D30E065D56EA9D /* plastic.json */; };
 		5ED7AFB7F2CFFDD833F6B090 /* AppLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4772541C79BB08C674B9F3AB /* AppLifecycle.swift */; };
@@ -164,6 +165,7 @@
 		600779D87D987BF611C6C3A0 /* ayu-mirage.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "ayu-mirage.json"; sourceTree = "<group>"; };
 		602074E16D05E0CDBE97410D /* OpenCodeAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeAPIClient.swift; sourceTree = "<group>"; };
 		60269834F2626A995F081968 /* ProjectSelectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSelectorView.swift; sourceTree = "<group>"; };
+		662582779335C66695B0F4C7 /* PerformanceInstrumentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceInstrumentation.swift; sourceTree = "<group>"; };
 		6CB06E4BB0D94F01C7C00C25 /* andromeeda.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = andromeeda.json; sourceTree = "<group>"; };
 		6ED0D3AAD932F8119F7329AE /* one-dark-pro.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "one-dark-pro.json"; sourceTree = "<group>"; };
 		6FDD51725396982353C62F06 /* PersistenceRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceRepository.swift; sourceTree = "<group>"; };
@@ -372,6 +374,7 @@
 				E18F32EE08F24614F358AAE7 /* Info.plist */,
 				99772D8985ED8E66530DBAC8 /* OpenCodeApp.swift */,
 				C70B3F81C3353D0F2407AC3F /* OpenCodeAppModelFactory.swift */,
+				662582779335C66695B0F4C7 /* PerformanceInstrumentation.swift */,
 				E5EB9CE9B86015966328BCE5 /* PlatformModels.swift */,
 				4D83130E2937D6310F7C0B66 /* PreferencesView.swift */,
 				4C5BEA44E4DA2BE5030F4662 /* TextMateThemeSupport.swift */,
@@ -475,7 +478,6 @@
 				TargetAttributes = {
 					07A3A72637770A8A767E075C = {
 						DevelopmentTeam = "";
-						ProvisioningStyle = Automatic;
 					};
 				};
 			};
@@ -605,6 +607,7 @@
 				8FD62F37FBAEA962FBA34044 /* OpenCodeApp.swift in Sources */,
 				5D24FEE5B189A27CA4CE68D1 /* OpenCodeAppModelFactory.swift in Sources */,
 				E248B295358F1B2372D37822 /* OpenCodeAppState.swift in Sources */,
+				5D09AB14D01FCA111D536D4A /* PerformanceInstrumentation.swift in Sources */,
 				F8C4E5E811BF4988A7FCDD80 /* Persistence.swift in Sources */,
 				85C40CA1720FCB9368E7B2D3 /* PersistenceCoders.swift in Sources */,
 				3E8559ACC506357314E22BD9 /* PersistenceRepository.swift in Sources */,
@@ -707,6 +710,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = NO;
 				INFOPLIST_FILE = OpenCodeMac/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -738,9 +742,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "Developer ID Application";
+				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = OpenCodeMac/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

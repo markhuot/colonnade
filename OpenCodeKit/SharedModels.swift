@@ -275,6 +275,23 @@ enum CommandAutocomplete {
             .map(\.0)
     }
 
+    static func suggestions(for draft: String, cursorLocation: Int, commands: [CommandOption], limit: Int = 8) -> [CommandOption] {
+        guard let query = query(from: draft, cursorLocation: cursorLocation) else { return [] }
+        let normalizedQuery = normalized(query)
+
+        return commands
+            .compactMap { command -> (CommandOption, Int, String)? in
+                guard let score = matchScore(query: normalizedQuery, command: command) else { return nil }
+                return (command, score, command.slashName)
+            }
+            .sorted { lhs, rhs in
+                if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }
+                return lhs.2.localizedCaseInsensitiveCompare(rhs.2) == .orderedAscending
+            }
+            .prefix(limit)
+            .map(\.0)
+    }
+
     static func applying(_ command: CommandOption, to draft: String) -> String? {
         guard let query = query(from: draft) else { return nil }
         let prefixLength = query.count
@@ -293,6 +310,26 @@ enum CommandAutocomplete {
         guard draft.hasPrefix("/") else { return nil }
         let firstLine = draft.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? draft
         let commandPortion = firstLine.split(maxSplits: 1, whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? firstLine
+        let trimmed = commandPortion.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func query(from draft: String, cursorLocation: Int) -> String? {
+        guard draft.hasPrefix("/") else { return nil }
+
+        let nsDraft = draft as NSString
+        let safeCursorLocation = min(max(cursorLocation, 0), nsDraft.length)
+        let newlineRange = nsDraft.range(of: "\n")
+        let firstLineLength = newlineRange.location == NSNotFound ? nsDraft.length : newlineRange.location
+        guard safeCursorLocation <= firstLineLength else { return nil }
+
+        let firstLine = nsDraft.substring(with: NSRange(location: 0, length: firstLineLength)) as NSString
+        let whitespaceRange = firstLine.rangeOfCharacter(from: .whitespacesAndNewlines)
+        let commandLength = whitespaceRange.location == NSNotFound ? firstLine.length : whitespaceRange.location
+        guard commandLength > 0 else { return nil }
+        guard safeCursorLocation <= commandLength else { return nil }
+
+        let commandPortion = firstLine.substring(with: NSRange(location: 0, length: commandLength))
         let trimmed = commandPortion.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
@@ -605,6 +642,139 @@ struct MessagePart: Codable, Identifiable, Hashable {
     let hash: String?
     let files: [String]?
     let snapshot: String?
+    let summaryProjection: ToolSummaryProjection?
+    let hasDeferredDetail: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case sessionID
+        case messageID
+        case type
+        case text
+        case synthetic
+        case ignored
+        case time
+        case metadata
+        case callID
+        case tool
+        case state
+        case mime
+        case filename
+        case url
+        case reason
+        case cost
+        case tokens
+        case prompt
+        case description
+        case agent
+        case model
+        case command
+        case name
+        case source
+        case hash
+        case files
+        case snapshot
+        case summaryProjection
+        case hasDeferredDetail
+    }
+
+    init(
+        id: String,
+        sessionID: String?,
+        messageID: String?,
+        type: MessagePartKind,
+        text: String?,
+        synthetic: Bool?,
+        ignored: Bool?,
+        time: TimeInfo?,
+        metadata: [String: JSONValue]?,
+        callID: String?,
+        tool: String?,
+        state: ToolState?,
+        mime: String?,
+        filename: String?,
+        url: String?,
+        reason: String?,
+        cost: Double?,
+        tokens: TokenInfo?,
+        prompt: String?,
+        description: String?,
+        agent: String?,
+        model: MessageInfo.ModelRef?,
+        command: String?,
+        name: String?,
+        source: SourceRange?,
+        hash: String?,
+        files: [String]?,
+        snapshot: String?,
+        summaryProjection: ToolSummaryProjection? = nil,
+        hasDeferredDetail: Bool = false
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.messageID = messageID
+        self.type = type
+        self.text = text
+        self.synthetic = synthetic
+        self.ignored = ignored
+        self.time = time
+        self.metadata = metadata
+        self.callID = callID
+        self.tool = tool
+        self.state = state
+        self.mime = mime
+        self.filename = filename
+        self.url = url
+        self.reason = reason
+        self.cost = cost
+        self.tokens = tokens
+        self.prompt = prompt
+        self.description = description
+        self.agent = agent
+        self.model = model
+        self.command = command
+        self.name = name
+        self.source = source
+        self.hash = hash
+        self.files = files
+        self.snapshot = snapshot
+        self.summaryProjection = summaryProjection
+        self.hasDeferredDetail = hasDeferredDetail
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        sessionID = try container.decodeIfPresent(String.self, forKey: .sessionID)
+        messageID = try container.decodeIfPresent(String.self, forKey: .messageID)
+        type = try container.decode(MessagePartKind.self, forKey: .type)
+        text = try container.decodeIfPresent(String.self, forKey: .text)
+        synthetic = try container.decodeIfPresent(Bool.self, forKey: .synthetic)
+        ignored = try container.decodeIfPresent(Bool.self, forKey: .ignored)
+        time = try container.decodeIfPresent(TimeInfo.self, forKey: .time)
+        metadata = try container.decodeIfPresent([String: JSONValue].self, forKey: .metadata)
+        callID = try container.decodeIfPresent(String.self, forKey: .callID)
+        tool = try container.decodeIfPresent(String.self, forKey: .tool)
+        state = try container.decodeIfPresent(ToolState.self, forKey: .state)
+        mime = try container.decodeIfPresent(String.self, forKey: .mime)
+        filename = try container.decodeIfPresent(String.self, forKey: .filename)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        reason = try container.decodeIfPresent(String.self, forKey: .reason)
+        cost = try container.decodeIfPresent(Double.self, forKey: .cost)
+        tokens = try container.decodeIfPresent(TokenInfo.self, forKey: .tokens)
+        prompt = try container.decodeIfPresent(String.self, forKey: .prompt)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        agent = try container.decodeIfPresent(String.self, forKey: .agent)
+        model = try container.decodeIfPresent(MessageInfo.ModelRef.self, forKey: .model)
+        command = try container.decodeIfPresent(String.self, forKey: .command)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        source = try container.decodeIfPresent(SourceRange.self, forKey: .source)
+        hash = try container.decodeIfPresent(String.self, forKey: .hash)
+        files = try container.decodeIfPresent([String].self, forKey: .files)
+        snapshot = try container.decodeIfPresent(String.self, forKey: .snapshot)
+        summaryProjection = try container.decodeIfPresent(ToolSummaryProjection.self, forKey: .summaryProjection)
+        hasDeferredDetail = try container.decodeIfPresent(Bool.self, forKey: .hasDeferredDetail) ?? false
+    }
 
     mutating func apply(delta: String, to field: MessagePartDeltaField) {
         switch field {
@@ -836,6 +1006,7 @@ struct SessionDisplay: Identifiable, Hashable {
 struct PersistenceSnapshot: Equatable {
     let sessions: [SessionDisplay]
     let messagesBySession: [String: [MessageEnvelope]]
+    let deferredMessageSessionIDs: Set<String>
     let questionsBySession: [String: [QuestionRequest]]
     let permissionsBySession: [String: [PermissionRequest]]
     let selectedDirectory: String?
@@ -844,6 +1015,7 @@ struct PersistenceSnapshot: Equatable {
     static let empty = PersistenceSnapshot(
         sessions: [],
         messagesBySession: [:],
+        deferredMessageSessionIDs: [],
         questionsBySession: [:],
         permissionsBySession: [:],
         selectedDirectory: nil,
@@ -947,6 +1119,24 @@ struct ToolTodoDetail: Hashable {
     let items: [ToolTodoItem]
 }
 
+enum ToolSummaryProjectionKind: String, Codable, Hashable {
+    case standard
+    case patch
+    case read
+    case task
+}
+
+struct ToolSummaryProjection: Codable, Hashable {
+    let kind: ToolSummaryProjectionKind
+    let iconSystemName: String?
+    let action: String
+    let target: String?
+    let additions: Int?
+    let deletions: Int?
+    let statusLabel: String?
+    let drawerTitle: String?
+}
+
 enum ToolSummaryStyle: Hashable {
     case standard(ToolCallSummary)
     case patch(ToolPatchSummary)
@@ -993,6 +1183,45 @@ struct ToolPresentation: Hashable {
     let fallbackDetail: String?
 }
 
+private extension ToolSummaryProjection {
+    var summaryStyle: ToolSummaryStyle {
+        switch kind {
+        case .standard:
+            return .standard(
+                ToolCallSummary(
+                    action: action,
+                    target: target,
+                    iconSystemName: iconSystemName,
+                    additions: additions,
+                    deletions: deletions
+                )
+            )
+        case .patch:
+            return .patch(
+                ToolPatchSummary(
+                    target: target,
+                    additions: additions,
+                    deletions: deletions
+                )
+            )
+        case .read:
+            return .read(
+                ToolReadSummary(
+                    fileName: target,
+                    path: target
+                )
+            )
+        case .task:
+            return .task(
+                ToolTaskSummary(
+                    title: action,
+                    target: target
+                )
+            )
+        }
+    }
+}
+
 extension MessagePart {
     struct SubagentInvocation: Hashable {
         let taskID: String?
@@ -1021,6 +1250,10 @@ extension MessagePart {
     }
 
     var toolDrawerTitle: String? {
+        if let projectedTitle = Self.normalizedToolSupplementalText(summaryProjection?.drawerTitle) {
+            return projectedTitle
+        }
+
         guard let title = Self.normalizedToolSupplementalText(state?.title) else { return nil }
 
         let output = Self.normalizedToolSupplementalText(state?.output)
@@ -1073,6 +1306,16 @@ extension MessagePart {
     }
 
     var toolPresentation: ToolPresentation {
+        if let summaryProjection {
+            return ToolPresentation(
+                summaryStyle: summaryProjection.summaryStyle,
+                drawerStyle: .standard,
+                detailFields: [],
+                statusLabel: summaryProjection.statusLabel,
+                fallbackDetail: state?.status == .completed ? nil : state?.status.title
+            )
+        }
+
         let descriptor = toolDescriptor
         let statusLabel = state.flatMap { $0.status == .completed ? nil : $0.status.title }
         let hasSupplementalContent = !(state?.output?.isEmpty ?? true) || !(state?.error?.isEmpty ?? true)

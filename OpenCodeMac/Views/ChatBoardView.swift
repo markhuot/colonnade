@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+private struct ChatBoardPaneDescriptor: Equatable {
+    let sessionID: String
+    let width: CGFloat
+}
+
 struct ChatBoardView: View {
     @EnvironmentObject private var appState: OpenCodeAppModel
     @State private var transientPaneWidths: [String: CGFloat] = [:]
@@ -11,6 +16,12 @@ struct ChatBoardView: View {
 
     private let paneSpacing: CGFloat = 18
     var body: some View {
+        let focusedSessionID = appState.focusedSessionID
+        let focusedSessionIDText = focusedSessionID ?? "nil"
+        let paneDescriptors = sessionIDs.map { sessionID in
+            ChatBoardPaneDescriptor(sessionID: sessionID, width: paneWidth(for: sessionID))
+        }
+
         if sessionIDs.isEmpty {
             ContentUnavailableView(
                 "No Open Sessions",
@@ -18,6 +29,11 @@ struct ChatBoardView: View {
                 description: Text("Choose a session from the sidebar or create a new one.")
             )
         } else if let liveStore = appState.liveStore {
+            let renderStart = PerformanceInstrumentation.begin(
+                "chat-board-body",
+                details: "sessionCount=\(sessionIDs.count) focusedSessionID=\(focusedSessionIDText)"
+            )
+
             ScrollViewReader { proxy in
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: 18) {
@@ -32,17 +48,10 @@ struct ChatBoardView: View {
                     pruneTransientPaneWidths()
                     scrollToFocusedSession(with: proxy, animated: false)
                 }
-                .onChange(of: appState.focusedSessionID) { _, _ in
+                .onChange(of: focusedSessionID) { _, _ in
                     scrollToFocusedSession(with: proxy)
                 }
-                .onChange(of: appState.openSessionIDs) { _, _ in
-                    pruneTransientPaneWidths()
-                    if let draggedSessionID, !sessionIDs.contains(draggedSessionID) {
-                        self.draggedSessionID = nil
-                        draggedPaneOffset = 0
-                    }
-                }
-                .onChange(of: sessionIDs) { _, _ in
+                .onChange(of: paneDescriptors) { _, _ in
                     pruneTransientPaneWidths()
                     if let draggedSessionID, !sessionIDs.contains(draggedSessionID) {
                         self.draggedSessionID = nil
@@ -50,6 +59,32 @@ struct ChatBoardView: View {
                     }
                     scrollToFocusedSession(with: proxy)
                 }
+                .performanceLayoutProbe("ChatBoardView") {
+                    "sessionCount=\(sessionIDs.count) focusedSessionID=\(focusedSessionIDText)"
+                }
+                .onAppear {
+                    PerformanceInstrumentation.log(
+                        "chat-board-appear sessionCount=\(sessionIDs.count) focusedSessionID=\(focusedSessionIDText)"
+                    )
+                    PerformanceInstrumentation.end(
+                        "chat-board-body",
+                        from: renderStart,
+                        details: "sessionCount=\(sessionIDs.count)",
+                        thresholdMS: 1
+                    )
+                }
+                .onChange(of: appState.liveStore == nil) { _, isNil in
+                    PerformanceInstrumentation.log("chat-board-live-store available=\(!isNil)")
+                }
+                .onChange(of: sessionIDs.count) { oldValue, newValue in
+                    PerformanceInstrumentation.log("chat-board-session-count old=\(oldValue) new=\(newValue)")
+                }
+                .onChange(of: focusedSessionIDText) { oldValue, newValue in
+                    PerformanceInstrumentation.log("chat-board-focus old=\(oldValue) new=\(newValue)")
+                }
+            }
+            .onAppear {
+                PerformanceInstrumentation.log("chat-board-scroll-reader-appear sessionCount=\(sessionIDs.count)")
             }
         } else {
             ProgressView()
@@ -82,7 +117,6 @@ struct ChatBoardView: View {
             .zIndex(draggedSessionID == sessionID ? 1 : 0)
             .overlay(alignment: Alignment.trailing) {
                 PaneResizeHandle(
-                    sessionID: sessionID,
                     displayedWidth: width,
                     minWidth: appState.minPaneWidth,
                     maxWidth: appState.maxPaneWidth,
@@ -182,66 +216,128 @@ struct ChatBoardView: View {
 }
 
 private struct PaneResizeHandle: View {
-    let sessionID: String
     let displayedWidth: CGFloat
     let minWidth: CGFloat
     let maxWidth: CGFloat
     let onPreview: (CGFloat, Bool) -> Void
     let onCommit: (CGFloat, Bool) -> Void
 
-    @State private var dragStartWidth: CGFloat?
-    @State private var optionPressedAtDragStart = false
-    @State private var cursorPushed = false
-    @State private var isDragging = false
-
     var body: some View {
-        Color.clear
+        PaneResizeHandleBridge(
+            displayedWidth: displayedWidth,
+            minWidth: minWidth,
+            maxWidth: maxWidth,
+            onPreview: onPreview,
+            onCommit: onCommit
+        )
             .frame(width: 12)
             .padding(.horizontal, 3)
-            .contentShape(Rectangle())
-            .onHover { hovering in
-                guard !isDragging else { return }
-                updateCursor(active: hovering)
-            }
-            .gesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .global)
-                    .onChanged { value in
-                        if dragStartWidth == nil {
-                            dragStartWidth = displayedWidth
-                            optionPressedAtDragStart = MacModifierKeyState.isOptionPressed()
-                            isDragging = true
-                            updateCursor(active: true)
-                        }
+    }
+}
 
-                        guard let dragStartWidth else { return }
-                        let translation = value.location.x - value.startLocation.x
-                        let targetWidth = min(max(dragStartWidth + translation, minWidth), maxWidth)
-                        onPreview(targetWidth, optionPressedAtDragStart)
-                    }
-                    .onEnded { value in
-                        let translation = value.location.x - value.startLocation.x
-                        if let dragStartWidth {
-                            onCommit(min(max(dragStartWidth + translation, minWidth), maxWidth), optionPressedAtDragStart)
-                        }
+private struct PaneResizeHandleBridge: NSViewRepresentable {
+    let displayedWidth: CGFloat
+    let minWidth: CGFloat
+    let maxWidth: CGFloat
+    let onPreview: (CGFloat, Bool) -> Void
+    let onCommit: (CGFloat, Bool) -> Void
 
-                        dragStartWidth = nil
-                        optionPressedAtDragStart = false
-                        isDragging = false
-                        updateCursor(active: false)
-                    }
-            )
-            .onDisappear {
-                updateCursor(active: false)
-            }
+    func makeNSView(context: Context) -> PaneResizeHandleNSView {
+        let view = PaneResizeHandleNSView()
+        view.displayedWidth = displayedWidth
+        view.minWidth = minWidth
+        view.maxWidth = maxWidth
+        view.onPreview = onPreview
+        view.onCommit = onCommit
+        return view
     }
 
-    private func updateCursor(active: Bool) {
-        if active, !cursorPushed {
-            MacCursorStyle.pushPaneResize()
-            cursorPushed = true
-        } else if !active, cursorPushed {
-            MacCursorStyle.pop()
-            cursorPushed = false
+    func updateNSView(_ nsView: PaneResizeHandleNSView, context: Context) {
+        nsView.displayedWidth = displayedWidth
+        nsView.minWidth = minWidth
+        nsView.maxWidth = maxWidth
+        nsView.onPreview = onPreview
+        nsView.onCommit = onCommit
+    }
+}
+
+private final class PaneResizeHandleNSView: NSView {
+    var displayedWidth: CGFloat = 0
+    var minWidth: CGFloat = 0
+    var maxWidth: CGFloat = 0
+    var onPreview: ((CGFloat, Bool) -> Void)?
+    var onCommit: ((CGFloat, Bool) -> Void)?
+
+    private var dragStartWidth: CGFloat?
+    private var dragStartLocationX: CGFloat?
+    private var optionPressedAtDragStart = false
+    private var trackingArea: NSTrackingArea?
+
+    override var mouseDownCanMoveWindow: Bool {
+        false
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func updateTrackingAreas() {
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
         }
+
+        let trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        self.trackingArea = trackingArea
+
+        super.updateTrackingAreas()
+    }
+
+    override func resetCursorRects() {
+        discardCursorRects()
+        addCursorRect(bounds, cursor: .resizeLeftRight)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        dragStartWidth = displayedWidth
+        dragStartLocationX = event.locationInWindow.x
+        optionPressedAtDragStart = event.modifierFlags.contains(.option)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let dragStartWidth, let dragStartLocationX else { return }
+        onPreview?(clampedWidth(for: dragStartWidth, translation: event.locationInWindow.x - dragStartLocationX), optionPressedAtDragStart)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let dragStartWidth, let dragStartLocationX else {
+            clearDragState()
+            return
+        }
+
+        onCommit?(clampedWidth(for: dragStartWidth, translation: event.locationInWindow.x - dragStartLocationX), optionPressedAtDragStart)
+        clearDragState()
+    }
+
+    private func clampedWidth(for startWidth: CGFloat, translation: CGFloat) -> CGFloat {
+        min(max(startWidth + translation, minWidth), maxWidth)
+    }
+
+    private func clearDragState() {
+        dragStartWidth = nil
+        dragStartLocationX = nil
+        optionPressedAtDragStart = false
     }
 }

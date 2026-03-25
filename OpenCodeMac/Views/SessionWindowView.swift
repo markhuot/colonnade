@@ -7,6 +7,8 @@ struct SessionWindowView: View {
     let sessionID: String
 
     var body: some View {
+        let selectedDirectoryText = appState.selectedDirectory ?? "nil"
+
         Group {
             if sessionID.isEmpty {
                 ContentUnavailableView("No Session", systemImage: "bubble.left.and.text.bubble.right")
@@ -25,6 +27,14 @@ struct SessionWindowView: View {
         }
         .foregroundStyle(theme.primaryText)
         .background(theme.windowBackground)
+        .performanceLayoutProbe("SessionWindowView") {
+            "sessionID=\(sessionID) selectedDirectory=\(selectedDirectoryText) isLoading=\(appState.isLoading)"
+        }
         .themedWindow(theme)
+        .onAppear {
+            PerformanceInstrumentation.log(
+                "session-window-view-appear sessionID=\(sessionID) selectedDirectory=\(selectedDirectoryText) isLoading=\(appState.isLoading)"
+            )
+        }
     }
 }

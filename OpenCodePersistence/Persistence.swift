@@ -182,7 +182,8 @@ final class PersistenceController: @unchecked Sendable {
             attribute("tokenCacheWrite", .integer64AttributeType),
             attribute("finish", .stringAttributeType),
             attribute("summaryJSON", .stringAttributeType),
-            attribute("errorJSON", .stringAttributeType)
+            attribute("errorJSON", .stringAttributeType),
+            attribute("errorText", .stringAttributeType)
         ]
 
         messagePart.properties = [
@@ -231,7 +232,16 @@ final class PersistenceController: @unchecked Sendable {
             attribute("sourceEnd", .integer64AttributeType),
             attribute("hashString", .stringAttributeType),
             attribute("filesJSON", .stringAttributeType),
-            attribute("snapshot", .stringAttributeType)
+            attribute("snapshot", .stringAttributeType),
+            attribute("summaryKind", .stringAttributeType),
+            attribute("summaryIconSystemName", .stringAttributeType),
+            attribute("summaryAction", .stringAttributeType),
+            attribute("summaryTarget", .stringAttributeType),
+            attribute("summaryAdditions", .integer64AttributeType),
+            attribute("summaryDeletions", .integer64AttributeType),
+            attribute("summaryStatusLabel", .stringAttributeType),
+            attribute("summaryDrawerTitle", .stringAttributeType),
+            attribute("hasDeferredDetail", .booleanAttributeType)
         ]
 
         permission.properties = [
@@ -390,6 +400,7 @@ final class MessageEntity: NSManagedObject {
     @NSManaged var finish: String?
     @NSManaged var summaryJSON: String?
     @NSManaged var errorJSON: String?
+    @NSManaged var errorText: String?
 }
 
 @objc(MessagePartEntity)
@@ -440,6 +451,15 @@ final class MessagePartEntity: NSManagedObject {
     @NSManaged var hashString: String?
     @NSManaged var filesJSON: String?
     @NSManaged var snapshot: String?
+    @NSManaged var summaryKind: String?
+    @NSManaged var summaryIconSystemName: String?
+    @NSManaged var summaryAction: String?
+    @NSManaged var summaryTarget: String?
+    @NSManaged var summaryAdditions: NSNumber?
+    @NSManaged var summaryDeletions: NSNumber?
+    @NSManaged var summaryStatusLabel: String?
+    @NSManaged var summaryDrawerTitle: String?
+    @NSManaged var hasDeferredDetail: NSNumber?
 }
 
 @objc(PermissionEntity)

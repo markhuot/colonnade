@@ -1,3 +1,4 @@
+import AppKit
 import OSLog
 import SwiftUI
 import Textual
@@ -71,6 +72,15 @@ private extension View {
             self
         }
     }
+
+    @ViewBuilder
+    func clipPaneContent(if condition: Bool, cornerRadius: CGFloat) -> some View {
+        if condition {
+            clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        } else {
+            self
+        }
+    }
 }
 
 private struct PaneShadowModifier: ViewModifier {
@@ -86,6 +96,8 @@ private struct PaneShadowModifier: ViewModifier {
 }
 
 struct SessionColumnView: View {
+    private static let paneCornerRadius: CGFloat = 24
+
     @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
     @ObservedObject var sessionState: SessionLiveState
@@ -98,8 +110,9 @@ struct SessionColumnView: View {
     var body: some View {
         let session = sessionState.session
         let messages = sessionState.messages
-        let questions = sessionState.questions
+        let questions = appState.questionForSession(sessionID)
         let permissions = deduplicatedPermissions(sessionState.permissions)
+        let chromeName = chrome == .pane ? "pane" : "window"
         let thinkingBannerTitle = latestThinkingBannerTitle(
             session: session,
             messages: messages,
@@ -130,17 +143,42 @@ struct SessionColumnView: View {
             SessionComposerView(sessionID: sessionID, permissions: permissions, sessionState: sessionState)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipPaneContent(if: chrome == .pane, cornerRadius: Self.paneCornerRadius)
         .background(backgroundView)
         .overlay { overlayView }
+        .performanceLayoutProbe("SessionColumnView") {
+            "sessionID=\(sessionID) chrome=\(chromeName) messages=\(messages.count) questions=\(questions.count) permissions=\(permissions.count) focused=\(isFocused)"
+        }
         .contentShape(Rectangle())
         .onTapGesture {
             appState.focusSession(sessionID)
+        }
+        .onAppear {
+            PerformanceInstrumentation.log(
+                "session-column-appear sessionID=\(sessionID) messages=\(messages.count) questions=\(questions.count) permissions=\(permissions.count)"
+            )
+        }
+        .onChange(of: sessionState.messages.count) { oldValue, newValue in
+            PerformanceInstrumentation.log(
+                "session-column-message-count sessionID=\(sessionID) old=\(oldValue) new=\(newValue)"
+            )
+        }
+        .onChange(of: sessionState.questions.count) { oldValue, newValue in
+            PerformanceInstrumentation.log(
+                "session-column-question-count sessionID=\(sessionID) old=\(oldValue) new=\(newValue)"
+            )
+        }
+        .onChange(of: sessionState.permissions.count) { oldValue, newValue in
+            PerformanceInstrumentation.log(
+                "session-column-permission-count sessionID=\(sessionID) old=\(oldValue) new=\(newValue)"
+            )
         }
     }
 
     private func deduplicatedPermissions(_ permissions: [PermissionRequest]) -> [PermissionRequest] {
         var seenKeys = Set<SessionPermissionPresentationKey>()
         return permissions.filter { request in
+            guard !appState.isPermissionDismissed(request) else { return false }
             let key = SessionPermissionPresentationKey(request: request)
             return seenKeys.insert(key).inserted
         }
@@ -158,7 +196,7 @@ struct SessionColumnView: View {
     private var backgroundView: some View {
         switch chrome {
         case .pane:
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: Self.paneCornerRadius, style: .continuous)
                 .fill(theme.surfaceBackground)
                 .modifier(PaneShadowModifier(isFocused: isFocused))
         case .window:
@@ -169,7 +207,7 @@ struct SessionColumnView: View {
     @ViewBuilder
     private var overlayView: some View {
         if chrome == .pane {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: Self.paneCornerRadius, style: .continuous)
                 .strokeBorder(borderColor, lineWidth: appState.focusedSessionID == sessionID ? 2 : 1)
         }
     }
@@ -180,7 +218,7 @@ struct SessionColumnView: View {
         questions: [QuestionRequest],
         permissions: [PermissionRequest]
     ) -> String? {
-        guard !UserDefaults.standard.bool(forKey: "showsThinking") else { return nil }
+        guard !ThinkingVisibilityPreferences.showsThinking() else { return nil }
         guard permissions.isEmpty, questions.isEmpty else { return nil }
         guard session?.status?.isThinkingActive == true else { return nil }
 
@@ -317,6 +355,14 @@ private struct SessionTimelineView: View {
     }
 
     var body: some View {
+        let latestTodoToolPartID = PerformanceInstrumentation.measure(
+            "timeline-latest-todo",
+            thresholdMS: 1,
+            details: "sessionID=\(sessionID) messages=\(messages.count)"
+        ) {
+            self.latestTodoToolPartID
+        }
+
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
                 ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
@@ -346,6 +392,29 @@ private struct SessionTimelineView: View {
 
         .defaultScrollAnchor(.bottom)
         .background(theme.mutedSurfaceBackground.opacity(0.8))
+        .performanceLayoutProbe("SessionTimelineView") {
+            "sessionID=\(sessionID) messages=\(messages.count) questions=\(questions.count) thinkingBanner=\(thinkingBannerTitle != nil)"
+        }
+        .onAppear {
+            PerformanceInstrumentation.log(
+                "timeline-appear sessionID=\(sessionID) messages=\(messages.count) questions=\(questions.count)"
+            )
+        }
+        .onChange(of: messages.count) { oldValue, newValue in
+            PerformanceInstrumentation.log(
+                "timeline-message-count sessionID=\(sessionID) old=\(oldValue) new=\(newValue)"
+            )
+        }
+        .onChange(of: questions.count) { oldValue, newValue in
+            PerformanceInstrumentation.log(
+                "timeline-question-count sessionID=\(sessionID) old=\(oldValue) new=\(newValue)"
+            )
+        }
+        .onChange(of: thinkingBannerTitle) { _, newValue in
+            PerformanceInstrumentation.log(
+                "timeline-thinking-banner sessionID=\(sessionID) visible=\(newValue != nil)"
+            )
+        }
     }
 
     private func shouldShowTimestamp(for index: Int) -> Bool {
@@ -367,11 +436,16 @@ private struct SessionComposerView: View {
 
     @State private var promptHeight = PromptTextView.defaultHeight
     @State private var highlightedCommandSuggestionIndex: Int? = 0
+    @State private var promptCursorLocation = 0
     @State private var promptSuggestionAnchor: CGRect = .zero
     @State private var placeholderText = Self.placeholderOptions.randomElement() ?? "Let's get started!"
-
+    @State private var lastAutoFocusedPermissionID: String?
     let sessionID: String
     let permissions: [PermissionRequest]
+
+    private var isFocused: Bool {
+        appState.focusedSessionID == sessionID
+    }
 
     private var activePermission: PermissionRequest? {
         permissions.first
@@ -386,13 +460,40 @@ private struct SessionComposerView: View {
     }
 
     private var commandSuggestions: [CommandOption] {
-        appState.slashCommandSuggestions(for: sessionID)
+        appState.slashCommandSuggestions(for: sessionID, cursorLocation: promptCursorLocation)
     }
 
     private var normalizedHighlightedCommandSuggestionIndex: Int? {
         guard !commandSuggestions.isEmpty else { return nil }
         let candidate = highlightedCommandSuggestionIndex ?? 0
         return min(max(candidate, 0), commandSuggestions.count - 1)
+    }
+
+    private func applySlashCommandSuggestion(_ option: CommandOption) {
+        appState.applySlashCommandSuggestion(option, for: sessionID)
+        let updatedDraft = appState.drafts[sessionID, default: ""]
+        promptCursorLocation = updatedDraft.utf16.count
+        highlightedCommandSuggestionIndex = nil
+    }
+
+    private func maybeFocusPermissionPrompt(for permissionID: String?) {
+        guard let permissionID else {
+            lastAutoFocusedPermissionID = nil
+            return
+        }
+
+        guard isFocused, lastAutoFocusedPermissionID != permissionID else { return }
+        lastAutoFocusedPermissionID = permissionID
+        appState.focusSession(sessionID, focusPrompt: true)
+    }
+
+    private var composerFocusRequestID: UUID? {
+        appState.promptFocusRequest?.sessionID == sessionID ? appState.promptFocusRequest?.id : nil
+    }
+
+    private var permissionFocusRequestID: UUID? {
+        guard activePermission != nil, isFocused else { return nil }
+        return composerFocusRequestID
     }
 
     private var selectedAgentKey: Binding<String> {
@@ -439,15 +540,16 @@ private struct SessionComposerView: View {
                         ),
                         measuredHeight: $promptHeight,
                         highlightedSuggestionIndex: $highlightedCommandSuggestionIndex,
+                        cursorLocation: $promptCursorLocation,
                         suggestions: commandSuggestions,
                         suggestionAnchor: $promptSuggestionAnchor,
                         placeholder: placeholderText,
                         textColor: theme.primaryTextColor,
                         insertionPointColor: theme.primaryTextColor,
                         placeholderColor: theme.secondaryTextColor,
-                        focusRequestID: appState.promptFocusRequest?.sessionID == sessionID ? appState.promptFocusRequest?.id : nil,
+                        focusRequestID: composerFocusRequestID,
                         onSelectSuggestion: { option in
-                            appState.applySlashCommandSuggestion(option, for: sessionID)
+                            applySlashCommandSuggestion(option)
                         },
                         onFocus: {
                             appState.focusSession(sessionID)
@@ -506,14 +608,24 @@ private struct SessionComposerView: View {
                         highlightedIndex: normalizedHighlightedCommandSuggestionIndex,
                         theme: theme,
                         onSelect: { option in
-                            appState.applySlashCommandSuggestion(option, for: sessionID)
+                            applySlashCommandSuggestion(option)
                         }
                     )
                 }
             } else if let request = activePermission {
-                PermissionPromptView(request: request)
+                PermissionPromptView(request: request, focusRequestID: permissionFocusRequestID)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+        }
+        .onAppear {
+            maybeFocusPermissionPrompt(for: activePermission?.id)
+        }
+        .onChange(of: activePermission?.id) { _, newValue in
+            maybeFocusPermissionPrompt(for: newValue)
+        }
+        .onChange(of: isFocused) { _, newValue in
+            guard newValue else { return }
+            maybeFocusPermissionPrompt(for: activePermission?.id)
         }
     }
 }
@@ -806,7 +918,7 @@ private enum TimelineMessageLayout {
 }
 
 private struct MessageCard: View {
-    @AppStorage("showsThinking") private var showsThinking = true
+    @AppStorage(ThinkingVisibilityPreferences.showsThinkingKey) private var showsThinking = true
     @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
 
@@ -824,6 +936,39 @@ private struct MessageCard: View {
     }
 
     var body: some View {
+        let textParts = PerformanceInstrumentation.measure(
+            "message-card-text-parts",
+            thresholdMS: 1,
+            details: "sessionID=\(message.info.sessionID) messageID=\(message.id)"
+        ) {
+            message.textParts
+        }
+        let reasoningParts = PerformanceInstrumentation.measure(
+            "message-card-reasoning-parts",
+            thresholdMS: 1,
+            details: "sessionID=\(message.info.sessionID) messageID=\(message.id)"
+        ) {
+            message.reasoningParts
+        }
+        let toolParts = PerformanceInstrumentation.measure(
+            "message-card-tool-parts",
+            thresholdMS: 1,
+            details: "sessionID=\(message.info.sessionID) messageID=\(message.id)"
+        ) {
+            message.toolParts
+        }
+        let subagentSessionsByPartID = PerformanceInstrumentation.measure(
+            "message-card-subagent-resolution",
+            thresholdMS: 1,
+            details: "sessionID=\(message.info.sessionID) messageID=\(message.id) toolParts=\(toolParts.count) sessions=\(appState.sessions.count)"
+        ) {
+            self.subagentSessionsByPartID
+        }
+        let showsMessageBubble = !message.visibleText.isEmpty
+            || (showsThinking && !message.reasoningText.isEmpty)
+            || (message.stepFinish?.reason?.localizedCaseInsensitiveCompare("tool-calls") != .orderedSame && message.stepFinish != nil)
+            || message.info.error != nil
+
         VStack(alignment: .leading, spacing: 8) {
             if showsTimestamp {
                 MessageCardHeader(message: message)
@@ -831,8 +976,8 @@ private struct MessageCard: View {
 
             if showsMessageBubble {
                 VStack(alignment: .leading, spacing: 10) {
-                    if !message.textParts.isEmpty {
-                        ForEach(message.textParts) { part in
+                    if !textParts.isEmpty {
+                        ForEach(textParts) { part in
                             if let text = part.text, !text.isEmpty {
                                 MarkdownContentView(
                                     text: text,
@@ -848,8 +993,8 @@ private struct MessageCard: View {
                         }
                     }
 
-                    if showsThinking, !message.reasoningParts.isEmpty {
-                        ForEach(message.reasoningParts) { part in
+                    if showsThinking, !reasoningParts.isEmpty {
+                        ForEach(reasoningParts) { part in
                             if let text = part.text, !text.isEmpty {
                                 MarkdownContentView(
                                     text: text,
@@ -884,7 +1029,7 @@ private struct MessageCard: View {
                 .padding(.leading, TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.messageCardPadding))
             }
 
-            ForEach(message.toolParts) { toolPart in
+            ForEach(toolParts) { toolPart in
                 ToolPartView(
                     part: toolPart,
                     subagentSession: subagentSessionsByPartID[toolPart.id],
@@ -894,18 +1039,14 @@ private struct MessageCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .performanceLayoutProbe("MessageCard") {
+            "sessionID=\(message.info.sessionID) messageID=\(message.id) role=\(message.info.role.rawString) parts=\(message.parts.count) toolParts=\(message.toolParts.count)"
+        }
     }
 
     private var bubbleBackground: some View {
         RoundedRectangle(cornerRadius: 18, style: .continuous)
             .fill(message.info.role.isAssistant ? theme.assistantBubble : theme.userBubble)
-    }
-
-    private var showsMessageBubble: Bool {
-        !message.visibleText.isEmpty
-            || (showsThinking && !message.reasoningText.isEmpty)
-            || (message.stepFinish?.reason?.localizedCaseInsensitiveCompare("tool-calls") != .orderedSame && message.stepFinish != nil)
-            || message.info.error != nil
     }
 }
 
@@ -955,9 +1096,14 @@ private struct ToolPartView: View {
     let subagentSession: SessionDisplay?
     let latestTodoToolPartID: String?
     @State private var isExpanded = false
+    @State private var detailedPart: MessagePart?
 
     private var presentation: ToolPresentation {
-        part.toolPresentation
+        resolvedPart.toolPresentation
+    }
+
+    private var resolvedPart: MessagePart {
+        detailedPart ?? part
     }
 
     private var statusLabel: String? {
@@ -965,7 +1111,7 @@ private struct ToolPartView: View {
     }
 
     private var shouldAutoExpand: Bool {
-        part.isTodoWriteTool && part.id == latestTodoToolPartID
+        resolvedPart.isTodoWriteTool && resolvedPart.id == latestTodoToolPartID
     }
 
     var body: some View {
@@ -978,7 +1124,7 @@ private struct ToolPartView: View {
                 }
             } label: {
                 HStack(alignment: .center, spacing: 8) {
-                    ToolSummaryView(style: presentation.summaryStyle)
+                        ToolSummaryView(style: presentation.summaryStyle)
 
                     Spacer(minLength: 8)
 
@@ -1013,7 +1159,7 @@ private struct ToolPartView: View {
             .buttonStyle(.plain)
 
             if isExpanded {
-                ToolPartDrawerView(part: part)
+                ToolPartDrawerView(part: resolvedPart)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
@@ -1031,6 +1177,10 @@ private struct ToolPartView: View {
         .onAppear {
             guard part.isTodoWriteTool else { return }
             isExpanded = shouldAutoExpand
+        }
+        .task(id: isExpanded) {
+            guard isExpanded, part.hasDeferredDetail, detailedPart == nil else { return }
+            detailedPart = await PersistenceRepository.shared.loadMessagePartDetail(partID: part.id)
         }
         .onChange(of: latestTodoToolPartID) { _, _ in
             guard part.isTodoWriteTool else { return }
@@ -1475,6 +1625,7 @@ private struct PermissionPromptView: View {
     @Environment(\.openCodeTheme) private var theme
 
     let request: PermissionRequest
+    let focusRequestID: UUID?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1486,25 +1637,121 @@ private struct PermissionPromptView: View {
                 Text(request.patterns.joined(separator: "\n"))
                     .font(.caption.monospaced())
             }
-            HStack {
-                Button("Deny", role: .destructive) {
-                    appState.answerPermission(request, reply: .reject)
-                }
-
-                Button("Allow Always") {
-                    appState.answerPermission(request, reply: .always)
-                }
-
-                Button("Allow once") {
-                    appState.answerPermission(request, reply: .once)
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-            }
+            PermissionPromptButtonRow(
+                focusRequestID: focusRequestID,
+                onDeny: { appState.answerPermission(request, reply: .reject) },
+                onAllowAlways: { appState.answerPermission(request, reply: .always) },
+                onAllowOnce: { appState.answerPermission(request, reply: .once) }
+            )
+            .frame(height: 32)
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(theme.errorBackground)
+    }
+}
+
+private struct PermissionPromptButtonRow: NSViewRepresentable {
+    let focusRequestID: UUID?
+    let onDeny: () -> Void
+    let onAllowAlways: () -> Void
+    let onAllowOnce: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> NSStackView {
+        let stackView = NSStackView()
+        stackView.orientation = .horizontal
+        stackView.alignment = .centerY
+        stackView.spacing = 8
+
+        let denyButton = NSButton(title: "Deny", target: context.coordinator, action: #selector(Coordinator.handleDeny))
+        denyButton.bezelStyle = .rounded
+        denyButton.contentTintColor = .systemRed
+
+        let allowAlwaysButton = NSButton(title: "Allow Always", target: context.coordinator, action: #selector(Coordinator.handleAllowAlways))
+        allowAlwaysButton.bezelStyle = .rounded
+
+        let allowOnceButton = NSButton(title: "Allow once", target: context.coordinator, action: #selector(Coordinator.handleAllowOnce))
+        allowOnceButton.bezelStyle = .rounded
+        allowOnceButton.keyEquivalent = "\r"
+        allowOnceButton.keyEquivalentModifierMask = []
+
+        stackView.addArrangedSubview(denyButton)
+        stackView.addArrangedSubview(allowAlwaysButton)
+        stackView.addArrangedSubview(allowOnceButton)
+
+        context.coordinator.allowOnceButton = allowOnceButton
+        context.coordinator.denyAction = onDeny
+        context.coordinator.allowAlwaysAction = onAllowAlways
+        context.coordinator.allowOnceAction = onAllowOnce
+
+        return stackView
+    }
+
+    func updateNSView(_ nsView: NSStackView, context: Context) {
+        context.coordinator.denyAction = onDeny
+        context.coordinator.allowAlwaysAction = onAllowAlways
+        context.coordinator.allowOnceAction = onAllowOnce
+
+        guard let focusRequestID, focusRequestID != context.coordinator.lastAppliedFocusRequestID else { return }
+        context.coordinator.lastAppliedFocusRequestID = focusRequestID
+        context.coordinator.requestFocus()
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var lastAppliedFocusRequestID: UUID?
+        weak var allowOnceButton: NSButton?
+        var denyAction: (() -> Void)?
+        var allowAlwaysAction: (() -> Void)?
+        var allowOnceAction: (() -> Void)?
+
+        private var remainingFocusAttempts = 0
+        private let maximumFocusAttempts = 6
+
+        @objc
+        func handleDeny() {
+            denyAction?()
+        }
+
+        @objc
+        func handleAllowAlways() {
+            allowAlwaysAction?()
+        }
+
+        @objc
+        func handleAllowOnce() {
+            allowOnceAction?()
+        }
+
+        func requestFocus() {
+            remainingFocusAttempts = maximumFocusAttempts
+            attemptFocus()
+        }
+
+        private func attemptFocus() {
+            guard remainingFocusAttempts > 0 else { return }
+            remainingFocusAttempts -= 1
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if self.focusDefaultButtonIfAvailable() {
+                    self.remainingFocusAttempts = 0
+                    return
+                }
+
+                self.attemptFocus()
+            }
+        }
+
+        private func focusDefaultButtonIfAvailable() -> Bool {
+            guard let button = allowOnceButton, let window = button.window else { return false }
+            window.makeFirstResponder(button)
+            return window.firstResponder === button
+        }
     }
 }
 
