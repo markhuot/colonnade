@@ -700,6 +700,20 @@ actor PersistenceRepository {
         }
     }
 
+    func markMessagesHydrated(directory: String, sessionID: String, updatedAtMS: Double) async {
+        let context = persistence.newBackgroundContext()
+        Self.performSync(on: context) { context in
+            let workspace = Self.findOrCreateWorkspace(directory: directory, context: context)
+            let workspaceID = workspace.id ?? directory
+            let request = SessionEntity.fetchRequest()
+            request.fetchLimit = 1
+            request.predicate = NSPredicate(format: "workspaceID == %@ AND id == %@", workspaceID, sessionID)
+            guard let entity = try? context.fetch(request).first else { return }
+            entity.hydratedMessageUpdatedAtMS = NSNumber(value: updatedAtMS)
+            try? context.save()
+        }
+    }
+
     nonisolated func flushBufferedStreamMutations() async {
         await streamMutationBuffer.flushIfNeeded()
     }
@@ -953,6 +967,7 @@ actor PersistenceRepository {
             title: entity.title ?? id,
             createdAtMS: entity.createdAtMS?.doubleValue ?? 0,
             updatedAtMS: entity.sortUpdatedAtMS?.doubleValue ?? entity.updatedAtMS?.doubleValue ?? 0,
+            hydratedMessageUpdatedAtMS: entity.hydratedMessageUpdatedAtMS?.doubleValue,
             parentID: entity.parentID,
             status: decodeStatus(entity),
             hasPendingPermission: entity.hasPendingPermission?.boolValue ?? false,
@@ -1147,6 +1162,9 @@ actor PersistenceRepository {
             entity.summaryDeletions = session.summary?.deletions.map(NSNumber.init(value:))
             entity.summaryFiles = session.summary?.files.map(NSNumber.init(value:))
             entity.sortUpdatedAtMS = NSNumber(value: session.time.updated)
+            if entity.hydratedMessageUpdatedAtMS == nil {
+                entity.hydratedMessageUpdatedAtMS = nil
+            }
         }
     }
 

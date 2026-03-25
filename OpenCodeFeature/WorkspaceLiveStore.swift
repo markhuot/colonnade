@@ -55,6 +55,40 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
         persistedSession = session
     }
 
+    func markMessagesHydrated(updatedAtMS: Double) {
+        if let persistedSession {
+            self.persistedSession = SessionDisplay(
+                id: persistedSession.id,
+                title: persistedSession.title,
+                createdAtMS: persistedSession.createdAtMS,
+                updatedAtMS: persistedSession.updatedAtMS,
+                hydratedMessageUpdatedAtMS: updatedAtMS,
+                parentID: persistedSession.parentID,
+                status: persistedSession.status,
+                hasPendingPermission: persistedSession.hasPendingPermission,
+                todoProgress: persistedSession.todoProgress,
+                contextUsageText: persistedSession.contextUsageText,
+                isArchived: persistedSession.isArchived
+            )
+        }
+
+        if let session {
+            self.session = SessionDisplay(
+                id: session.id,
+                title: session.title,
+                createdAtMS: session.createdAtMS,
+                updatedAtMS: session.updatedAtMS,
+                hydratedMessageUpdatedAtMS: updatedAtMS,
+                parentID: session.parentID,
+                status: session.status,
+                hasPendingPermission: session.hasPendingPermission,
+                todoProgress: session.todoProgress,
+                contextUsageText: session.contextUsageText,
+                isArchived: session.isArchived
+            )
+        }
+    }
+
     func applyStatus(_ status: SessionStatus?) {
         self.status = status
     }
@@ -327,6 +361,7 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
             title: sessionModel.title,
             createdAtMS: sessionModel.time.created,
             updatedAtMS: updatedAtMS,
+            hydratedMessageUpdatedAtMS: persistedSession?.hydratedMessageUpdatedAtMS,
             parentID: sessionModel.parentID,
             status: status,
             hasPendingPermission: hasPendingPermission,
@@ -415,6 +450,10 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
     func setModelContextLimits(_ limits: [ModelContextKey: Int]) {
         modelContextLimits = limits
         refreshSessionsList()
+    }
+
+    func markMessagesHydrated(sessionID: String, updatedAtMS: Double) {
+        sessionState(for: sessionID).markMessagesHydrated(updatedAtMS: updatedAtMS)
     }
 
     func replacePaneStates(_ paneStates: [String: SessionPaneState]) {

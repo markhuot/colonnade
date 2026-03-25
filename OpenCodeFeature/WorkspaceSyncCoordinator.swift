@@ -161,6 +161,10 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
     }
 
     func refreshMessages(sessionID: String) async {
+        let callStack = Thread.callStackSymbols.prefix(12).joined(separator: " | ")
+        PerformanceInstrumentation.log(
+            "coordinator-refresh-messages-callstack directory=\(directory) sessionID=\(sessionID) stack=\(callStack)"
+        )
         logger.notice("Refreshing messages for \(sessionID, privacy: .public)")
         messageRefreshTasks[sessionID]?.cancel()
         messageRefreshTasks[sessionID] = Task {
@@ -183,9 +187,18 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
                     messages: messages,
                     modelContextLimits: limits
                 )
+                let hydratedUpdatedAtMS = await withStore { store in
+                    store.sessionDisplay(for: sessionID)?.updatedAtMS ?? 0
+                }
+                await repository.markMessagesHydrated(
+                    directory: directory,
+                    sessionID: sessionID,
+                    updatedAtMS: hydratedUpdatedAtMS
+                )
                 await withStore { store in
                     store.setModelContextLimits(limits)
                     store.replaceMessages(sessionID: sessionID, messages: messages)
+                    store.markMessagesHydrated(sessionID: sessionID, updatedAtMS: hydratedUpdatedAtMS)
                 }
                 PerformanceInstrumentation.end(
                     "coordinator-refresh-messages",

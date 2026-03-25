@@ -987,6 +987,7 @@ struct SessionDisplay: Identifiable, Hashable {
     let title: String
     let createdAtMS: Double
     let updatedAtMS: Double
+    let hydratedMessageUpdatedAtMS: Double?
     let parentID: String?
     let status: SessionStatus?
     let hasPendingPermission: Bool

@@ -154,6 +154,7 @@ final class PersistenceController: @unchecked Sendable {
             attribute("lastContextUsagePercent", .integer64AttributeType),
             attribute("lastMessageCreatedAtMS", .doubleAttributeType),
             attribute("sortUpdatedAtMS", .doubleAttributeType),
+            attribute("hydratedMessageUpdatedAtMS", .doubleAttributeType),
             attribute("selectedModelProviderID", .stringAttributeType),
             attribute("selectedModelID", .stringAttributeType),
             attribute("selectedThinkingLevel", .stringAttributeType)
@@ -370,6 +371,7 @@ final class SessionEntity: NSManagedObject {
     @NSManaged var lastContextUsagePercent: NSNumber?
     @NSManaged var lastMessageCreatedAtMS: NSNumber?
     @NSManaged var sortUpdatedAtMS: NSNumber?
+    @NSManaged var hydratedMessageUpdatedAtMS: NSNumber?
     @NSManaged var selectedModelProviderID: String?
     @NSManaged var selectedModelID: String?
     @NSManaged var selectedThinkingLevel: String?

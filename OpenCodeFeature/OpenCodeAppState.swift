@@ -449,7 +449,6 @@ final class OpenCodeAppModel: ObservableObject {
                     )
                     guard isCurrentLoad(loadID, for: connection), self.liveStore === liveStore else { return }
                     reconcileModelSelections()
-                    await refreshOpenSessionHistories(connection: connection)
 
                     await refreshWorkspaceInBackground(
                         loadID: loadID,
@@ -481,7 +480,6 @@ final class OpenCodeAppModel: ObservableObject {
                 loadedModelContextLimits: loadedModelContextLimits
             )
             launchStage = isUsingLocalServer ? .localFolderSelection : .remoteDirectoryEntry
-            await refreshOpenSessionHistories(connection: connection)
         } catch {
             logger.error("Load failed: \(error.localizedDescription, privacy: .public)")
             PerformanceInstrumentation.log(
@@ -574,7 +572,6 @@ final class OpenCodeAppModel: ObservableObject {
 
         for sessionID in openSessionIDs {
             await coordinator.refreshTodos(sessionID: sessionID)
-            await coordinator.refreshMessages(sessionID: sessionID)
         }
 
         if reportErrorsToUser {
@@ -679,15 +676,9 @@ final class OpenCodeAppModel: ObservableObject {
         }
     }
 
-    private func refreshOpenSessionHistories(connection: WorkspaceConnection) async {
-        guard !openSessionIDs.isEmpty else { return }
-        let coordinator = await syncRegistry.coordinator(for: connection)
-        PerformanceInstrumentation.log(
-            "refresh-open-session-histories directory=\(connection.directory) sessionCount=\(openSessionIDs.count) sessions=\(openSessionIDs.joined(separator: ","))"
-        )
-        for sessionID in openSessionIDs {
-            await coordinator.refreshMessages(sessionID: sessionID)
-        }
+    private func shouldRefreshMessages(for sessionID: String) -> Bool {
+        guard let session = liveStore?.sessionDisplay(for: sessionID) else { return true }
+        return session.hydratedMessageUpdatedAtMS != session.updatedAtMS
     }
 
     func openSession(_ sessionID: String, focusPrompt: Bool = false) {
@@ -704,12 +695,18 @@ final class OpenCodeAppModel: ObservableObject {
         Task {
             await syncOpenSessions()
             if let workspaceConnection {
-                PerformanceInstrumentation.log(
-                    "open-session-refresh sessionID=\(sessionID) directory=\(workspaceConnection.directory)"
-                )
                 let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
                 await coordinator.refreshTodos(sessionID: sessionID)
-                await coordinator.refreshMessages(sessionID: sessionID)
+                if shouldRefreshMessages(for: sessionID) {
+                    PerformanceInstrumentation.log(
+                        "open-session-refresh sessionID=\(sessionID) directory=\(workspaceConnection.directory)"
+                    )
+                    await coordinator.refreshMessages(sessionID: sessionID)
+                } else {
+                    PerformanceInstrumentation.log(
+                        "open-session-refresh-skip sessionID=\(sessionID) directory=\(workspaceConnection.directory)"
+                    )
+                }
             }
         }
     }
