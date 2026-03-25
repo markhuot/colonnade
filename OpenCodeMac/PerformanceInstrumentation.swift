@@ -6,10 +6,21 @@ enum PerformanceInstrumentation {
     static let logger = Logger(subsystem: "ai.opencode.app", category: "performance")
     private static let clock = ContinuousClock()
 
+    static var isEnabled: Bool {
+        #if DEBUG
+            ProcessInfo.processInfo.environment["CI"] == nil
+                && ProcessInfo.processInfo.environment["OPENCODE_DISABLE_PERF_LOGGING"] == nil
+        #else
+            false
+        #endif
+    }
+
     @discardableResult
     static func begin(_ name: String, details: @autoclosure () -> String = "") -> ContinuousClock.Instant {
         let start = clock.now
-        log("begin name=\(name) \(details())")
+        if isEnabled {
+            log("begin name=\(name) \(details())")
+        }
         return start
     }
 
@@ -19,6 +30,7 @@ enum PerformanceInstrumentation {
         details: @autoclosure () -> String = "",
         thresholdMS: Double = 0
     ) {
+        guard isEnabled else { return }
         let milliseconds = elapsedMilliseconds(since: start)
         guard milliseconds >= thresholdMS else { return }
         log("end name=\(name) durationMS=\(formatted(milliseconds)) \(details())")
@@ -30,6 +42,7 @@ enum PerformanceInstrumentation {
         details: @autoclosure () -> String = "",
         _ body: () -> T
     ) -> T {
+        guard isEnabled else { return body() }
         let start = clock.now
         let value = body()
         let milliseconds = elapsedMilliseconds(since: start)
@@ -40,6 +53,7 @@ enum PerformanceInstrumentation {
     }
 
     static func log(_ message: String) {
+        guard isEnabled else { return }
         logger.notice("\(message, privacy: .public)")
     }
 
