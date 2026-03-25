@@ -7,9 +7,27 @@ protocol WorkspaceEventNotifying: Sendable {
 }
 
 enum WorkspaceEventNotification: Equatable, Sendable {
-    case sessionStopped(sessionID: String, sessionTitle: String)
-    case permissionRequested(sessionID: String, sessionTitle: String, permission: String)
-    case questionAsked(sessionID: String, sessionTitle: String, question: String)
+    case sessionStopped(connection: WorkspaceConnection, sessionID: String, sessionTitle: String)
+    case permissionRequested(connection: WorkspaceConnection, sessionID: String, sessionTitle: String, permission: String)
+    case questionAsked(connection: WorkspaceConnection, sessionID: String, sessionTitle: String, question: String)
+
+    var connection: WorkspaceConnection {
+        switch self {
+        case let .sessionStopped(connection, _, _),
+             let .permissionRequested(connection, _, _, _),
+             let .questionAsked(connection, _, _, _):
+            return connection
+        }
+    }
+
+    var sessionID: String {
+        switch self {
+        case let .sessionStopped(_, sessionID, _),
+             let .permissionRequested(_, sessionID, _, _),
+             let .questionAsked(_, sessionID, _, _):
+            return sessionID
+        }
+    }
 }
 
 struct NoopWorkspaceEventNotifier: WorkspaceEventNotifying {
@@ -136,8 +154,8 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
             details: "sessionID=\(self.id) messageID=\(info.id) totalMessages=\(updatedMessages.count)",
             thresholdMS: 1
         )
-        logger.notice(
-            "Published message info sessionID=\(self.id, privacy: .public) messageID=\(info.id, privacy: .public) totalMessages=\(updatedMessages.count, privacy: .public)"
+        DebugLogging.notice(logger,
+            "Published message info sessionID=\(self.id) messageID=\(info.id) totalMessages=\(updatedMessages.count)"
         )
     }
 
@@ -152,7 +170,7 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
             PerformanceInstrumentation.log(
                 "session-state-apply-message-part-miss sessionID=\(self.id) partID=\(part.id) reason=missing-message-id"
             )
-            logger.notice("Direct part apply miss sessionID=\(self.id, privacy: .public) partID=\(part.id, privacy: .public) reason=missing-message-id")
+            DebugLogging.notice(logger, "Direct part apply miss sessionID=\(self.id) partID=\(part.id) reason=missing-message-id")
             return nil
         }
 
@@ -163,8 +181,8 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
             PerformanceInstrumentation.log(
                 "session-state-apply-message-part-miss sessionID=\(self.id) messageID=\(messageID) partID=\(resolvedPart.id) reason=message-not-loaded loadedMessages=\(updatedMessages.count)"
             )
-            logger.notice(
-                "Direct part apply miss sessionID=\(self.id, privacy: .public) messageID=\(messageID, privacy: .public) partID=\(resolvedPart.id, privacy: .public) reason=message-not-loaded loadedMessages=\(updatedMessages.count, privacy: .public)"
+            DebugLogging.notice(logger,
+                "Direct part apply miss sessionID=\(self.id) messageID=\(messageID) partID=\(resolvedPart.id) reason=message-not-loaded loadedMessages=\(updatedMessages.count)"
             )
             return nil
         }
@@ -187,8 +205,8 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
             details: "sessionID=\(self.id) messageID=\(messageID) partID=\(resolvedPart.id) messageParts=\(message.parts.count) totalMessages=\(updatedMessages.count)",
             thresholdMS: 1
         )
-        logger.notice(
-            "Published message part sessionID=\(self.id, privacy: .public) messageID=\(messageID, privacy: .public) partID=\(resolvedPart.id, privacy: .public) partType=\(resolvedPart.type.rawString, privacy: .public) messageParts=\(message.parts.count, privacy: .public)"
+        DebugLogging.notice(logger,
+            "Published message part sessionID=\(self.id) messageID=\(messageID) partID=\(resolvedPart.id) partType=\(resolvedPart.type.rawString) messageParts=\(message.parts.count)"
         )
         PerformanceInstrumentation.log(
             "session-state-apply-message-part-publish sessionID=\(self.id) messageID=\(messageID) partID=\(resolvedPart.id) partsBefore=\(previousPartsCount) partsAfter=\(message.parts.count) visibleTextBytesBefore=\(previousVisibleTextBytes) visibleTextBytesAfter=\(updatedVisibleTextBytes)"
@@ -210,8 +228,8 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
             PerformanceInstrumentation.log(
                 "session-state-apply-part-delta-buffer sessionID=\(self.id) partID=\(partID) field=\(field.rawString) deltaBytes=\(delta.utf8.count) messages=\(messages.count) bufferedCount=\(self.pendingPartDeltas[partID]?.count ?? 0)"
             )
-            logger.notice(
-                "Buffered part delta sessionID=\(self.id, privacy: .public) partID=\(partID, privacy: .public) field=\(field.rawString, privacy: .public) deltaBytes=\(delta.utf8.count, privacy: .public) bufferedCount=\(self.pendingPartDeltas[partID]?.count ?? 0, privacy: .public)"
+            DebugLogging.notice(logger,
+                "Buffered part delta sessionID=\(self.id) partID=\(partID) field=\(field.rawString) deltaBytes=\(delta.utf8.count) bufferedCount=\(self.pendingPartDeltas[partID]?.count ?? 0)"
             )
             return true
         }
@@ -238,8 +256,8 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
             details: "sessionID=\(self.id) partID=\(partID) messageID=\(message.id) visibleTextBytes=\(message.visibleText.utf8.count)",
             thresholdMS: 1
         )
-        logger.notice(
-            "Published part delta sessionID=\(self.id, privacy: .public) partID=\(partID, privacy: .public) field=\(field.rawString, privacy: .public) visibleTextBytes=\(message.visibleText.utf8.count, privacy: .public)"
+        DebugLogging.notice(logger,
+            "Published part delta sessionID=\(self.id) partID=\(partID) field=\(field.rawString) visibleTextBytes=\(message.visibleText.utf8.count)"
         )
         PerformanceInstrumentation.log(
             "session-state-apply-part-delta-publish sessionID=\(self.id) messageID=\(message.id) partID=\(partID) field=\(field.rawString) partIndex=\(partIndex) partsBefore=\(previousPartsCount) partsAfter=\(message.parts.count) visibleTextBytesBefore=\(previousVisibleTextBytes) visibleTextBytesAfter=\(updatedVisibleTextBytes)"
@@ -346,29 +364,35 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
         }
     }
 
-    func recomputeDisplay(modelContextLimits: [ModelContextKey: Int]) {
-        guard let sessionModel else {
-            session = persistedSession
-            return
+    @discardableResult
+    func recomputeDisplay(modelContextLimits: [ModelContextKey: Int]) -> Bool {
+        let updatedSession: SessionDisplay?
+
+        if let sessionModel {
+            let todoProgress = TodoProgress.from(todos)
+            let hasPendingPermission = !permissions.isEmpty
+            let updatedAtMS = max(sessionModel.time.updated, messages.last?.info.time.created ?? 0)
+
+            updatedSession = SessionDisplay(
+                id: sessionModel.id,
+                title: sessionModel.title,
+                createdAtMS: sessionModel.time.created,
+                updatedAtMS: updatedAtMS,
+                hydratedMessageUpdatedAtMS: persistedSession?.hydratedMessageUpdatedAtMS,
+                parentID: sessionModel.parentID,
+                status: status,
+                hasPendingPermission: hasPendingPermission,
+                todoProgress: todoProgress,
+                contextUsageText: contextUsageText(modelContextLimits: modelContextLimits),
+                isArchived: sessionModel.time.archived != nil
+            )
+        } else {
+            updatedSession = persistedSession
         }
 
-        let todoProgress = TodoProgress.from(todos)
-        let hasPendingPermission = !permissions.isEmpty
-        let updatedAtMS = max(sessionModel.time.updated, messages.last?.info.time.created ?? 0)
-
-        session = SessionDisplay(
-            id: sessionModel.id,
-            title: sessionModel.title,
-            createdAtMS: sessionModel.time.created,
-            updatedAtMS: updatedAtMS,
-            hydratedMessageUpdatedAtMS: persistedSession?.hydratedMessageUpdatedAtMS,
-            parentID: sessionModel.parentID,
-            status: status,
-            hasPendingPermission: hasPendingPermission,
-            todoProgress: todoProgress,
-            contextUsageText: contextUsageText(modelContextLimits: modelContextLimits),
-            isArchived: sessionModel.time.archived != nil
-        )
+        guard session != updatedSession else { return false }
+        session = updatedSession
+        return true
     }
 
     private func contextUsageText(modelContextLimits: [ModelContextKey: Int]) -> String? {
@@ -401,12 +425,13 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
 
     var directory: String { connection.directory }
 
-    @Published private(set) var sessions: [SessionDisplay] = []
+    @Published private(set) var orderedVisibleSessionIDs: [String] = []
     @Published private(set) var paneStates: [String: SessionPaneState] = [:]
 
     private var notifier: any WorkspaceEventNotifying
     private var modelContextLimits: [ModelContextKey: Int] = [:]
     private var sessionStates: [String: SessionLiveState] = [:]
+    private var orderedSessionIDs: [String] = []
     private var deferredMessageSessionIDs: Set<String> = []
     private var previousStatusBySessionID: [String: SessionStatus] = [:]
     private var questionRequestIDsBySessionID: [String: Set<String>] = [:]
@@ -436,11 +461,23 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
         sessionStates[sessionID]
     }
 
+    func orderedVisibleSessionStates() -> [SessionLiveState] {
+        orderedVisibleSessionIDs.compactMap { sessionStates[$0] }
+    }
+
     func allMessagesBySession(for sessionIDs: [String]) -> [String: [MessageEnvelope]] {
         Dictionary(uniqueKeysWithValues: sessionIDs.compactMap { sessionID in
             guard let state = sessionStates[sessionID] else { return nil }
             return (sessionID, state.messages)
         })
+    }
+
+    var sessions: [SessionDisplay] {
+        orderedSessionIDs.compactMap(sessionDisplay(for:))
+    }
+
+    var visibleSessions: [SessionDisplay] {
+        orderedVisibleSessionIDs.compactMap(sessionDisplay(for:))
     }
 
     func sessionDisplay(for sessionID: String) -> SessionDisplay? {
@@ -449,7 +486,7 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
 
     func setModelContextLimits(_ limits: [ModelContextKey: Int]) {
         modelContextLimits = limits
-        refreshSessionsList()
+        rebuildSessionOrdering()
     }
 
     func markMessagesHydrated(sessionID: String, updatedAtMS: Double) {
@@ -500,7 +537,7 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
             permissionRequestIDsBySessionID.removeValue(forKey: sessionID)
         }
 
-        refreshSessionsList()
+        rebuildSessionOrdering()
         logSnapshotDiff(
             name: "workspace-snapshot-apply",
             visibleSessionIDs: visibleSessionIDSet,
@@ -560,7 +597,7 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
             permissionRequestIDsBySessionID.removeValue(forKey: sessionID)
         }
 
-        refreshSessionsList()
+        rebuildSessionOrdering()
         logSnapshotDiff(
             name: "persistence-snapshot-apply",
             visibleSessionIDs: visibleSessionIDSet,
@@ -580,13 +617,13 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
         let lifecycleDescription = String(describing: lifecycle)
         switch lifecycle {
         case .created, .updated:
-            logger.notice(
-                "Apply session lifecycle sessionID=\(session.id, privacy: .public) lifecycle=\(lifecycleDescription, privacy: .public) updatedAtMS=\(session.time.updated, privacy: .public)"
+            DebugLogging.notice(logger,
+                "Apply session lifecycle sessionID=\(session.id) lifecycle=\(lifecycleDescription) updatedAtMS=\(session.time.updated)"
             )
             sessionState(for: session.id).applySessionModel(session)
         case .deleted:
-            logger.notice(
-                "Apply session lifecycle sessionID=\(session.id, privacy: .public) lifecycle=\(lifecycleDescription, privacy: .public)"
+            DebugLogging.notice(logger,
+                "Apply session lifecycle sessionID=\(session.id) lifecycle=\(lifecycleDescription)"
             )
             sessionStates.removeValue(forKey: session.id)
             paneStates.removeValue(forKey: session.id)
@@ -595,7 +632,7 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
             permissionRequestIDsBySessionID.removeValue(forKey: session.id)
         }
 
-        refreshSessionsList()
+        updateSessionOrdering(for: session.id)
     }
 
     func applyStatus(sessionID: String, status: SessionStatus?) {
@@ -603,13 +640,13 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
         sessionState(for: sessionID).applyStatus(status)
         notifyIfSessionStopped(sessionID: sessionID, previousStatus: previousStatus, newStatus: status, shouldNotify: hasEstablishedNotificationBaseline)
         updateTrackedStatus(status, sessionID: sessionID)
-        refreshSessionsList()
+        updateSessionOrdering(for: sessionID)
     }
 
     func replaceMessages(sessionID: String, messages: [MessageEnvelope]) {
         deferredMessageSessionIDs.remove(sessionID)
         sessionState(for: sessionID).replaceMessages(messages)
-        refreshSessionsList()
+        updateSessionOrdering(for: sessionID)
     }
 
     func hasDeferredMessages(for sessionID: String) -> Bool {
@@ -635,12 +672,12 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
 
     func upsertMessageInfo(_ info: MessageInfo) {
         sessionState(for: info.sessionID).upsertMessageInfo(info)
-        refreshSessionsList()
+        updateSessionOrdering(for: info.sessionID)
     }
 
     func replaceTodos(sessionID: String, todos: [SessionTodo]) {
         sessionState(for: sessionID).replaceTodos(todos)
-        refreshSessionsList()
+        updateSessionOrdering(for: sessionID)
     }
 
     func replaceInteractions(sessionID: String, questions: [QuestionRequest], permissions: [PermissionRequest]) {
@@ -650,7 +687,7 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
         notifyForNewInteractions(sessionID: sessionID, questions: questions, permissions: permissions, shouldNotify: hasEstablishedNotificationBaseline)
         questionRequestIDsBySessionID[sessionID] = Set(questions.map(\.id))
         permissionRequestIDsBySessionID[sessionID] = Set(permissions.map(\.id))
-        refreshSessionsList()
+        updateSessionOrdering(for: sessionID)
     }
 
     func applyInteractionSnapshot(_ snapshot: InteractionSnapshot) {
@@ -670,7 +707,7 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
             permissionRequestIDsBySessionID[sessionID] = Set(permissions.map(\.id))
         }
 
-        refreshSessionsList()
+        rebuildSessionOrdering()
         hasEstablishedNotificationBaseline = true
     }
 
@@ -679,7 +716,7 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
         guard let sessionID = part.sessionID else { return nil }
         let appliedPart = sessionState(for: sessionID).applyMessagePart(part)
         if appliedPart != nil {
-            refreshSessionsList()
+            updateSessionOrdering(for: sessionID)
         }
         return appliedPart
     }
@@ -688,7 +725,7 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
     func applyMessagePartDelta(sessionID: String, partID: String, field: MessagePartDeltaField, delta: String) -> Bool {
         let changed = sessionState(for: sessionID).applyMessagePartDelta(partID: partID, field: field, delta: delta)
         if changed {
-            refreshSessionsList()
+            updateSessionOrdering(for: sessionID)
         }
         return changed
     }
@@ -697,7 +734,7 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
     func removeMessagePart(sessionID: String, partID: String) -> Bool {
         let changed = sessionState(for: sessionID).removeMessagePart(partID: partID)
         if changed {
-            refreshSessionsList()
+            updateSessionOrdering(for: sessionID)
         }
         return changed
     }
@@ -706,39 +743,95 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
     func removeMessage(sessionID: String, messageID: String) -> Bool {
         let changed = sessionState(for: sessionID).removeMessage(messageID: messageID)
         if changed {
-            refreshSessionsList()
+            updateSessionOrdering(for: sessionID)
         }
         return changed
     }
 
-    private func refreshSessionsList() {
+    private func rebuildSessionOrdering() {
         let start = PerformanceInstrumentation.begin(
-            "workspace-refresh-sessions-list",
+            "workspace-rebuild-session-ordering",
             details: "directory=\(directory) sessionStates=\(sessionStates.count)"
         )
         for state in sessionStates.values {
-            state.recomputeDisplay(modelContextLimits: modelContextLimits)
+            _ = state.recomputeDisplay(modelContextLimits: modelContextLimits)
         }
 
-        sessions = sessionStates.values
+        let rebuiltOrderedSessionIDs = sessionStates.values
             .compactMap(\.session)
             .sorted { lhs, rhs in
-                if lhs.updatedAtMS == rhs.updatedAtMS {
-                    return lhs.id < rhs.id
-                }
-                return lhs.updatedAtMS > rhs.updatedAtMS
+                Self.sessionSortsBefore(lhs, rhs)
             }
+            .map(\.id)
 
-        let orderedSessionIDs = sessions.map(\.id).joined(separator: ",")
+        publishSessionOrdering(rebuiltOrderedSessionIDs)
+
+        let orderedSessionIDsSummary = rebuiltOrderedSessionIDs.joined(separator: ",")
         PerformanceInstrumentation.end(
-            "workspace-refresh-sessions-list",
+            "workspace-rebuild-session-ordering",
             from: start,
-            details: "directory=\(directory) sessions=\(self.sessions.count) orderedCount=\(orderedSessionIDs.isEmpty ? 0 : self.sessions.count)",
+            details: "directory=\(directory) sessions=\(rebuiltOrderedSessionIDs.count) visibleSessions=\(orderedVisibleSessionIDs.count)",
             thresholdMS: 1
         )
-        logger.notice(
-            "Refresh sessions list count=\(self.sessions.count, privacy: .public) order=\(orderedSessionIDs, privacy: .public)"
+        DebugLogging.notice(logger,
+            "Rebuilt session ordering count=\(rebuiltOrderedSessionIDs.count) order=\(orderedSessionIDsSummary)"
         )
+    }
+
+    private func updateSessionOrdering(for sessionID: String) {
+        let state = sessionState(for: sessionID)
+        let previousSession = state.session
+        let didChange = state.recomputeDisplay(modelContextLimits: modelContextLimits)
+        let currentSession = state.session
+
+        let previousOrderKey = previousSession.map(Self.orderKey)
+        let currentOrderKey = currentSession.map(Self.orderKey)
+        let shouldReorder = previousOrderKey != currentOrderKey || !orderedSessionIDs.contains(sessionID)
+
+        guard didChange || shouldReorder else { return }
+
+        var updatedOrderedSessionIDs = orderedSessionIDs.filter { $0 != sessionID && sessionStates[$0]?.session != nil }
+
+        if let currentSession {
+            let insertionIndex = updatedOrderedSessionIDs.firstIndex { existingSessionID in
+                guard let existingSession = sessionStates[existingSessionID]?.session else {
+                    return false
+                }
+                return Self.sessionSortsBefore(currentSession, existingSession)
+            } ?? updatedOrderedSessionIDs.endIndex
+            updatedOrderedSessionIDs.insert(sessionID, at: insertionIndex)
+        }
+
+        publishSessionOrdering(updatedOrderedSessionIDs)
+    }
+
+    private func publishSessionOrdering(_ updatedOrderedSessionIDs: [String]) {
+        let normalizedOrderedSessionIDs = updatedOrderedSessionIDs.filter { sessionStates[$0]?.session != nil }
+        orderedSessionIDs = normalizedOrderedSessionIDs
+
+        let updatedVisibleSessionIDs = normalizedOrderedSessionIDs.filter { sessionID in
+            guard let session = sessionStates[sessionID]?.session else { return false }
+            return !session.isArchived && !session.isSubagentSession
+        }
+
+        guard orderedVisibleSessionIDs != updatedVisibleSessionIDs else { return }
+        orderedVisibleSessionIDs = updatedVisibleSessionIDs
+    }
+
+    private struct SessionOrderKey: Equatable {
+        let updatedAtMS: Double
+        let id: String
+    }
+
+    private static func orderKey(for session: SessionDisplay) -> SessionOrderKey {
+        SessionOrderKey(updatedAtMS: session.updatedAtMS, id: session.id)
+    }
+
+    private static func sessionSortsBefore(_ lhs: SessionDisplay, _ rhs: SessionDisplay) -> Bool {
+        if lhs.updatedAtMS == rhs.updatedAtMS {
+            return lhs.id < rhs.id
+        }
+        return lhs.updatedAtMS > rhs.updatedAtMS
     }
 
     private func updateTrackedStatus(_ status: SessionStatus?, sessionID: String) {
@@ -760,7 +853,7 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
               newStatus?.isThinkingActive != true else { return }
 
         let sessionTitle = sessionState(for: sessionID).sessionTitle
-        notifier.notify(.sessionStopped(sessionID: sessionID, sessionTitle: sessionTitle))
+        notifier.notify(.sessionStopped(connection: connection, sessionID: sessionID, sessionTitle: sessionTitle))
     }
 
     private func notifyForNewInteractions(
@@ -776,6 +869,7 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
         for permission in permissions where !previousPermissionIDs.contains(permission.id) {
             notifier.notify(
                 .permissionRequested(
+                    connection: connection,
                     sessionID: sessionID,
                     sessionTitle: sessionTitle,
                     permission: permission.permission
@@ -788,6 +882,7 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
             let questionText = request.questions.first?.question ?? "Question requires an answer"
             notifier.notify(
                 .questionAsked(
+                    connection: connection,
                     sessionID: sessionID,
                     sessionTitle: sessionTitle,
                     question: questionText

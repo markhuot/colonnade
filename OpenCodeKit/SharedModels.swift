@@ -356,6 +356,52 @@ enum CommandAutocomplete {
     }
 }
 
+enum PathAutocomplete {
+    static func suggestions(for input: String, paths: [String], limit: Int = 8) -> [String] {
+        let trimmedInput = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedInput = normalized(trimmedInput)
+
+        return paths
+            .compactMap { path -> (String, Int, String)? in
+                guard let score = matchScore(input: normalizedInput, path: path) else { return nil }
+                return (path, score, normalized(path))
+            }
+            .sorted { lhs, rhs in
+                if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }
+                return lhs.2.localizedCaseInsensitiveCompare(rhs.2) == .orderedAscending
+            }
+            .prefix(limit)
+            .map(\.0)
+    }
+
+    private static func matchScore(input: String, path: String) -> Int? {
+        let normalizedPath = normalized(path)
+
+        if input.isEmpty {
+            return 0
+        }
+
+        if normalizedPath.hasPrefix(input) {
+            return 0
+        }
+
+        let components = normalizedPath.split(separator: "/").map(String.init)
+        if components.contains(where: { $0.hasPrefix(input) }) {
+            return 1
+        }
+
+        if normalizedPath.contains(input) {
+            return 2
+        }
+
+        return nil
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
+}
+
 struct ModelContextKey: Hashable {
     let providerID: String
     let modelID: String

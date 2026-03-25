@@ -31,10 +31,5 @@ struct SessionWindowView: View {
             "sessionID=\(sessionID) selectedDirectory=\(selectedDirectoryText) isLoading=\(appState.isLoading)"
         }
         .themedWindow(theme)
-        .onAppear {
-            PerformanceInstrumentation.log(
-                "session-window-view-appear sessionID=\(sessionID) selectedDirectory=\(selectedDirectoryText) isLoading=\(appState.isLoading)"
-            )
-        }
     }
 }

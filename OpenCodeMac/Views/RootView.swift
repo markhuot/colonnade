@@ -44,21 +44,6 @@ struct RootView: View {
         }
         .background(theme.windowBackground)
         .themedWindow(theme)
-        .onAppear {
-            PerformanceInstrumentation.log(
-                "root-view-appear selectedDirectory=\(selectedDirectoryText) openSessions=\(appState.openSessionIDs.count) isLoading=\(appState.isLoading)"
-            )
-        }
-        .onChange(of: appState.selectedDirectory) { _, newValue in
-            let selectedDirectoryText = newValue ?? "nil"
-            PerformanceInstrumentation.log("root-selected-directory value=\(selectedDirectoryText)")
-        }
-        .onChange(of: appState.isLoading) { oldValue, newValue in
-            PerformanceInstrumentation.log("root-is-loading old=\(oldValue) new=\(newValue)")
-        }
-        .onChange(of: appState.openSessionIDs.count) { oldValue, newValue in
-            PerformanceInstrumentation.log("root-open-session-count old=\(oldValue) new=\(newValue)")
-        }
     }
 }
 
@@ -223,55 +208,53 @@ private struct SessionListSection: View {
     let onStopRequest: (SessionDisplay) -> Void
     let onArchiveRequest: (SessionDisplay) -> Void
 
-    private var visibleSessions: [SessionDisplay] {
-        liveStore.sessions.filter { !$0.isArchived && !$0.isSubagentSession }
+    private var visibleSessionStates: [SessionLiveState] {
+        liveStore.orderedVisibleSessionStates()
     }
 
     private var openSessionIDSet: Set<String> {
         Set(openSessionIDs)
     }
 
-    private var openSessions: [SessionDisplay] {
-        return visibleSessions.filter { openSessionIDSet.contains($0.id) }
+    private var openSessionStates: [SessionLiveState] {
+        visibleSessionStates.filter { openSessionIDSet.contains($0.id) }
     }
 
-    private var remainingSessions: [SessionDisplay] {
-        return visibleSessions.filter { !openSessionIDSet.contains($0.id) }
+    private var remainingSessionStates: [SessionLiveState] {
+        visibleSessionStates.filter { !openSessionIDSet.contains($0.id) }
     }
 
     var body: some View {
         Section("Open Sessions") {
-            if openSessions.isEmpty {
+            if openSessionStates.isEmpty {
                 Text("No open sessions")
                     .foregroundStyle(theme.secondaryText)
             } else {
-                ForEach(openSessions) { session in
-                    sessionRow(for: session)
+                ForEach(openSessionStates) { sessionState in
+                    sessionRow(for: sessionState)
                 }
             }
         }
 
         Section("All Sessions") {
-            if remainingSessions.isEmpty {
-                Text(visibleSessions.isEmpty ? "No sessions yet" : "No other sessions")
+            if remainingSessionStates.isEmpty {
+                Text(visibleSessionStates.isEmpty ? "No sessions yet" : "No other sessions")
                     .foregroundStyle(theme.secondaryText)
             } else {
-                ForEach(remainingSessions) { session in
-                    sessionRow(for: session)
+                ForEach(remainingSessionStates) { sessionState in
+                    sessionRow(for: sessionState)
                 }
             }
         }
     }
 
     @ViewBuilder
-    private func sessionRow(for session: SessionDisplay) -> some View {
+    private func sessionRow(for sessionState: SessionLiveState) -> some View {
         SessionRow(
-            session: session,
-            indicator: session.indicator,
-            todoProgress: session.todoProgress
+            sessionState: sessionState
         )
         .contextMenu {
-            if openSessionIDSet.contains(session.id) {
+            if let session = sessionState.session, openSessionIDSet.contains(session.id) {
                 Button("Close Session") {
                     appState.closeSession(session.id)
                 }
@@ -279,27 +262,43 @@ private struct SessionListSection: View {
                 Divider()
             }
 
-            if session.status?.isThinkingActive == true {
+            if let session = sessionState.session, session.status?.isThinkingActive == true {
                 Button("Stop Session...", role: .destructive) {
                     onStopRequest(session)
                 }
             }
 
-            Button("Archive Session...", role: .destructive) {
-                onArchiveRequest(session)
+            if let session = sessionState.session {
+                Button("Archive Session...", role: .destructive) {
+                    onArchiveRequest(session)
+                }
             }
         }
-        .tag(session.id)
+        .tag(sessionState.id)
     }
 }
 
 private struct SessionRow: View {
     @Environment(\.openCodeTheme) private var theme
-    let session: SessionDisplay
-    let indicator: SessionIndicator
-    let todoProgress: TodoProgress?
+    @ObservedObject var sessionState: SessionLiveState
 
     var body: some View {
+        let session = sessionState.session ?? SessionDisplay(
+            id: sessionState.id,
+            title: sessionState.sessionTitle,
+            createdAtMS: 0,
+            updatedAtMS: 0,
+            hydratedMessageUpdatedAtMS: nil,
+            parentID: nil,
+            status: nil,
+            hasPendingPermission: false,
+            todoProgress: nil,
+            contextUsageText: nil,
+            isArchived: false
+        )
+        let indicator = session.indicator
+        let todoProgress = session.todoProgress
+
         HStack(alignment: .top, spacing: 10) {
             SessionStatusIcon(color: indicator.color())
                 .padding(.top, 5)
@@ -329,7 +328,7 @@ private struct SessionRow: View {
         .padding(.horizontal, 8)
         .contentShape(Rectangle())
     }
-
+ 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .short

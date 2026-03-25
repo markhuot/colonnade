@@ -1,19 +1,13 @@
-import AppKit
 import Foundation
 import SwiftUI
-import Textual
+
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 private final class ThemeBundleMarker: NSObject {}
-
-private struct ThemeTokenPropertyGroup: TextProperty {
-    let properties: [AnyTextProperty]
-
-    func apply(in attributes: inout AttributeContainer, environment: TextEnvironmentValues) {
-        for property in properties {
-            property.apply(in: &attributes, environment: environment)
-        }
-    }
-}
 
 private struct TextMateThemeDocument: Decodable {
     let name: String
@@ -98,7 +92,6 @@ private struct TextMateTokenSettings: Decodable {
     static let empty = Self(foreground: nil, background: nil, fontStyle: nil)
 }
 
-
 final class TextMateThemeCatalog: @unchecked Sendable {
     static let shared = TextMateThemeCatalog()
 
@@ -137,7 +130,7 @@ final class TextMateThemeCatalog: @unchecked Sendable {
     }
 
     var themeIDs: [OpenCodeThemeID] {
-        self.orderedThemeIDs
+        orderedThemeIDs
     }
 
     func contains(_ id: OpenCodeThemeID) -> Bool {
@@ -158,7 +151,6 @@ final class TextMateThemeCatalog: @unchecked Sendable {
         return OpenCodeTheme(
             id: id,
             preferredColorScheme: palette.colorScheme,
-            highlighterTheme: makeHighlighterTheme(document: document, palette: palette),
             windowBackgroundColor: palette.windowBackground,
             surfaceBackgroundColor: palette.surfaceBackground,
             mutedSurfaceBackgroundColor: palette.mutedSurfaceBackground,
@@ -181,193 +173,6 @@ final class TextMateThemeCatalog: @unchecked Sendable {
             errorBackgroundColor: palette.errorBackground,
             positiveColor: palette.positive
         )
-    }
-
-    private static func makeHighlighterTheme(document: TextMateThemeDocument, palette: TextMateThemePalette) -> StructuredText.HighlighterTheme {
-        var tokenProperties: [StructuredText.HighlighterTheme.TokenType: AnyTextProperty] = [:]
-
-        for rule in document.tokenColors {
-            let tokenTypes = Set(rule.scopes.flatMap(tokenTypes(for:)))
-            guard !tokenTypes.isEmpty else { continue }
-
-            let property = tokenProperty(from: rule.settings)
-            for tokenType in tokenTypes {
-                tokenProperties[tokenType] = property
-            }
-        }
-
-        return StructuredText.HighlighterTheme(
-            foregroundColor: DynamicColor(Color(nsColor: palette.codeForeground)),
-            backgroundColor: DynamicColor(Color(nsColor: palette.codeBlockBackground)),
-            tokenProperties: tokenProperties
-        )
-    }
-
-    private static func tokenProperty(from settings: TextMateTokenSettings) -> AnyTextProperty {
-        var properties: [AnyTextProperty] = []
-
-        if let foreground = settings.foreground.flatMap(NSColor.init(cssHex:)) {
-            properties.append(AnyTextProperty(.foregroundColor(DynamicColor(Color(nsColor: foreground)))))
-        }
-
-        if let background = settings.background.flatMap(NSColor.init(cssHex:)) {
-            properties.append(AnyTextProperty(.backgroundColor(DynamicColor(Color(nsColor: background)))))
-        }
-
-        let fontStyles = Set(
-            (settings.fontStyle ?? "")
-                .split(whereSeparator: \.isWhitespace)
-                .map { $0.lowercased() }
-        )
-
-        if fontStyles.contains("italic") {
-            properties.append(AnyTextProperty(.italic))
-        }
-
-        if fontStyles.contains("bold") {
-            properties.append(AnyTextProperty(.bold))
-        }
-
-        if fontStyles.contains("underline") {
-            properties.append(AnyTextProperty(.underlineStyle(.single)))
-        }
-
-        if fontStyles.contains("strikethrough") {
-            properties.append(AnyTextProperty(.strikethroughStyle(.single)))
-        }
-
-        return AnyTextProperty(ThemeTokenPropertyGroup(properties: properties))
-    }
-
-    private static func tokenTypes(for scope: String) -> [StructuredText.HighlighterTheme.TokenType] {
-        let scope = scope.lowercased()
-        var tokens: Set<StructuredText.HighlighterTheme.TokenType> = []
-
-        if scope.contains("comment") {
-            tokens.insert(.comment)
-        }
-        if scope.contains("doc") && scope.contains("comment") {
-            tokens.insert(.docComment)
-        }
-        if scope.contains("block") && scope.contains("comment") {
-            tokens.insert(.blockComment)
-        }
-        if scope.contains("keyword") || scope.contains("storage") || scope.contains("control") {
-            tokens.insert(.keyword)
-        }
-        if scope.contains("builtin") || scope.contains("support.") {
-            tokens.insert(.builtin)
-        }
-        if scope.contains("entity.name.class") || scope.contains("entity.name.type") || scope.contains("support.class") || scope.contains("support.type") {
-            tokens.insert(.className)
-        }
-        if scope.contains("entity.name.function") || scope.contains("meta.function") || scope.contains("support.function") || scope.contains("variable.function") || scope.contains("method") {
-            tokens.insert(.function)
-        }
-        if scope.contains("function-definition") || (scope.contains("function") && scope.contains("definition")) {
-            tokens.insert(.functionDefinition)
-        }
-        if scope.contains("boolean") {
-            tokens.insert(.boolean)
-        }
-        if scope.contains("numeric") || scope.contains("number") {
-            tokens.insert(.number)
-        }
-        if scope.contains("regexp") || scope.contains("regex") {
-            tokens.insert(.regex)
-        }
-        if scope.contains("url") || scope.contains("link") {
-            tokens.insert(.url)
-        }
-        if scope.contains("string") {
-            tokens.insert(.string)
-        }
-        if scope.contains("character") || scope.contains("char") {
-            tokens.insert(.char)
-        }
-        if scope.contains("symbol") {
-            tokens.insert(.symbol)
-        }
-        if scope.contains("operator") {
-            tokens.insert(.operator)
-        }
-        if scope.contains("variable.other.constant") || scope.contains("variable.constant") || scope.contains("enum") || scope.contains("constant") {
-            tokens.insert(.constant)
-        }
-        if scope.contains("parameter") || scope.contains("variable") {
-            tokens.insert(.variable)
-        }
-        if scope.contains("property-name") || scope.contains("property") || scope.contains("field") || scope.contains("meta.object-literal.key") {
-            tokens.insert(.property)
-        }
-        if scope.contains("punctuation") {
-            tokens.insert(.punctuation)
-        }
-        if scope.contains("important") {
-            tokens.insert(.important)
-        }
-        if scope.contains("entity.name.tag") || scope.contains("meta.tag") {
-            tokens.insert(.tag)
-        }
-        if scope.contains("attribute-name") || scope.contains("attr-name") {
-            tokens.insert(.attributeName)
-        }
-        if scope.contains("attribute-value") || scope.contains("attr-value") {
-            tokens.insert(.attributeValue)
-        }
-        if scope.contains("namespace") {
-            tokens.insert(.namespace)
-        }
-        if scope.contains("prolog") {
-            tokens.insert(.prolog)
-        }
-        if scope.contains("doctype") {
-            tokens.insert(.doctype)
-        }
-        if scope.contains("cdata") {
-            tokens.insert(.cdata)
-        }
-        if scope.contains("entity") {
-            tokens.insert(.entity)
-        }
-        if scope.contains("atrule") {
-            tokens.insert(.atrule)
-        }
-        if scope.contains("selector") {
-            tokens.insert(.selector)
-        }
-        if scope.contains("markup.inserted") || scope.contains("diff.plus") || scope.contains("inserted") || scope.contains("added") {
-            tokens.insert(.inserted)
-        }
-        if scope.contains("markup.deleted") || scope.contains("diff.minus") || scope.contains("deleted") || scope.contains("removed") {
-            tokens.insert(.deleted)
-        }
-        if scope.contains("preprocessor") {
-            tokens.insert(.preprocessor)
-        }
-        if scope.contains("directive") {
-            tokens.insert(.directive)
-        }
-        if scope.contains("annotation") || scope.contains("attribute") {
-            tokens.insert(.attribute)
-        }
-        if scope.contains("label") {
-            tokens.insert(.label)
-        }
-        if scope.contains(" nil") || scope.hasSuffix(".nil") || scope.contains(".nil.") {
-            tokens.insert(.nil)
-        }
-        if scope.contains("interpolation-punctuation") {
-            tokens.insert(.interpolationPunctuation)
-        }
-        if scope.contains("interpolation") {
-            tokens.insert(.interpolation)
-        }
-        if tokens.isEmpty {
-            tokens.insert(.plain)
-        }
-
-        return Array(tokens)
     }
 
     private static func themeFileURLs(fileManager: FileManager) -> [URL] {
@@ -415,28 +220,28 @@ final class TextMateThemeCatalog: @unchecked Sendable {
 
 private struct TextMateThemePalette {
     let colorScheme: ColorScheme?
-    let windowBackground: NSColor
-    let surfaceBackground: NSColor
-    let mutedSurfaceBackground: NSColor
-    let inputBackground: NSColor
-    let primaryText: NSColor
-    let secondaryText: NSColor
-    let border: NSColor
-    let accent: NSColor
-    let accentSubtleBackground: NSColor
-    let assistantBubble: NSColor
-    let userBubble: NSColor
-    let codeForeground: NSColor
-    let codeBlockBackground: NSColor
-    let toolCardBackground: NSColor
-    let diffAddition: NSColor
-    let diffAdditionBackground: NSColor
-    let diffDeletion: NSColor
-    let diffDeletionBackground: NSColor
-    let warning: NSColor
-    let error: NSColor
-    let errorBackground: NSColor
-    let positive: NSColor
+    let windowBackground: PlatformColor
+    let surfaceBackground: PlatformColor
+    let mutedSurfaceBackground: PlatformColor
+    let inputBackground: PlatformColor
+    let primaryText: PlatformColor
+    let secondaryText: PlatformColor
+    let border: PlatformColor
+    let accent: PlatformColor
+    let accentSubtleBackground: PlatformColor
+    let assistantBubble: PlatformColor
+    let userBubble: PlatformColor
+    let codeForeground: PlatformColor
+    let codeBlockBackground: PlatformColor
+    let toolCardBackground: PlatformColor
+    let diffAddition: PlatformColor
+    let diffAdditionBackground: PlatformColor
+    let diffDeletion: PlatformColor
+    let diffDeletionBackground: PlatformColor
+    let warning: PlatformColor
+    let error: PlatformColor
+    let errorBackground: PlatformColor
+    let positive: PlatformColor
 
     init(document: TextMateThemeDocument) {
         let themeType = document.type?.lowercased()
@@ -449,12 +254,12 @@ private struct TextMateThemePalette {
         default: nil
         }
 
-        let defaultWindow = isDark ? NSColor(hex: 0x111111) : NSColor(hex: 0xFFFFFF)
-        let defaultForeground = isDark ? NSColor(hex: 0xE6E6E6) : NSColor(hex: 0x1F2328)
-        let defaultAccent = isDark ? NSColor(hex: 0x61AFEF) : NSColor(hex: 0x0B6BDE)
-        let defaultPositive = isDark ? NSColor(hex: 0x3FB950) : NSColor(hex: 0x1A7F37)
-        let defaultWarning = isDark ? NSColor(hex: 0xE3B341) : NSColor(hex: 0x9A6700)
-        let defaultError = isDark ? NSColor(hex: 0xF85149) : NSColor(hex: 0xCF222E)
+        let defaultWindow = PlatformColor(hex: isDark ? 0x111111 : 0xFFFFFF)
+        let defaultForeground = PlatformColor(hex: isDark ? 0xE6E6E6 : 0x1F2328)
+        let defaultAccent = PlatformColor(hex: isDark ? 0x61AFEF : 0x0B6BDE)
+        let defaultPositive = PlatformColor(hex: isDark ? 0x3FB950 : 0x1A7F37)
+        let defaultWarning = PlatformColor(hex: isDark ? 0xE3B341 : 0x9A6700)
+        let defaultError = PlatformColor(hex: isDark ? 0xF85149 : 0xCF222E)
 
         windowBackground = Self.color(in: colors, keys: ["editor.background", "sideBar.background", "activityBar.background"]) ?? defaultWindow
         surfaceBackground = Self.color(in: colors, keys: ["sideBar.background", "panel.background", "editorWidget.background"]) ?? windowBackground.shiftedSurface(isDark: isDark, amount: 0.06)
@@ -494,9 +299,9 @@ private struct TextMateThemePalette {
         errorBackground = diffDeletionBackground.withAlphaComponent(max(diffDeletionAlpha, 0.14))
     }
 
-    private static func color(in colors: [String: String], keys: [String]) -> NSColor? {
+    private static func color(in colors: [String: String], keys: [String]) -> PlatformColor? {
         for key in keys {
-            if let value = colors[key], let color = NSColor(cssHex: value) {
+            if let value = colors[key], let color = PlatformColor(cssHex: value) {
                 return color
             }
         }
@@ -504,9 +309,9 @@ private struct TextMateThemePalette {
         return nil
     }
 
-    private static func color(in colors: [String: String], keys: [String], meetingMinimumContrast minimumContrast: CGFloat, against background: NSColor) -> NSColor? {
+    private static func color(in colors: [String: String], keys: [String], meetingMinimumContrast minimumContrast: CGFloat, against background: PlatformColor) -> PlatformColor? {
         for key in keys {
-            guard let value = colors[key], let color = NSColor(cssHex: value) else { continue }
+            guard let value = colors[key], let color = PlatformColor(cssHex: value) else { continue }
             if color.contrastRatio(against: background) >= minimumContrast {
                 return color
             }
@@ -526,7 +331,17 @@ extension String {
     }
 }
 
-private extension NSColor {
+#if os(macOS)
+private extension PlatformColor {
+    convenience init(hex: UInt32, alpha: CGFloat = 1) {
+        self.init(
+            srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: alpha
+        )
+    }
+
     convenience init?(cssHex: String) {
         let trimmed = cssHex.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("#") else { return nil }
@@ -555,17 +370,106 @@ private extension NSColor {
         }
     }
 
-    func shiftedSurface(isDark: Bool, amount: CGFloat) -> NSColor {
-        let target = isDark ? NSColor.white : NSColor.black
-        return blended(withFraction: amount, of: target) ?? self
+    static func fromRGBA(red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) -> PlatformColor {
+        PlatformColor(srgbRed: red, green: green, blue: blue, alpha: alpha)
+    }
+
+    var rgbaComponents: (red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat)? {
+        guard let color = usingColorSpace(.sRGB) else { return nil }
+        return (color.redComponent, color.greenComponent, color.blueComponent, color.alphaComponent)
+    }
+}
+#else
+private extension PlatformColor {
+    convenience init(hex: UInt32, alpha: CGFloat = 1) {
+        self.init(
+            red: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: alpha
+        )
+    }
+
+    convenience init?(cssHex: String) {
+        let trimmed = cssHex.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("#") else { return nil }
+
+        let hex = String(trimmed.dropFirst())
+        var value: UInt64 = 0
+        guard Scanner(string: hex).scanHexInt64(&value) else { return nil }
+
+        switch hex.count {
+        case 6:
+            self.init(
+                red: CGFloat((value >> 16) & 0xFF) / 255,
+                green: CGFloat((value >> 8) & 0xFF) / 255,
+                blue: CGFloat(value & 0xFF) / 255,
+                alpha: 1
+            )
+        case 8:
+            self.init(
+                red: CGFloat((value >> 24) & 0xFF) / 255,
+                green: CGFloat((value >> 16) & 0xFF) / 255,
+                blue: CGFloat((value >> 8) & 0xFF) / 255,
+                alpha: CGFloat(value & 0xFF) / 255
+            )
+        default:
+            return nil
+        }
+    }
+
+    static func fromRGBA(red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) -> PlatformColor {
+        PlatformColor(red: red, green: green, blue: blue, alpha: alpha)
+    }
+
+    var rgbaComponents: (red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat)? {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+
+        if getRed(&red, green: &green, blue: &blue, alpha: &alpha) {
+            return (red, green, blue, alpha)
+        }
+
+        guard
+            let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+            let converted = cgColor.converted(to: colorSpace, intent: .defaultIntent, options: nil),
+            let components = converted.components
+        else {
+            return nil
+        }
+
+        switch components.count {
+        case 4:
+            return (components[0], components[1], components[2], components[3])
+        case 2:
+            return (components[0], components[0], components[0], components[1])
+        default:
+            return nil
+        }
+    }
+}
+#endif
+
+private extension PlatformColor {
+    func shiftedSurface(isDark: Bool, amount: CGFloat) -> PlatformColor {
+        guard let components = rgbaComponents else { return self }
+        let target: CGFloat = isDark ? 1 : 0
+
+        return PlatformColor.fromRGBA(
+            red: components.red + (target - components.red) * amount,
+            green: components.green + (target - components.green) * amount,
+            blue: components.blue + (target - components.blue) * amount,
+            alpha: components.alpha
+        )
     }
 
     var resolvedAlphaComponent: CGFloat {
-        guard let color = usingColorSpace(.sRGB) else { return 1 }
-        return color.alphaComponent
+        rgbaComponents?.alpha ?? 1
     }
 
-    func contrastRatio(against background: NSColor) -> CGFloat {
+    func contrastRatio(against background: PlatformColor) -> CGFloat {
         let foreground = composited(over: background)
         let foregroundLuminance = foreground.relativeLuminance
         let backgroundLuminance = background.relativeLuminance
@@ -574,27 +478,25 @@ private extension NSColor {
         return (lighter + 0.05) / (darker + 0.05)
     }
 
-    private func composited(over background: NSColor) -> NSColor {
-        guard
-            let foreground = usingColorSpace(.sRGB),
-            let background = background.usingColorSpace(.sRGB)
-        else {
+    private func composited(over background: PlatformColor) -> PlatformColor {
+        guard let foreground = rgbaComponents, let background = background.rgbaComponents else {
             return self
         }
 
-        let alpha = foreground.alphaComponent
-        if alpha >= 1 { return foreground }
+        if foreground.alpha >= 1 {
+            return self
+        }
 
-        return NSColor(
-            srgbRed: foreground.redComponent * alpha + background.redComponent * (1 - alpha),
-            green: foreground.greenComponent * alpha + background.greenComponent * (1 - alpha),
-            blue: foreground.blueComponent * alpha + background.blueComponent * (1 - alpha),
+        return PlatformColor.fromRGBA(
+            red: foreground.red * foreground.alpha + background.red * (1 - foreground.alpha),
+            green: foreground.green * foreground.alpha + background.green * (1 - foreground.alpha),
+            blue: foreground.blue * foreground.alpha + background.blue * (1 - foreground.alpha),
             alpha: 1
         )
     }
 
     private var relativeLuminance: CGFloat {
-        guard let color = usingColorSpace(.sRGB) else { return 0 }
+        guard let color = rgbaComponents else { return 0 }
 
         func channel(_ value: CGFloat) -> CGFloat {
             if value <= 0.03928 {
@@ -604,9 +506,9 @@ private extension NSColor {
             return pow((value + 0.055) / 1.055, 2.4)
         }
 
-        let red = channel(color.redComponent)
-        let green = channel(color.greenComponent)
-        let blue = channel(color.blueComponent)
+        let red = channel(color.red)
+        let green = channel(color.green)
+        let blue = channel(color.blue)
         return 0.2126 * red + 0.7152 * green + 0.0722 * blue
     }
 }

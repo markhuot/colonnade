@@ -13,30 +13,40 @@
 		067267E43F22C881A5083C03 /* min-dark.json in Resources */ = {isa = PBXBuildFile; fileRef = E3C05DB35B1E4A05B2966850 /* min-dark.json */; };
 		07B5B10507902451B8812E17 /* one-light.json in Resources */ = {isa = PBXBuildFile; fileRef = B06E90F012A613EE1ADB474F /* one-light.json */; };
 		07C8F833DADDD4572AA57938 /* night-owl-light.json in Resources */ = {isa = PBXBuildFile; fileRef = EF5846A30D7C0ED6B29B58DB /* night-owl-light.json */; };
+		09CB17BCCFE541726321D4AB /* OpenCodeAppModelFactory+iOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = C27D0278DE079A25DB149E4D /* OpenCodeAppModelFactory+iOS.swift */; };
 		09E3FCE37762A7C982D91AFA /* aurora-x.json in Resources */ = {isa = PBXBuildFile; fileRef = 239BD2A8A0CC15596128C64D /* aurora-x.json */; };
+		0BB4F124672224E68EAB51C8 /* NativeWorkspaceEventNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D9883E2D837A231D55E1F6D /* NativeWorkspaceEventNotifier.swift */; };
 		0DA0A766B555009F7127BC4C /* kanagawa-lotus.json in Resources */ = {isa = PBXBuildFile; fileRef = 5D4D11B8D2815ECF93711E50 /* kanagawa-lotus.json */; };
 		10745B8689927BF3CBE8BED4 /* PreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D83130E2937D6310F7C0B66 /* PreferencesView.swift */; };
+		138215FAC39E3BA74B776623 /* LocalServerLaunchHandle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB92D03586816A5EA76C1056 /* LocalServerLaunchHandle.swift */; };
 		16213623EEEF57444FF41C18 /* one-dark-pro.json in Resources */ = {isa = PBXBuildFile; fileRef = 6ED0D3AAD932F8119F7329AE /* one-dark-pro.json */; };
+		17671C5D4419FE69366A0E27 /* Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 198F1C786C1E59FEBE85CFA3 /* Persistence.swift */; };
+		17724EEDFE29E1B82082D86A /* IOSSessionBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E927828E6D5B9BAF7400CB5 /* IOSSessionBoardView.swift */; };
 		17FC30AF2252D7B6DA41C32D /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 562AF3A187EF417E7441A050 /* RootView.swift */; };
 		185B49C4CE5388F54ACA565E /* gruvbox-light-soft.json in Resources */ = {isa = PBXBuildFile; fileRef = 29559C53D4786591AD835A43 /* gruvbox-light-soft.json */; };
 		20526079A2AA4B2B4308B2A5 /* material-theme-lighter.json in Resources */ = {isa = PBXBuildFile; fileRef = AFDC9A570F1E1FDDFE2E3504 /* material-theme-lighter.json */; };
 		2D18941B3173A153D8B80D49 /* ChatBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99DDEA433EC2667A13E64465 /* ChatBoardView.swift */; };
 		2F76AB0F3AE5F8D90A997F47 /* andromeeda.json in Resources */ = {isa = PBXBuildFile; fileRef = 6CB06E4BB0D94F01C7C00C25 /* andromeeda.json */; };
+		337A6BEB6C16F07A4BA573BC /* IOSRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF4BCCB8B9759ACAC1E0F946 /* IOSRootView.swift */; };
 		339FE420BE3109B37DCC028A /* github-light-high-contrast.json in Resources */ = {isa = PBXBuildFile; fileRef = 468A96B167AA5EC609F43F8B /* github-light-high-contrast.json */; };
+		364D64BE0E5278A480FFB755 /* WorkspaceLiveStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CD055A8CF30370EB27BC136 /* WorkspaceLiveStore.swift */; };
 		38EF39F8B76553DE2FBF7D01 /* catppuccin-mocha.json in Resources */ = {isa = PBXBuildFile; fileRef = BE2C69FAB70779493044AD71 /* catppuccin-mocha.json */; };
+		3ABA4597D265974FD1131608 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FAC43FEF9E7A43B8E4A4C9DC /* Assets.xcassets */; };
 		3B65D549DDA7CB861FE7D143 /* WorkspaceSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9916DBB4131BBC03B70B8410 /* WorkspaceSyncCoordinator.swift */; };
 		3E8559ACC506357314E22BD9 /* PersistenceRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FDD51725396982353C62F06 /* PersistenceRepository.swift */; };
 		4560405C75119609A63EF13A /* vitesse-dark.json in Resources */ = {isa = PBXBuildFile; fileRef = 39B532C575D9A84EE08B9C08 /* vitesse-dark.json */; };
 		49BD6F7BEAB806FD90C5C3E5 /* red.json in Resources */ = {isa = PBXBuildFile; fileRef = 297D314CBFA947CBF7B98B62 /* red.json */; };
 		4EA98BD65730E3E605B13508 /* WorkspaceServerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99A358BCB5B643B47216E1CC /* WorkspaceServerController.swift */; };
+		51C34F8438AAD2D2069DFECF /* NativeWorkspaceEventNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D9883E2D837A231D55E1F6D /* NativeWorkspaceEventNotifier.swift */; };
 		51DA9792DE7BE99CDA2B8912 /* nord.json in Resources */ = {isa = PBXBuildFile; fileRef = 27B97AF51A07B0CCBE772FDA /* nord.json */; };
+		540C121B89B208C78370FD74 /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 948E6EB35491F76F49BF2C95 /* SharedModels.swift */; };
 		57A7E2BDD433D6E18AE4D239 /* LocalServerLaunchHandle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB92D03586816A5EA76C1056 /* LocalServerLaunchHandle.swift */; };
 		57C884FC6C1FFA5B017718AE /* everforest-light.json in Resources */ = {isa = PBXBuildFile; fileRef = F9C1C2526C4BE800C29A8748 /* everforest-light.json */; };
 		57F1B54ADE79B823689FC118 /* FocusedSessionTimelineKeyHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCA1F9B8C2DF46A5E5798462 /* FocusedSessionTimelineKeyHandler.swift */; };
 		59A9723F536A64E2BF752692 /* github-dark.json in Resources */ = {isa = PBXBuildFile; fileRef = 9202654BBC3150149FCBE6E5 /* github-dark.json */; };
 		5CEEB06CA5B719E961ACD6DE /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFD943C72B4EB9338475E9B7 /* AppPreferences.swift */; };
-		5D09AB14D01FCA111D536D4A /* PerformanceInstrumentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662582779335C66695B0F4C7 /* PerformanceInstrumentation.swift */; };
 		5D24FEE5B189A27CA4CE68D1 /* OpenCodeAppModelFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70B3F81C3353D0F2407AC3F /* OpenCodeAppModelFactory.swift */; };
+		5D78BFA829EBBE950E7FD2D6 /* WorkspaceSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9916DBB4131BBC03B70B8410 /* WorkspaceSyncCoordinator.swift */; };
 		5E9D0519FDD50DA52DEB8F7B /* plastic.json in Resources */ = {isa = PBXBuildFile; fileRef = 3D518BF612D30E065D56EA9D /* plastic.json */; };
 		5ED7AFB7F2CFFDD833F6B090 /* AppLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4772541C79BB08C674B9F3AB /* AppLifecycle.swift */; };
 		5F817C0C1AD10C0CD16A539B /* night-owl.json in Resources */ = {isa = PBXBuildFile; fileRef = 7DA3D34649C6F7ACBDE71CE1 /* night-owl.json */; };
@@ -44,13 +54,20 @@
 		61A337D3027153EE2E9F9E7B /* snazzy-light.json in Resources */ = {isa = PBXBuildFile; fileRef = 0EB8D083525F80EB15AC10FE /* snazzy-light.json */; };
 		61AA5E1DDAD2F793845D1B6F /* WorkspaceLiveStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CD055A8CF30370EB27BC136 /* WorkspaceLiveStore.swift */; };
 		638FF0EEF34DB42709AABC41 /* github-dark-high-contrast.json in Resources */ = {isa = PBXBuildFile; fileRef = 8C9BB12F02012CEECDD6415B /* github-dark-high-contrast.json */; };
+		6439F65887B850B434BE346F /* StringBackedTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9BC06B4419E9F0B86B33F7D /* StringBackedTypes.swift */; };
+		654407EF2F3879A33F57AABF /* OpenCodeAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14EC8AE42C80968027536CB3 /* OpenCodeAppState.swift */; };
 		6687419C56078DDC306BDE83 /* kanagawa-wave.json in Resources */ = {isa = PBXBuildFile; fileRef = FB3971C471171607289748ED /* kanagawa-wave.json */; };
+		66D071668B5F7426FD276F55 /* EventPayloadDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B5F441F6600EE62CD4A7904 /* EventPayloadDecoder.swift */; };
+		6737EE34E4E305A2336F4F2D /* PersistenceRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FDD51725396982353C62F06 /* PersistenceRepository.swift */; };
 		6981BD0B34AD11A72A68C865 /* gruvbox-dark-soft.json in Resources */ = {isa = PBXBuildFile; fileRef = 379F10DC5029744C6C8E0C85 /* gruvbox-dark-soft.json */; };
 		6C2EC1764E7061053965FE5D /* monokai.json in Resources */ = {isa = PBXBuildFile; fileRef = 11E55F0599FFC0EDC69DF67F /* monokai.json */; };
 		6D32AEC7DE830562045AB08E /* EventPayloadDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B5F441F6600EE62CD4A7904 /* EventPayloadDecoder.swift */; };
+		6EE6A2D36A89363BA30F7E91 /* OpenCodeAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 602074E16D05E0CDBE97410D /* OpenCodeAPIClient.swift */; };
 		744FFDEE3E050FAADE94D737 /* rose-pine-moon.json in Resources */ = {isa = PBXBuildFile; fileRef = 2846097A6507A1D4F6E3AF09 /* rose-pine-moon.json */; };
 		76D38F7A1A3E1306A49A5F0C /* vitesse-light.json in Resources */ = {isa = PBXBuildFile; fileRef = 007BC484E50E06F17A62E793 /* vitesse-light.json */; };
 		7AE7ECEAAA4155EC4185475A /* horizon.json in Resources */ = {isa = PBXBuildFile; fileRef = 86D53F3642426144041B7D76 /* horizon.json */; };
+		7CB517A9F22E08DA03003303 /* PerformanceInstrumentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FF8457353B92E0582F3C6AD /* PerformanceInstrumentation.swift */; };
+		7DEFFD6DAE0BFAEBD6E924D0 /* OpenCodeiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BC109E934B9D1497C764E61 /* OpenCodeiOSApp.swift */; };
 		81E0EDF7E87BC2BED278CF90 /* gruvbox-light-medium.json in Resources */ = {isa = PBXBuildFile; fileRef = C6D4FF52237DCBA185685BD4 /* gruvbox-light-medium.json */; };
 		821D90BD132054905D97E615 /* material-theme-palenight.json in Resources */ = {isa = PBXBuildFile; fileRef = 10857F1C52C842DB813DE6D5 /* material-theme-palenight.json */; };
 		82D5195E91E83B2628A783DB /* everforest-dark.json in Resources */ = {isa = PBXBuildFile; fileRef = CE28FA506BBB1C66F096CC3A /* everforest-dark.json */; };
@@ -62,49 +79,66 @@
 		8AE08AE7F03B9D743B4ECF0A /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 948E6EB35491F76F49BF2C95 /* SharedModels.swift */; };
 		8D3D463D3C062A11B3DE2EC0 /* material-theme.json in Resources */ = {isa = PBXBuildFile; fileRef = FD2A9584BC590B57E80EF78E /* material-theme.json */; };
 		8DEF4F721C360A00E8558D18 /* MacPlatformSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC073AFE7627557BF4B8BCD3 /* MacPlatformSupport.swift */; };
+		8F64EED4634E70D260C22E0C /* OpenCodeThemeSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE623F9300FC8A882417FE98 /* OpenCodeThemeSupport.swift */; };
 		8FD62F37FBAEA962FBA34044 /* OpenCodeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99772D8985ED8E66530DBAC8 /* OpenCodeApp.swift */; };
+		8FDA6B0D0AED7588FF9F28C1 /* WorkspaceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B75C6A96DD4E6297F6EC77EC /* WorkspaceService.swift */; };
 		90CF83D678D4FE9855426FF6 /* ayu-dark.json in Resources */ = {isa = PBXBuildFile; fileRef = 379B7B449FEA26CCF409F121 /* ayu-dark.json */; };
 		91426EDABE9C3CF4BBC9A779 /* rose-pine.json in Resources */ = {isa = PBXBuildFile; fileRef = FA47AB9154EAF95B4EAC9974 /* rose-pine.json */; };
+		91DF8D4484C5DD197246985B /* IOSWorkspaceRootContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8672FF7E632BD25181D8064 /* IOSWorkspaceRootContainer.swift */; };
+		948FBE34A50EF22D51602E51 /* SelectableMessageTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34AE90FF1AC8E73461BC2636 /* SelectableMessageTextView.swift */; };
 		96B354206F8014236D72D96A /* material-theme-darker.json in Resources */ = {isa = PBXBuildFile; fileRef = 47A0FF05EDC0ED54F5B27F60 /* material-theme-darker.json */; };
-		9C590A87C2B582BF1DAE3907 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = BBCA70D196FB8361B60A90A4 /* Textual */; };
+		9CE95CEE6467564850BF57FD /* SelectableMessageTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34AE90FF1AC8E73461BC2636 /* SelectableMessageTextView.swift */; };
 		A1FFBFE9D841B2788BF6AFC4 /* gruvbox-dark-medium.json in Resources */ = {isa = PBXBuildFile; fileRef = 094BAE750236FB468F182F79 /* gruvbox-dark-medium.json */; };
+		A2879BFC88CD6D696561EDBD /* PlatformSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27F7DDABEE6FBE36B8CEC9DB /* PlatformSupport.swift */; };
 		A43FDC93827FCF4508F0F8B1 /* slack-dark.json in Resources */ = {isa = PBXBuildFile; fileRef = 5B02DAE53D8DAA5D913AFE39 /* slack-dark.json */; };
 		A7E7F228E5A323320EC9EE03 /* PromptTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15451F12CC1193E39223DDD /* PromptTextView.swift */; };
 		A80DD376CC2A1D306D53BB8D /* houston.json in Resources */ = {isa = PBXBuildFile; fileRef = ED81FB8687873469E66F5443 /* houston.json */; };
 		A913D22E8AE88B73E299F42D /* TextMateThemeSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C5BEA44E4DA2BE5030F4662 /* TextMateThemeSupport.swift */; };
+		AA5F8FA1A20F1420EF3D2BA3 /* IOSPreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83B30A347BFEACE43032386F /* IOSPreferencesView.swift */; };
+		AA8BE6CBBF6044ECB80260AB /* PersistenceCoders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 409F8DF23EB26E76C9B024BB /* PersistenceCoders.swift */; };
 		AC8DDEDCDEDBF4CE0F942CDC /* solarized-light.json in Resources */ = {isa = PBXBuildFile; fileRef = AAB4911DD210A17FDB19E16C /* solarized-light.json */; };
 		AEBDD85C20187AF6CEFBED24 /* poimandres.json in Resources */ = {isa = PBXBuildFile; fileRef = 5BE6D0708EDF46393B3D567E /* poimandres.json */; };
+		AF8ABCC4B3483FB2E66852DF /* WorkspaceServerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99A358BCB5B643B47216E1CC /* WorkspaceServerController.swift */; };
+		B3760A0AC29C7D5DA2DAF34E /* MarkdownTextRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF2F67B04A4F21071CA30450 /* MarkdownTextRenderer.swift */; };
 		B433571DCF61ACDDE184D224 /* dark-plus.json in Resources */ = {isa = PBXBuildFile; fileRef = 8096897F2825AD973DCA0F42 /* dark-plus.json */; };
 		B4574ECD4B355EECF6EE4F55 /* ProjectSelectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60269834F2626A995F081968 /* ProjectSelectorView.swift */; };
 		B67F090449DFE82B7426E491 /* catppuccin-macchiato.json in Resources */ = {isa = PBXBuildFile; fileRef = B5E1BB60C8335141EAE7389C /* catppuccin-macchiato.json */; };
+		B73015FD9587170ED39A4C2B /* AppThemePreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3A41F374510C3BD0ADDA47C /* AppThemePreferences.swift */; };
+		B746768754BE3A3A8AA1CF5D /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFD943C72B4EB9338475E9B7 /* AppPreferences.swift */; };
 		B8A555AEB8D3443B0C00ECAB /* material-theme-ocean.json in Resources */ = {isa = PBXBuildFile; fileRef = F49B21850F2A8A3DC2485C09 /* material-theme-ocean.json */; };
 		B8CB8D66585A1797D11C7C42 /* SessionWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4AEA298CB2C2137AA867AF0 /* SessionWindowView.swift */; };
 		BAEEDE4325ED6418B1CCB858 /* dracula-soft.json in Resources */ = {isa = PBXBuildFile; fileRef = ED68EC21804BF6421F0AC533 /* dracula-soft.json */; };
 		BD0E1B238EC1B6C0594ADE56 /* ayu-mirage.json in Resources */ = {isa = PBXBuildFile; fileRef = 600779D87D987BF611C6C3A0 /* ayu-mirage.json */; };
 		BE00F0822EEE9B0080478D62 /* light-plus.json in Resources */ = {isa = PBXBuildFile; fileRef = 4C3C7C742CAB92E9F36CE9D1 /* light-plus.json */; };
+		BE4063BD28A12541EB254CD5 /* SessionStatusIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45252529EECA126D84F56366 /* SessionStatusIcon.swift */; };
 		BF185F2E07B0593BCFD623F6 /* horizon-bright.json in Resources */ = {isa = PBXBuildFile; fileRef = D41B23B7949593323077B07E /* horizon-bright.json */; };
 		C18CEEF0FF1DCB26E0FFA9D5 /* OpenCodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9261222A02062CA80AF4B2A4 /* OpenCodeTests.swift */; };
+		C1C1FA7022018F164ED30B52 /* PerformanceInstrumentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FF8457353B92E0582F3C6AD /* PerformanceInstrumentation.swift */; };
 		C1E3171A77A6AD3BCA84F2FF /* gruvbox-dark-hard.json in Resources */ = {isa = PBXBuildFile; fileRef = 724990C11933DCBCBC06477B /* gruvbox-dark-hard.json */; };
 		C435503A29E645951DA488D6 /* gruvbox-light-hard.json in Resources */ = {isa = PBXBuildFile; fileRef = C1895EC8959F6B6E0C091AC7 /* gruvbox-light-hard.json */; };
 		C8971DC0D7CEA0890D3E07D2 /* catppuccin-latte.json in Resources */ = {isa = PBXBuildFile; fileRef = F4F9E048C1D7DB315B1D0311 /* catppuccin-latte.json */; };
+		C94B728C7894DCF3C6B73AC1 /* IOSSessionColumnView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05D7A1941B5DD9DA07CEE67 /* IOSSessionColumnView.swift */; };
+		CD561C23A20054013A0FDAA6 /* MarkdownTextRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF2F67B04A4F21071CA30450 /* MarkdownTextRenderer.swift */; };
 		D08014049317D0911ED7242B /* catppuccin-frappe.json in Resources */ = {isa = PBXBuildFile; fileRef = A9F8EA1A7231DE8BFDEDE650 /* catppuccin-frappe.json */; };
 		D102999455A3B9822D229632 /* AppWindows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19CB848A41CE116C5C722A65 /* AppWindows.swift */; };
+		D13B6E2BC5DE3BDE16487043 /* IOSProjectSelectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D7D4938C7BCBD36B5D6A3CC /* IOSProjectSelectorView.swift */; };
 		D4BECB841CAAE60EB9EC7517 /* OpenCodeAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 602074E16D05E0CDBE97410D /* OpenCodeAPIClient.swift */; };
 		DC39602A7B80B4C281184402 /* synthwave-84.json in Resources */ = {isa = PBXBuildFile; fileRef = 768D41FEECF078BEA77D7860 /* synthwave-84.json */; };
 		DDBE3B745792B795CDD246C7 /* PlatformModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5EB9CE9B86015966328BCE5 /* PlatformModels.swift */; };
 		E248B295358F1B2372D37822 /* OpenCodeAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14EC8AE42C80968027536CB3 /* OpenCodeAppState.swift */; };
+		E48D3E2925BAA82B75234D4E /* SessionStatusIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45252529EECA126D84F56366 /* SessionStatusIcon.swift */; };
 		E500A2D8A84B0CCD2AC99AA6 /* kanagawa-dragon.json in Resources */ = {isa = PBXBuildFile; fileRef = 509E011CD946A6C6CF5C4EF7 /* kanagawa-dragon.json */; };
 		E74DC968160574670FEDFC13 /* solarized-dark.json in Resources */ = {isa = PBXBuildFile; fileRef = 0103559676CCE9B40CA11ED5 /* solarized-dark.json */; };
 		E7CB6573DF3E6A80A09AA22C /* StringBackedTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9BC06B4419E9F0B86B33F7D /* StringBackedTypes.swift */; };
 		E98F308CD2662C8ACB198EB2 /* github-light-default.json in Resources */ = {isa = PBXBuildFile; fileRef = 7CEF7ECA5CA3C49CD6BDE781 /* github-light-default.json */; };
-		EE4BEED265A0DC1095574057 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = 932C6E88EE9638A057246E1A /* Textual */; };
+		ECB93FF1C4FD13C7968AFA64 /* OpenCodeThemeSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE623F9300FC8A882417FE98 /* OpenCodeThemeSupport.swift */; };
 		EE7B9FD9EF806F39B35DC214 /* vesper.json in Resources */ = {isa = PBXBuildFile; fileRef = 7EE9B463269FC1F761696C0A /* vesper.json */; };
 		F0AEF2E7474062187242C3A2 /* dracula.json in Resources */ = {isa = PBXBuildFile; fileRef = 47EEFD7667EC9CA091725651 /* dracula.json */; };
 		F0C9F8D3AE62CA2175E7665B /* vitesse-black.json in Resources */ = {isa = PBXBuildFile; fileRef = 324F3A523CEBCF204FE18C42 /* vitesse-black.json */; };
 		F37DB888146835F34190003E /* github-dark-dimmed.json in Resources */ = {isa = PBXBuildFile; fileRef = 0441B767AE670CB5C2F04162 /* github-dark-dimmed.json */; };
+		F3BE0ADE4972ECFA5F74422B /* IOSSourcesListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DCA609F8A941CC69497B840 /* IOSSourcesListView.swift */; };
 		F540FA68CDE6E0521B925FB2 /* tokyo-night.json in Resources */ = {isa = PBXBuildFile; fileRef = 9EF3267B4C26894C1247E7F7 /* tokyo-night.json */; };
 		F8C4E5E811BF4988A7FCDD80 /* Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 198F1C786C1E59FEBE85CFA3 /* Persistence.swift */; };
-		F946373AD2B3F582C582AE5A /* SessionStatusIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA69A9728F6E4EC784812E19 /* SessionStatusIcon.swift */; };
 		F9CA562BFD4C146627A657CC /* rose-pine-dawn.json in Resources */ = {isa = PBXBuildFile; fileRef = 4B8065FD71CFB86EBE9953F9 /* rose-pine-dawn.json */; };
 		FAC47241F546D44A205CB022 /* ayu-light.json in Resources */ = {isa = PBXBuildFile; fileRef = A499A77BF1B8F241CCDEF598 /* ayu-light.json */; };
 		FC01E82C722B494E3B712BE8 /* min-light.json in Resources */ = {isa = PBXBuildFile; fileRef = 0023A7DA83EA73C57022A91D /* min-light.json */; };
@@ -137,22 +171,27 @@
 		19CB848A41CE116C5C722A65 /* AppWindows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppWindows.swift; sourceTree = "<group>"; };
 		239BD2A8A0CC15596128C64D /* aurora-x.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "aurora-x.json"; sourceTree = "<group>"; };
 		27B97AF51A07B0CCBE772FDA /* nord.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = nord.json; sourceTree = "<group>"; };
+		27F7DDABEE6FBE36B8CEC9DB /* PlatformSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformSupport.swift; sourceTree = "<group>"; };
 		2846097A6507A1D4F6E3AF09 /* rose-pine-moon.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "rose-pine-moon.json"; sourceTree = "<group>"; };
 		29559C53D4786591AD835A43 /* gruvbox-light-soft.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "gruvbox-light-soft.json"; sourceTree = "<group>"; };
 		297D314CBFA947CBF7B98B62 /* red.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = red.json; sourceTree = "<group>"; };
+		2DCA609F8A941CC69497B840 /* IOSSourcesListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSSourcesListView.swift; sourceTree = "<group>"; };
 		30E9440FB7E3B4FD1078434E /* slack-ochin.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "slack-ochin.json"; sourceTree = "<group>"; };
 		324F3A523CEBCF204FE18C42 /* vitesse-black.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "vitesse-black.json"; sourceTree = "<group>"; };
+		34AE90FF1AC8E73461BC2636 /* SelectableMessageTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectableMessageTextView.swift; sourceTree = "<group>"; };
 		379B7B449FEA26CCF409F121 /* ayu-dark.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "ayu-dark.json"; sourceTree = "<group>"; };
 		379F10DC5029744C6C8E0C85 /* gruvbox-dark-soft.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "gruvbox-dark-soft.json"; sourceTree = "<group>"; };
 		3894A8BEC5EFB694981DA999 /* LICENSE */ = {isa = PBXFileReference; path = LICENSE; sourceTree = "<group>"; };
 		39B532C575D9A84EE08B9C08 /* vitesse-dark.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "vitesse-dark.json"; sourceTree = "<group>"; };
 		3D518BF612D30E065D56EA9D /* plastic.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = plastic.json; sourceTree = "<group>"; };
 		409F8DF23EB26E76C9B024BB /* PersistenceCoders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceCoders.swift; sourceTree = "<group>"; };
+		45252529EECA126D84F56366 /* SessionStatusIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStatusIcon.swift; sourceTree = "<group>"; };
 		468A96B167AA5EC609F43F8B /* github-light-high-contrast.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "github-light-high-contrast.json"; sourceTree = "<group>"; };
 		4772541C79BB08C674B9F3AB /* AppLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLifecycle.swift; sourceTree = "<group>"; };
 		47A0FF05EDC0ED54F5B27F60 /* material-theme-darker.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "material-theme-darker.json"; sourceTree = "<group>"; };
 		47EEFD7667EC9CA091725651 /* dracula.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = dracula.json; sourceTree = "<group>"; };
 		4B8065FD71CFB86EBE9953F9 /* rose-pine-dawn.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "rose-pine-dawn.json"; sourceTree = "<group>"; };
+		4BC109E934B9D1497C764E61 /* OpenCodeiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeiOSApp.swift; sourceTree = "<group>"; };
 		4C3C7C742CAB92E9F36CE9D1 /* light-plus.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "light-plus.json"; sourceTree = "<group>"; };
 		4C5BEA44E4DA2BE5030F4662 /* TextMateThemeSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextMateThemeSupport.swift; sourceTree = "<group>"; };
 		4D83130E2937D6310F7C0B66 /* PreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesView.swift; sourceTree = "<group>"; };
@@ -162,10 +201,12 @@
 		5BE6D0708EDF46393B3D567E /* poimandres.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = poimandres.json; sourceTree = "<group>"; };
 		5CD055A8CF30370EB27BC136 /* WorkspaceLiveStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceLiveStore.swift; sourceTree = "<group>"; };
 		5D4D11B8D2815ECF93711E50 /* kanagawa-lotus.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "kanagawa-lotus.json"; sourceTree = "<group>"; };
+		5D9883E2D837A231D55E1F6D /* NativeWorkspaceEventNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWorkspaceEventNotifier.swift; sourceTree = "<group>"; };
+		5E927828E6D5B9BAF7400CB5 /* IOSSessionBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSSessionBoardView.swift; sourceTree = "<group>"; };
+		5FF8457353B92E0582F3C6AD /* PerformanceInstrumentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceInstrumentation.swift; sourceTree = "<group>"; };
 		600779D87D987BF611C6C3A0 /* ayu-mirage.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "ayu-mirage.json"; sourceTree = "<group>"; };
 		602074E16D05E0CDBE97410D /* OpenCodeAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeAPIClient.swift; sourceTree = "<group>"; };
 		60269834F2626A995F081968 /* ProjectSelectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSelectorView.swift; sourceTree = "<group>"; };
-		662582779335C66695B0F4C7 /* PerformanceInstrumentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceInstrumentation.swift; sourceTree = "<group>"; };
 		6CB06E4BB0D94F01C7C00C25 /* andromeeda.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = andromeeda.json; sourceTree = "<group>"; };
 		6ED0D3AAD932F8119F7329AE /* one-dark-pro.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "one-dark-pro.json"; sourceTree = "<group>"; };
 		6FDD51725396982353C62F06 /* PersistenceRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceRepository.swift; sourceTree = "<group>"; };
@@ -179,6 +220,7 @@
 		7DA3D34649C6F7ACBDE71CE1 /* night-owl.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "night-owl.json"; sourceTree = "<group>"; };
 		7EE9B463269FC1F761696C0A /* vesper.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = vesper.json; sourceTree = "<group>"; };
 		8096897F2825AD973DCA0F42 /* dark-plus.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "dark-plus.json"; sourceTree = "<group>"; };
+		83B30A347BFEACE43032386F /* IOSPreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPreferencesView.swift; sourceTree = "<group>"; };
 		86D53F3642426144041B7D76 /* horizon.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = horizon.json; sourceTree = "<group>"; };
 		8C9BB12F02012CEECDD6415B /* github-dark-high-contrast.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "github-dark-high-contrast.json"; sourceTree = "<group>"; };
 		9202654BBC3150149FCBE6E5 /* github-dark.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "github-dark.json"; sourceTree = "<group>"; };
@@ -189,6 +231,7 @@
 		99A358BCB5B643B47216E1CC /* WorkspaceServerController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceServerController.swift; sourceTree = "<group>"; };
 		99DDEA433EC2667A13E64465 /* ChatBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatBoardView.swift; sourceTree = "<group>"; };
 		9B5F441F6600EE62CD4A7904 /* EventPayloadDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventPayloadDecoder.swift; sourceTree = "<group>"; };
+		9D7D4938C7BCBD36B5D6A3CC /* IOSProjectSelectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSProjectSelectorView.swift; sourceTree = "<group>"; };
 		9EF3267B4C26894C1247E7F7 /* tokyo-night.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "tokyo-night.json"; sourceTree = "<group>"; };
 		A4474FD2DF9BFF669A79FC04 /* NOTICE */ = {isa = PBXFileReference; path = NOTICE; sourceTree = "<group>"; };
 		A499A77BF1B8F241CCDEF598 /* ayu-light.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "ayu-light.json"; sourceTree = "<group>"; };
@@ -201,52 +244,41 @@
 		B75C6A96DD4E6297F6EC77EC /* WorkspaceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceService.swift; sourceTree = "<group>"; };
 		BE2C69FAB70779493044AD71 /* catppuccin-mocha.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "catppuccin-mocha.json"; sourceTree = "<group>"; };
 		C1895EC8959F6B6E0C091AC7 /* gruvbox-light-hard.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "gruvbox-light-hard.json"; sourceTree = "<group>"; };
+		C27D0278DE079A25DB149E4D /* OpenCodeAppModelFactory+iOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OpenCodeAppModelFactory+iOS.swift"; sourceTree = "<group>"; };
 		C3168F4C42B447B833DC1169 /* laserwave.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = laserwave.json; sourceTree = "<group>"; };
 		C3A41F374510C3BD0ADDA47C /* AppThemePreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppThemePreferences.swift; sourceTree = "<group>"; };
 		C6D4FF52237DCBA185685BD4 /* gruvbox-light-medium.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "gruvbox-light-medium.json"; sourceTree = "<group>"; };
 		C70B3F81C3353D0F2407AC3F /* OpenCodeAppModelFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeAppModelFactory.swift; sourceTree = "<group>"; };
 		CCA1F9B8C2DF46A5E5798462 /* FocusedSessionTimelineKeyHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusedSessionTimelineKeyHandler.swift; sourceTree = "<group>"; };
 		CE28FA506BBB1C66F096CC3A /* everforest-dark.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "everforest-dark.json"; sourceTree = "<group>"; };
+		CE623F9300FC8A882417FE98 /* OpenCodeThemeSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeThemeSupport.swift; sourceTree = "<group>"; };
 		D15451F12CC1193E39223DDD /* PromptTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptTextView.swift; sourceTree = "<group>"; };
 		D41B23B7949593323077B07E /* horizon-bright.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "horizon-bright.json"; sourceTree = "<group>"; };
+		D89CACD9485849688B232B80 /* OpenCodeiOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = OpenCodeiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		DB92D03586816A5EA76C1056 /* LocalServerLaunchHandle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalServerLaunchHandle.swift; sourceTree = "<group>"; };
 		E18F32EE08F24614F358AAE7 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		E3C05DB35B1E4A05B2966850 /* min-dark.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "min-dark.json"; sourceTree = "<group>"; };
 		E4AEA298CB2C2137AA867AF0 /* SessionWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionWindowView.swift; sourceTree = "<group>"; };
 		E5EB9CE9B86015966328BCE5 /* PlatformModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformModels.swift; sourceTree = "<group>"; };
-		EA69A9728F6E4EC784812E19 /* SessionStatusIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStatusIcon.swift; sourceTree = "<group>"; };
 		EBBC143569B8A546CE059D16 /* github-dark-default.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "github-dark-default.json"; sourceTree = "<group>"; };
 		EC073AFE7627557BF4B8BCD3 /* MacPlatformSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacPlatformSupport.swift; sourceTree = "<group>"; };
 		ED68EC21804BF6421F0AC533 /* dracula-soft.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "dracula-soft.json"; sourceTree = "<group>"; };
 		ED81FB8687873469E66F5443 /* houston.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = houston.json; sourceTree = "<group>"; };
+		EE08B4485E3B7EFB64154617 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		EF2F67B04A4F21071CA30450 /* MarkdownTextRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTextRenderer.swift; sourceTree = "<group>"; };
+		EF4BCCB8B9759ACAC1E0F946 /* IOSRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSRootView.swift; sourceTree = "<group>"; };
 		EF5846A30D7C0ED6B29B58DB /* night-owl-light.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "night-owl-light.json"; sourceTree = "<group>"; };
 		EFD943C72B4EB9338475E9B7 /* AppPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferences.swift; sourceTree = "<group>"; };
+		F05D7A1941B5DD9DA07CEE67 /* IOSSessionColumnView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSSessionColumnView.swift; sourceTree = "<group>"; };
 		F49B21850F2A8A3DC2485C09 /* material-theme-ocean.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "material-theme-ocean.json"; sourceTree = "<group>"; };
 		F4F9E048C1D7DB315B1D0311 /* catppuccin-latte.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "catppuccin-latte.json"; sourceTree = "<group>"; };
+		F8672FF7E632BD25181D8064 /* IOSWorkspaceRootContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSWorkspaceRootContainer.swift; sourceTree = "<group>"; };
 		F9C1C2526C4BE800C29A8748 /* everforest-light.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "everforest-light.json"; sourceTree = "<group>"; };
 		FA47AB9154EAF95B4EAC9974 /* rose-pine.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "rose-pine.json"; sourceTree = "<group>"; };
+		FAC43FEF9E7A43B8E4A4C9DC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		FB3971C471171607289748ED /* kanagawa-wave.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "kanagawa-wave.json"; sourceTree = "<group>"; };
 		FD2A9584BC590B57E80EF78E /* material-theme.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "material-theme.json"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
-
-/* Begin PBXFrameworksBuildPhase section */
-		3332BAC49081104D8F2E75F2 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				EE4BEED265A0DC1095574057 /* Textual in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		DFE91CC203DF71598617E485 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				9C590A87C2B582BF1DAE3907 /* Textual in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		14096835CC18161427D72DBA /* OpenCodeTests */ = {
@@ -348,15 +380,36 @@
 			isa = PBXGroup;
 			children = (
 				77644C23F7F3E433E0101BEA /* OpenCode.app */,
+				D89CACD9485849688B232B80 /* OpenCodeiOS.app */,
 				702F9A395F94B6B6BD022783 /* OpenCodeTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		3B5B6A7A6F250A526DB87AE9 /* OpenCodeiOS */ = {
+			isa = PBXGroup;
+			children = (
+				FAC43FEF9E7A43B8E4A4C9DC /* Assets.xcassets */,
+				EE08B4485E3B7EFB64154617 /* Info.plist */,
+				83B30A347BFEACE43032386F /* IOSPreferencesView.swift */,
+				9D7D4938C7BCBD36B5D6A3CC /* IOSProjectSelectorView.swift */,
+				EF4BCCB8B9759ACAC1E0F946 /* IOSRootView.swift */,
+				5E927828E6D5B9BAF7400CB5 /* IOSSessionBoardView.swift */,
+				F05D7A1941B5DD9DA07CEE67 /* IOSSessionColumnView.swift */,
+				2DCA609F8A941CC69497B840 /* IOSSourcesListView.swift */,
+				F8672FF7E632BD25181D8064 /* IOSWorkspaceRootContainer.swift */,
+				C27D0278DE079A25DB149E4D /* OpenCodeAppModelFactory+iOS.swift */,
+				4BC109E934B9D1497C764E61 /* OpenCodeiOSApp.swift */,
+				27F7DDABEE6FBE36B8CEC9DB /* PlatformSupport.swift */,
+			);
+			path = OpenCodeiOS;
 			sourceTree = "<group>";
 		};
 		46DC7AC831CD9D97BF9B42E5 = {
 			isa = PBXGroup;
 			children = (
 				A281DB04AA6FC80E632C3AB6 /* OpenCodeFeature */,
+				3B5B6A7A6F250A526DB87AE9 /* OpenCodeiOS */,
 				28ABE0C6FEA5C236E652E999 /* OpenCodeKit */,
 				9EA9CEAC14CAEE78773E0A93 /* OpenCodeMac */,
 				AAE0D1D0C682E6A069B0326F /* OpenCodePersistence */,
@@ -374,7 +427,6 @@
 				E18F32EE08F24614F358AAE7 /* Info.plist */,
 				99772D8985ED8E66530DBAC8 /* OpenCodeApp.swift */,
 				C70B3F81C3353D0F2407AC3F /* OpenCodeAppModelFactory.swift */,
-				662582779335C66695B0F4C7 /* PerformanceInstrumentation.swift */,
 				E5EB9CE9B86015966328BCE5 /* PlatformModels.swift */,
 				4D83130E2937D6310F7C0B66 /* PreferencesView.swift */,
 				4C5BEA44E4DA2BE5030F4662 /* TextMateThemeSupport.swift */,
@@ -390,7 +442,13 @@
 				EFD943C72B4EB9338475E9B7 /* AppPreferences.swift */,
 				C3A41F374510C3BD0ADDA47C /* AppThemePreferences.swift */,
 				DB92D03586816A5EA76C1056 /* LocalServerLaunchHandle.swift */,
+				EF2F67B04A4F21071CA30450 /* MarkdownTextRenderer.swift */,
+				5D9883E2D837A231D55E1F6D /* NativeWorkspaceEventNotifier.swift */,
 				14EC8AE42C80968027536CB3 /* OpenCodeAppState.swift */,
+				CE623F9300FC8A882417FE98 /* OpenCodeThemeSupport.swift */,
+				5FF8457353B92E0582F3C6AD /* PerformanceInstrumentation.swift */,
+				34AE90FF1AC8E73461BC2636 /* SelectableMessageTextView.swift */,
+				45252529EECA126D84F56366 /* SessionStatusIcon.swift */,
 				5CD055A8CF30370EB27BC136 /* WorkspaceLiveStore.swift */,
 				99A358BCB5B643B47216E1CC /* WorkspaceServerController.swift */,
 				9916DBB4131BBC03B70B8410 /* WorkspaceSyncCoordinator.swift */,
@@ -418,7 +476,6 @@
 				D15451F12CC1193E39223DDD /* PromptTextView.swift */,
 				562AF3A187EF417E7441A050 /* RootView.swift */,
 				778068AAF9758A3F61A1475A /* SessionColumnView.swift */,
-				EA69A9728F6E4EC784812E19 /* SessionStatusIcon.swift */,
 				E4AEA298CB2C2137AA867AF0 /* SessionWindowView.swift */,
 			);
 			path = Views;
@@ -433,7 +490,6 @@
 			buildPhases = (
 				F96899CE76ED1FF720E98B63 /* Sources */,
 				66A429B93B9AA45BEE7B4F62 /* Resources */,
-				DFE91CC203DF71598617E485 /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -441,7 +497,6 @@
 			);
 			name = OpenCode;
 			packageProductDependencies = (
-				BBCA70D196FB8361B60A90A4 /* Textual */,
 			);
 			productName = OpenCode;
 			productReference = 77644C23F7F3E433E0101BEA /* OpenCode.app */;
@@ -452,7 +507,6 @@
 			buildConfigurationList = 0DF839ACFD20ED12FF5D2588 /* Build configuration list for PBXNativeTarget "OpenCodeTests" */;
 			buildPhases = (
 				313F030A3A7C67601F358A39 /* Sources */,
-				3332BAC49081104D8F2E75F2 /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -461,11 +515,28 @@
 			);
 			name = OpenCodeTests;
 			packageProductDependencies = (
-				932C6E88EE9638A057246E1A /* Textual */,
 			);
 			productName = OpenCodeTests;
 			productReference = 702F9A395F94B6B6BD022783 /* OpenCodeTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		5A96D1A56BC1788ED471220D /* OpenCodeiOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA4B2E25313B387B29BED2EF /* Build configuration list for PBXNativeTarget "OpenCodeiOS" */;
+			buildPhases = (
+				843502C83C94E9E822F47CDE /* Sources */,
+				7860C8B43ACC87EB87F59E3D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = OpenCodeiOS;
+			packageProductDependencies = (
+			);
+			productName = OpenCodeiOS;
+			productReference = D89CACD9485849688B232B80 /* OpenCodeiOS.app */;
+			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
@@ -477,7 +548,11 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					07A3A72637770A8A767E075C = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = 47P4ZSALX4;
+					};
+					5A96D1A56BC1788ED471220D = {
+						DevelopmentTeam = 47P4ZSALX4;
+						ProvisioningStyle = Automatic;
 					};
 				};
 			};
@@ -490,9 +565,6 @@
 			);
 			mainGroup = 46DC7AC831CD9D97BF9B42E5;
 			minimizedProjectReferenceProxies = 1;
-			packageReferences = (
-				3A5C381F922804A9DA4D9849 /* XCRemoteSwiftPackageReference "textual" */,
-			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 325B466093A21208ACA46E52 /* Products */;
 			projectDirPath = "";
@@ -500,6 +572,7 @@
 			targets = (
 				07A3A72637770A8A767E075C /* OpenCode */,
 				482B6ACEE1F367000CFDC13F /* OpenCodeTests */,
+				5A96D1A56BC1788ED471220D /* OpenCodeiOS */,
 			);
 		};
 /* End PBXProject section */
@@ -578,6 +651,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7860C8B43ACC87EB87F59E3D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3ABA4597D265974FD1131608 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -586,6 +667,44 @@
 			buildActionMask = 2147483647;
 			files = (
 				C18CEEF0FF1DCB26E0FFA9D5 /* OpenCodeTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		843502C83C94E9E822F47CDE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B746768754BE3A3A8AA1CF5D /* AppPreferences.swift in Sources */,
+				B73015FD9587170ED39A4C2B /* AppThemePreferences.swift in Sources */,
+				66D071668B5F7426FD276F55 /* EventPayloadDecoder.swift in Sources */,
+				AA5F8FA1A20F1420EF3D2BA3 /* IOSPreferencesView.swift in Sources */,
+				D13B6E2BC5DE3BDE16487043 /* IOSProjectSelectorView.swift in Sources */,
+				337A6BEB6C16F07A4BA573BC /* IOSRootView.swift in Sources */,
+				17724EEDFE29E1B82082D86A /* IOSSessionBoardView.swift in Sources */,
+				C94B728C7894DCF3C6B73AC1 /* IOSSessionColumnView.swift in Sources */,
+				F3BE0ADE4972ECFA5F74422B /* IOSSourcesListView.swift in Sources */,
+				91DF8D4484C5DD197246985B /* IOSWorkspaceRootContainer.swift in Sources */,
+				138215FAC39E3BA74B776623 /* LocalServerLaunchHandle.swift in Sources */,
+				CD561C23A20054013A0FDAA6 /* MarkdownTextRenderer.swift in Sources */,
+				0BB4F124672224E68EAB51C8 /* NativeWorkspaceEventNotifier.swift in Sources */,
+				6EE6A2D36A89363BA30F7E91 /* OpenCodeAPIClient.swift in Sources */,
+				09CB17BCCFE541726321D4AB /* OpenCodeAppModelFactory+iOS.swift in Sources */,
+				654407EF2F3879A33F57AABF /* OpenCodeAppState.swift in Sources */,
+				ECB93FF1C4FD13C7968AFA64 /* OpenCodeThemeSupport.swift in Sources */,
+				7DEFFD6DAE0BFAEBD6E924D0 /* OpenCodeiOSApp.swift in Sources */,
+				7CB517A9F22E08DA03003303 /* PerformanceInstrumentation.swift in Sources */,
+				17671C5D4419FE69366A0E27 /* Persistence.swift in Sources */,
+				AA8BE6CBBF6044ECB80260AB /* PersistenceCoders.swift in Sources */,
+				6737EE34E4E305A2336F4F2D /* PersistenceRepository.swift in Sources */,
+				A2879BFC88CD6D696561EDBD /* PlatformSupport.swift in Sources */,
+				9CE95CEE6467564850BF57FD /* SelectableMessageTextView.swift in Sources */,
+				E48D3E2925BAA82B75234D4E /* SessionStatusIcon.swift in Sources */,
+				540C121B89B208C78370FD74 /* SharedModels.swift in Sources */,
+				6439F65887B850B434BE346F /* StringBackedTypes.swift in Sources */,
+				364D64BE0E5278A480FFB755 /* WorkspaceLiveStore.swift in Sources */,
+				AF8ABCC4B3483FB2E66852DF /* WorkspaceServerController.swift in Sources */,
+				8FDA6B0D0AED7588FF9F28C1 /* WorkspaceService.swift in Sources */,
+				5D78BFA829EBBE950E7FD2D6 /* WorkspaceSyncCoordinator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -603,11 +722,14 @@
 				04B85B4F3C96ECDA6AEE9A22 /* KeyboardEventModels.swift in Sources */,
 				57A7E2BDD433D6E18AE4D239 /* LocalServerLaunchHandle.swift in Sources */,
 				8DEF4F721C360A00E8558D18 /* MacPlatformSupport.swift in Sources */,
+				B3760A0AC29C7D5DA2DAF34E /* MarkdownTextRenderer.swift in Sources */,
+				51C34F8438AAD2D2069DFECF /* NativeWorkspaceEventNotifier.swift in Sources */,
 				D4BECB841CAAE60EB9EC7517 /* OpenCodeAPIClient.swift in Sources */,
 				8FD62F37FBAEA962FBA34044 /* OpenCodeApp.swift in Sources */,
 				5D24FEE5B189A27CA4CE68D1 /* OpenCodeAppModelFactory.swift in Sources */,
 				E248B295358F1B2372D37822 /* OpenCodeAppState.swift in Sources */,
-				5D09AB14D01FCA111D536D4A /* PerformanceInstrumentation.swift in Sources */,
+				8F64EED4634E70D260C22E0C /* OpenCodeThemeSupport.swift in Sources */,
+				C1C1FA7022018F164ED30B52 /* PerformanceInstrumentation.swift in Sources */,
 				F8C4E5E811BF4988A7FCDD80 /* Persistence.swift in Sources */,
 				85C40CA1720FCB9368E7B2D3 /* PersistenceCoders.swift in Sources */,
 				3E8559ACC506357314E22BD9 /* PersistenceRepository.swift in Sources */,
@@ -616,8 +738,9 @@
 				B4574ECD4B355EECF6EE4F55 /* ProjectSelectorView.swift in Sources */,
 				A7E7F228E5A323320EC9EE03 /* PromptTextView.swift in Sources */,
 				17FC30AF2252D7B6DA41C32D /* RootView.swift in Sources */,
+				948FBE34A50EF22D51602E51 /* SelectableMessageTextView.swift in Sources */,
 				888C91D1FF013A270CDC5CA8 /* SessionColumnView.swift in Sources */,
-				F946373AD2B3F582C582AE5A /* SessionStatusIcon.swift in Sources */,
+				BE4063BD28A12541EB254CD5 /* SessionStatusIcon.swift in Sources */,
 				B8CB8D66585A1797D11C7C42 /* SessionWindowView.swift in Sources */,
 				8AE08AE7F03B9D743B4ECF0A /* SharedModels.swift in Sources */,
 				E7CB6573DF3E6A80A09AA22C /* StringBackedTypes.swift in Sources */,
@@ -696,7 +819,6 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.opencode.mac;
 				PRODUCT_NAME = Colonnade;
-				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 6.0;
@@ -709,7 +831,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 47P4ZSALX4;
 				ENABLE_HARDENED_RUNTIME = NO;
 				INFOPLIST_FILE = OpenCodeMac/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -745,7 +867,7 @@
 				CODE_SIGN_IDENTITY = "Developer ID Application";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 47P4ZSALX4;
 				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = OpenCodeMac/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -756,6 +878,28 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 			};
 			name = Release;
+		};
+		A7B4298BA1694C9D598AEDEF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 47P4ZSALX4;
+				INFOPLIST_FILE = OpenCodeiOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.opencode.ios;
+				PRODUCT_NAME = Colonnade;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
 		};
 		BE4C56C8805CD8176236AA32 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -837,12 +981,33 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.opencode.mac;
 				PRODUCT_NAME = Colonnade;
-				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
+		};
+		E537787C657A42BB60D8E52B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 47P4ZSALX4;
+				INFOPLIST_FILE = OpenCodeiOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.opencode.ios;
+				PRODUCT_NAME = Colonnade;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
@@ -874,31 +1039,16 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
+		AA4B2E25313B387B29BED2EF /* Build configuration list for PBXNativeTarget "OpenCodeiOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A7B4298BA1694C9D598AEDEF /* Debug */,
+				E537787C657A42BB60D8E52B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 /* End XCConfigurationList section */
-
-/* Begin XCRemoteSwiftPackageReference section */
-		3A5C381F922804A9DA4D9849 /* XCRemoteSwiftPackageReference "textual" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/gonzalezreal/textual";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.1.0;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		932C6E88EE9638A057246E1A /* Textual */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 3A5C381F922804A9DA4D9849 /* XCRemoteSwiftPackageReference "textual" */;
-			productName = Textual;
-		};
-		BBCA70D196FB8361B60A90A4 /* Textual */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 3A5C381F922804A9DA4D9849 /* XCRemoteSwiftPackageReference "textual" */;
-			productName = Textual;
-		};
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = EB09B41A3B9991B614A932F9 /* Project object */;
 }

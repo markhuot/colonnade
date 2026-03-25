@@ -81,3 +81,42 @@ enum ThinkingVisibilityPreferences {
         defaults.set(showsThinking, forKey: showsThinkingKey)
     }
 }
+
+enum RecentRemoteConnectionsPreferences {
+    static let recentRemoteConnectionsKey = "recentRemoteConnections"
+    private static let maximumConnectionCount = 5
+
+    static func load(from defaults: UserDefaults = .standard) -> [String] {
+        let storedValues = defaults.stringArray(forKey: recentRemoteConnectionsKey) ?? []
+        return normalize(storedValues)
+    }
+
+    @discardableResult
+    static func remember(_ urlText: String, defaults: UserDefaults = .standard) -> [String] {
+        let trimmedURLText = urlText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedURLText.isEmpty else {
+            return load(from: defaults)
+        }
+
+        let updatedConnections = normalize([trimmedURLText] + load(from: defaults))
+        defaults.set(updatedConnections, forKey: recentRemoteConnectionsKey)
+        return updatedConnections
+    }
+
+    private static func normalize(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var normalizedValues: [String] = []
+
+        for value in values {
+            let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedValue.isEmpty, seen.insert(trimmedValue).inserted else { continue }
+            normalizedValues.append(trimmedValue)
+
+            if normalizedValues.count == maximumConnectionCount {
+                break
+            }
+        }
+
+        return normalizedValues
+    }
+}

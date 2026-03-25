@@ -3,6 +3,24 @@ import SwiftUI
 struct ProjectSelectorView: View {
     @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
+    @State private var highlightedRemoteDirectorySuggestionIndex: Int? = 0
+    @State private var remoteDirectoryCursorLocation = 0
+    @State private var remoteDirectorySuggestionAnchor: CGRect = .zero
+
+    private var remoteDirectorySuggestions: [CommandOption] {
+        appState.remoteDirectorySuggestionOptions()
+    }
+
+    private var normalizedHighlightedRemoteDirectorySuggestionIndex: Int? {
+        guard !remoteDirectorySuggestions.isEmpty else { return nil }
+        let candidate = highlightedRemoteDirectorySuggestionIndex ?? 0
+        return min(max(candidate, 0), remoteDirectorySuggestions.count - 1)
+    }
+
+    private func applyRemoteDirectorySuggestion(_ option: CommandOption) {
+        appState.applyRemoteDirectorySuggestion(option)
+        highlightedRemoteDirectorySuggestionIndex = nil
+    }
 
     var body: some View {
         Group {
@@ -88,6 +106,10 @@ struct ProjectSelectorView: View {
                         appState.connectToRemoteServer()
                     }
 
+                if !appState.recentRemoteConnections.isEmpty {
+                    recentConnectionsSection
+                }
+
                 HStack(spacing: 12) {
                     Button("Connect") {
                         appState.connectToRemoteServer()
@@ -103,12 +125,36 @@ struct ProjectSelectorView: View {
             }
         case .remoteDirectoryEntry:
             VStack(alignment: .leading, spacing: 14) {
-                TextField("/Users/mark/projects/opencode", text: $appState.remoteDirectoryText)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 640)
-                    .onSubmit {
-                        appState.connectToRemoteDirectory()
+                PromptTextView(
+                    text: $appState.remoteDirectoryText,
+                    measuredHeight: .constant(PromptTextView.defaultHeight),
+                    highlightedSuggestionIndex: $highlightedRemoteDirectorySuggestionIndex,
+                    cursorLocation: $remoteDirectoryCursorLocation,
+                    suggestions: remoteDirectorySuggestions,
+                    suggestionAnchor: $remoteDirectorySuggestionAnchor,
+                    placeholder: "/Users/mark/projects/opencode",
+                    textColor: theme.primaryTextColor,
+                    insertionPointColor: theme.primaryTextColor,
+                    placeholderColor: theme.secondaryTextColor,
+                    focusRequestID: nil,
+                    minLineCount: 1,
+                    maxLineCount: 1,
+                    onSelectSuggestion: { option in
+                        applyRemoteDirectorySuggestion(option)
+                    },
+                    onFocus: {},
+                    onSubmit: {
+                        if let option = normalizedHighlightedRemoteDirectorySuggestionIndex.flatMap({ remoteDirectorySuggestions[$0] }) {
+                            applyRemoteDirectorySuggestion(option)
+                        } else {
+                            appState.connectToRemoteDirectory()
+                        }
                     }
+                )
+                .frame(height: 40)
+                .padding(4)
+                .background(theme.surfaceBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 HStack(spacing: 12) {
                     Button("Open Project") {
@@ -122,30 +168,41 @@ struct ProjectSelectorView: View {
                     .buttonStyle(.bordered)
                 }
 
-                if !appState.remoteProjectSuggestions.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Suggested Projects")
-                            .font(.headline)
-
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 8) {
-                                ForEach(appState.remoteProjectSuggestions, id: \.self) { project in
-                                    Button(project) {
-                                        appState.chooseRemoteProjectSuggestion(project)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(theme.mutedSurfaceBackground)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                }
-                            }
-                        }
-                        .frame(maxWidth: 700, maxHeight: 240)
+            }
+            .background {
+                SlashCommandSuggestionOverlayBridge(
+                    sessionID: "project-selector-remote-directory",
+                    anchor: remoteDirectorySuggestionAnchor,
+                    suggestions: remoteDirectorySuggestions,
+                    highlightedIndex: normalizedHighlightedRemoteDirectorySuggestionIndex,
+                    theme: theme,
+                    onSelect: { option in
+                        applyRemoteDirectorySuggestion(option)
                     }
+                )
+            }
+        }
+    }
+
+    private var recentConnectionsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Recent Connections")
+                .font(.headline)
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), alignment: .leading)], alignment: .leading, spacing: 8) {
+                ForEach(appState.recentRemoteConnections, id: \.self) { connection in
+                    Button(connection) {
+                        appState.connectToRecentRemoteServer(connection)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(theme.mutedSurfaceBackground)
+                    .clipShape(Capsule())
                 }
             }
+            .frame(maxWidth: 700, alignment: .leading)
         }
     }
 

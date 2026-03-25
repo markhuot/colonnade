@@ -67,12 +67,19 @@ final class PersistenceController: @unchecked Sendable {
         let supportDirectory: URL
 
         do {
-            supportDirectory = try fileManager.url(
-                for: .applicationSupportDirectory,
-                in: .userDomainMask,
-                appropriateFor: nil,
-                create: true
-            ).appendingPathComponent(PersistenceModel.name, isDirectory: true)
+            #if os(iOS) && targetEnvironment(simulator)
+                supportDirectory = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+                    .appendingPathComponent("Library", isDirectory: true)
+                    .appendingPathComponent("Application Support", isDirectory: true)
+                    .appendingPathComponent(PersistenceModel.name, isDirectory: true)
+            #else
+                supportDirectory = try fileManager.url(
+                    for: .applicationSupportDirectory,
+                    in: .userDomainMask,
+                    appropriateFor: nil,
+                    create: true
+                ).appendingPathComponent(PersistenceModel.name, isDirectory: true)
+            #endif
 
             try fileManager.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
         } catch {

@@ -606,6 +606,7 @@ final class MessagePartToolPresentationTests: XCTestCase {
             title: "Subagent",
             createdAtMS: 1_050,
             updatedAtMS: 1_400,
+            hydratedMessageUpdatedAtMS: nil,
             parentID: "parent-1",
             status: nil,
             hasPendingPermission: false,
@@ -618,6 +619,7 @@ final class MessagePartToolPresentationTests: XCTestCase {
             title: "Sibling",
             createdAtMS: 1_060,
             updatedAtMS: 1_500,
+            hydratedMessageUpdatedAtMS: nil,
             parentID: "parent-1",
             status: nil,
             hasPendingPermission: false,
@@ -642,6 +644,7 @@ final class MessagePartToolPresentationTests: XCTestCase {
             title: "Early",
             createdAtMS: 1_010,
             updatedAtMS: 1_200,
+            hydratedMessageUpdatedAtMS: nil,
             parentID: "parent-1",
             status: nil,
             hasPendingPermission: false,
@@ -654,6 +657,7 @@ final class MessagePartToolPresentationTests: XCTestCase {
             title: "Closest",
             createdAtMS: 1_090,
             updatedAtMS: 1_300,
+            hydratedMessageUpdatedAtMS: nil,
             parentID: "parent-1",
             status: nil,
             hasPendingPermission: false,
@@ -693,6 +697,7 @@ final class MessagePartToolPresentationTests: XCTestCase {
             title: "First child",
             createdAtMS: 1_005,
             updatedAtMS: 1_100,
+            hydratedMessageUpdatedAtMS: nil,
             parentID: "parent-1",
             status: nil,
             hasPendingPermission: false,
@@ -705,6 +710,7 @@ final class MessagePartToolPresentationTests: XCTestCase {
             title: "Second child",
             createdAtMS: 1_015,
             updatedAtMS: 1_200,
+            hydratedMessageUpdatedAtMS: nil,
             parentID: "parent-1",
             status: nil,
             hasPendingPermission: false,
@@ -744,6 +750,7 @@ final class MessagePartToolPresentationTests: XCTestCase {
             title: "First child",
             createdAtMS: 1_005,
             updatedAtMS: 1_100,
+            hydratedMessageUpdatedAtMS: nil,
             parentID: "parent-1",
             status: nil,
             hasPendingPermission: false,
@@ -756,6 +763,7 @@ final class MessagePartToolPresentationTests: XCTestCase {
             title: "Second child",
             createdAtMS: 1_015,
             updatedAtMS: 1_200,
+            hydratedMessageUpdatedAtMS: nil,
             parentID: "parent-1",
             status: nil,
             hasPendingPermission: false,
@@ -1556,6 +1564,67 @@ final class OpenCodeAppModelTests: XCTestCase {
         XCTAssertEqual(client.projectsCallCount, 1)
     }
 
+    func testConnectToRemoteServerStoresRecentConnections() async throws {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let client = MockOpenCodeAPIClient(health: .init(healthy: true, version: "1.0.0"), projects: [])
+
+        let appState = OpenCodeAppModel(
+            repository: PersistenceRepository(persistence: PersistenceController(inMemory: true)),
+            persistsWorkspacePaneState: false,
+            apiClientProviderOverride: { _ in client },
+            recentRemoteConnectionsDefaults: defaults
+        )
+        appState.remoteServerURLText = "example.com"
+
+        appState.connectToRemoteServer()
+        try await waitForAsyncWork()
+
+        XCTAssertEqual(appState.recentRemoteConnections, ["https://example.com"])
+        XCTAssertEqual(RecentRemoteConnectionsPreferences.load(from: defaults), ["https://example.com"])
+    }
+
+    func testRecentRemoteConnectionsKeepMostRecentFiveUniqueValues() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+
+        let entries = [
+            "https://one.example.com",
+            "https://two.example.com",
+            "https://three.example.com",
+            "https://four.example.com",
+            "https://five.example.com",
+            "https://six.example.com",
+            "https://three.example.com"
+        ]
+
+        for entry in entries {
+            RecentRemoteConnectionsPreferences.remember(entry, defaults: defaults)
+        }
+
+        XCTAssertEqual(
+            RecentRemoteConnectionsPreferences.load(from: defaults),
+            [
+                "https://three.example.com",
+                "https://six.example.com",
+                "https://five.example.com",
+                "https://four.example.com",
+                "https://two.example.com"
+            ]
+        )
+    }
+
+    func testRemoteDirectorySuggestionOptionsReturnBestMatches() {
+        let appState = OpenCodeAppModel(
+            repository: PersistenceRepository(persistence: PersistenceController(inMemory: true)),
+            persistsWorkspacePaneState: false
+        )
+        appState.remoteDirectoryText = "/tmp/b"
+        appState.remoteProjectSuggestions = ["/tmp/alpha", "/tmp/beta", "/var/project"]
+
+        XCTAssertEqual(appState.remoteDirectorySuggestionOptions().map(\.name), ["/tmp/beta"])
+    }
+
     func testOpenLocalDirectoryStartsServerAndUsesInjectedChooser() async throws {
         let client = MockOpenCodeAPIClient(health: .init(healthy: false, version: "1.0.0"))
         let probe = LocalServerProbe()
@@ -1943,7 +2012,7 @@ final class OpenCodeAppModelTests: XCTestCase {
 
         XCTAssertEqual(
             notifier.eventsSnapshot(),
-            [.sessionStopped(sessionID: session.id, sessionTitle: session.title)]
+            [.sessionStopped(connection: connection, sessionID: session.id, sessionTitle: session.title)]
         )
     }
 
@@ -1965,10 +2034,56 @@ final class OpenCodeAppModelTests: XCTestCase {
         XCTAssertEqual(
             notifier.eventsSnapshot(),
             [
-                .permissionRequested(sessionID: session.id, sessionTitle: session.title, permission: permission.permission),
-                .questionAsked(sessionID: session.id, sessionTitle: session.title, question: question.questions[0].question)
+                .permissionRequested(connection: connection, sessionID: session.id, sessionTitle: session.title, permission: permission.permission),
+                .questionAsked(connection: connection, sessionID: session.id, sessionTitle: session.title, question: question.questions[0].question)
             ]
         )
+    }
+
+    func testNotificationTargetHandlerLoadsWorkspaceAndFocusesPane() async throws {
+        let directory = try makeTemporaryDirectory()
+        let connection = WorkspaceConnection(serverURL: URL(string: "https://example.com")!, directory: directory)
+        let session = makeSession(id: "session-1", directory: directory)
+        let repository = PersistenceRepository(persistence: PersistenceController(inMemory: true))
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
+        )
+        workspaceService.modelCatalogResult = makeModelCatalog()
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false,
+            restoresLastSelectedDirectory: false,
+            supportsLocalServer: false
+        )
+
+        NativeWorkspaceEventNotifier.shared.setNotificationTargetHandler { target in
+            if appState.workspaceConnection != target.connection {
+                await appState.updatePreferencesConnection(target.connection)
+            }
+
+            appState.openSession(target.sessionID)
+            appState.requestSessionCenter(for: target.sessionID)
+        }
+        defer {
+            Task { @MainActor in
+                NativeWorkspaceEventNotifier.shared.setNotificationTargetHandler(nil)
+            }
+        }
+
+        await NativeWorkspaceEventNotifier.shared.handleNotificationTarget(
+            .init(connection: connection, sessionID: session.id)
+        )
+
+        XCTAssertEqual(appState.serverURL, connection.serverURL)
+        XCTAssertEqual(appState.selectedDirectory, directory)
+        XCTAssertEqual(appState.focusedSessionID, session.id)
+        XCTAssertEqual(appState.openSessionIDs, [session.id])
+        XCTAssertEqual(appState.sessionCenterRequest?.sessionID, session.id)
     }
 
     func testLoadPrefersRecentModelAndNormalizesThinkingLevelSelection() async throws {
@@ -2819,6 +2934,138 @@ final class WorkspaceSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(messageSnapshots[0].map(\.id), ["message-1"])
         XCTAssertEqual(messageSnapshots[1].first?.parts.count, 1)
         XCTAssertEqual(messageSnapshots[2].first?.visibleText, "Hello")
+    }
+
+    @MainActor
+    func testStreamingPartDeltaDoesNotRepublishVisibleSessionIDsWhenOrderIsUnchanged() {
+        let connection = WorkspaceConnection(serverURL: OpenCodeAppModel.defaultServerURL, directory: "/tmp/project")
+        let store = WorkspaceLiveStore(connection: connection)
+        let newerSession = makeSession(id: "session-1", directory: connection.directory, updatedAt: 3_000)
+        let olderSession = makeSession(id: "session-2", directory: connection.directory, updatedAt: 2_000)
+        let messageInfo = MessageInfo(
+            id: "message-1",
+            sessionID: newerSession.id,
+            role: .assistant,
+            time: .init(created: 3_000, completed: nil),
+            parentID: nil,
+            agent: nil,
+            model: nil,
+            modelID: nil,
+            providerID: nil,
+            mode: nil,
+            path: nil,
+            cost: nil,
+            tokens: nil,
+            finish: nil,
+            summary: nil,
+            error: nil
+        )
+        let part = makeMessagePart(id: "part-1", sessionID: newerSession.id, messageID: messageInfo.id)
+
+        store.applyWorkspaceSnapshot(
+            WorkspaceSnapshot(sessions: [newerSession, olderSession], statuses: [:], questions: [], permissions: [])
+        )
+        store.upsertMessageInfo(messageInfo)
+        _ = store.applyMessagePart(part)
+
+        var orderedVisibleSnapshots: [[String]] = []
+        var cancellables = Set<AnyCancellable>()
+
+        store.$orderedVisibleSessionIDs
+            .dropFirst()
+            .sink { orderedVisibleSnapshots.append($0) }
+            .store(in: &cancellables)
+
+        XCTAssertTrue(store.applyMessagePartDelta(sessionID: newerSession.id, partID: part.id, field: .text, delta: "Hello"))
+
+        XCTAssertEqual(store.orderedVisibleSessionIDs, [newerSession.id, olderSession.id])
+        XCTAssertTrue(orderedVisibleSnapshots.isEmpty)
+        XCTAssertEqual(store.sessionState(for: newerSession.id).messages.first?.visibleText, "Hello")
+    }
+
+    @MainActor
+    func testUpsertingNewerMessageReordersVisibleSessions() {
+        let connection = WorkspaceConnection(serverURL: OpenCodeAppModel.defaultServerURL, directory: "/tmp/project")
+        let store = WorkspaceLiveStore(connection: connection)
+        let leadingSession = makeSession(id: "session-1", directory: connection.directory, updatedAt: 3_000)
+        let trailingSession = makeSession(id: "session-2", directory: connection.directory, updatedAt: 2_000)
+        let newerMessage = MessageInfo(
+            id: "message-2",
+            sessionID: trailingSession.id,
+            role: .assistant,
+            time: .init(created: 4_000, completed: nil),
+            parentID: nil,
+            agent: nil,
+            model: nil,
+            modelID: nil,
+            providerID: nil,
+            mode: nil,
+            path: nil,
+            cost: nil,
+            tokens: nil,
+            finish: nil,
+            summary: nil,
+            error: nil
+        )
+
+        store.applyWorkspaceSnapshot(
+            WorkspaceSnapshot(sessions: [leadingSession, trailingSession], statuses: [:], questions: [], permissions: [])
+        )
+
+        var orderedVisibleSnapshots: [[String]] = []
+        var sessionSnapshots: [SessionDisplay?] = []
+        var cancellables = Set<AnyCancellable>()
+        let trailingSessionState = store.sessionState(for: trailingSession.id)
+
+        store.$orderedVisibleSessionIDs
+            .dropFirst()
+            .sink { orderedVisibleSnapshots.append($0) }
+            .store(in: &cancellables)
+
+        trailingSessionState.$session
+            .dropFirst()
+            .sink { sessionSnapshots.append($0) }
+            .store(in: &cancellables)
+
+        store.upsertMessageInfo(newerMessage)
+
+        XCTAssertEqual(store.orderedVisibleSessionIDs, [trailingSession.id, leadingSession.id])
+        XCTAssertEqual(orderedVisibleSnapshots, [[trailingSession.id, leadingSession.id]])
+        XCTAssertEqual(sessionSnapshots.last??.updatedAtMS, 4_000)
+    }
+
+    @MainActor
+    func testReplacingInteractionsUpdatesSessionRowWithoutRepublishingVisibleSessionIDs() {
+        let connection = WorkspaceConnection(serverURL: OpenCodeAppModel.defaultServerURL, directory: "/tmp/project")
+        let store = WorkspaceLiveStore(connection: connection)
+        let session = makeSession(id: "session-1", directory: connection.directory, updatedAt: 2_000)
+        let permission = makePermission(id: "permission-1", sessionID: session.id)
+
+        store.applyWorkspaceSnapshot(
+            WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
+        )
+
+        var orderedVisibleSnapshots: [[String]] = []
+        var sessionSnapshots: [SessionDisplay?] = []
+        var cancellables = Set<AnyCancellable>()
+        let sessionState = store.sessionState(for: session.id)
+
+        store.$orderedVisibleSessionIDs
+            .dropFirst()
+            .sink { orderedVisibleSnapshots.append($0) }
+            .store(in: &cancellables)
+
+        sessionState.$session
+            .dropFirst()
+            .sink { sessionSnapshots.append($0) }
+            .store(in: &cancellables)
+
+        store.replaceInteractions(sessionID: session.id, questions: [], permissions: [permission])
+
+        XCTAssertTrue(orderedVisibleSnapshots.isEmpty)
+        XCTAssertEqual(sessionSnapshots.count, 1)
+        XCTAssertEqual(sessionSnapshots.last??.hasPendingPermission, true)
+        XCTAssertEqual(store.sessionDisplay(for: session.id)?.indicator.tint, .permission)
     }
 
     func testAssistantMessageDefersMarkdownUntilMessageCompletion() {

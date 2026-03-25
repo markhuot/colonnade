@@ -47,13 +47,7 @@ struct WorkspaceRootContainer: View {
                     thresholdMS: 1
                 )
             }
-            .onAppear {
-                PerformanceInstrumentation.log(
-                    "workspace-root-appear restoredDirectory=\(restoredDirectory.isEmpty ? "nil" : restoredDirectory)"
-                )
-            }
             .onChange(of: appState.isLoading) { oldValue, newValue in
-                PerformanceInstrumentation.log("workspace-root-is-loading old=\(oldValue) new=\(newValue)")
                 guard oldValue, !newValue, let bootstrapStart else { return }
                 PerformanceInstrumentation.end(
                     "workspace-first-visible-content",

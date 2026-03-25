@@ -1,78 +1,8 @@
 import AppKit
 import OSLog
 import SwiftUI
-import Textual
-
-private struct MarkdownContentView: View {
-    @Environment(\.openCodeTheme) private var theme
-
-    let text: String
-    let messageRole: MessageRole
-    var rendersMarkdown: Bool = true
-    var baseFont: Font? = nil
-    var foregroundStyle: AnyShapeStyle? = nil
-
-    private var contentAlignment: Alignment {
-        messageRole.isAssistant ? .leading : .trailing
-    }
-
-    var body: some View {
-        Group {
-            if rendersMarkdown {
-                StructuredText(markdown: text)
-                    .textual.structuredTextStyle(.gitHub)
-                    .textual.highlighterTheme(theme.highlighterTheme)
-                    .textual.codeBlockStyle(
-                        OpenCodeCodeBlockStyle(
-                            foregroundStyle: foregroundStyle,
-                            backgroundColor: messageRole.isAssistant ? theme.codeBlockBackground : theme.userBubble,
-                            alignment: contentAlignment
-                        )
-                    )
-            } else {
-                Text(verbatim: text)
-            }
-        }
-        .font(baseFont)
-        .applyForegroundStyle(foregroundStyle)
-        .textSelection(.enabled)
-        .frame(maxWidth: .infinity, alignment: contentAlignment)
-    }
-}
-
-private struct OpenCodeCodeBlockStyle: StructuredText.CodeBlockStyle {
-    var foregroundStyle: AnyShapeStyle?
-    var backgroundColor: Color
-    var alignment: Alignment
-
-    func makeBody(configuration: Configuration) -> some View {
-        ScrollView(.horizontal) {
-            configuration.label
-                .font(.system(.body, design: .monospaced))
-                .applyForegroundStyle(foregroundStyle)
-                .textSelection(.enabled)
-                .textual.padding(.horizontal, .fontScaled(0.75))
-                .textual.padding(.vertical, .fontScaled(0.6))
-                .frame(maxWidth: .infinity, alignment: alignment)
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(backgroundColor)
-        )
-        .textual.blockSpacing(.fontScaled(top: 0.4, bottom: 0.8))
-    }
-}
 
 private extension View {
-    @ViewBuilder
-    func applyForegroundStyle(_ style: AnyShapeStyle?) -> some View {
-        if let style {
-            foregroundStyle(style)
-        } else {
-            self
-        }
-    }
-
     @ViewBuilder
     func clipPaneContent(if condition: Bool, cornerRadius: CGFloat) -> some View {
         if condition {
@@ -137,7 +67,8 @@ struct SessionColumnView: View {
                 sessionID: sessionID,
                 messages: messages,
                 questions: questions,
-                thinkingBannerTitle: thinkingBannerTitle
+                thinkingBannerTitle: thinkingBannerTitle,
+                availableSessions: appState.sessions
             )
             Divider()
             SessionComposerView(sessionID: sessionID, permissions: permissions, sessionState: sessionState)
@@ -152,26 +83,6 @@ struct SessionColumnView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             appState.focusSession(sessionID)
-        }
-        .onAppear {
-            PerformanceInstrumentation.log(
-                "session-column-appear sessionID=\(sessionID) messages=\(messages.count) questions=\(questions.count) permissions=\(permissions.count)"
-            )
-        }
-        .onChange(of: sessionState.messages.count) { oldValue, newValue in
-            PerformanceInstrumentation.log(
-                "session-column-message-count sessionID=\(sessionID) old=\(oldValue) new=\(newValue)"
-            )
-        }
-        .onChange(of: sessionState.questions.count) { oldValue, newValue in
-            PerformanceInstrumentation.log(
-                "session-column-question-count sessionID=\(sessionID) old=\(oldValue) new=\(newValue)"
-            )
-        }
-        .onChange(of: sessionState.permissions.count) { oldValue, newValue in
-            PerformanceInstrumentation.log(
-                "session-column-permission-count sessionID=\(sessionID) old=\(oldValue) new=\(newValue)"
-            )
         }
     }
 
@@ -338,12 +249,17 @@ private struct SessionHeaderDragModifier: ViewModifier {
 }
 
 private struct SessionTimelineView: View {
+    struct MessageRenderContext: Equatable {
+        let subagentSessionsByPartID: [String: SessionDisplay]
+    }
+
     @Environment(\.openCodeTheme) private var theme
 
     let sessionID: String
     let messages: [MessageEnvelope]
     let questions: [QuestionRequest]
     let thinkingBannerTitle: String?
+    let availableSessions: [SessionDisplay]
 
     private var latestTodoToolPartID: String? {
         messages
@@ -354,6 +270,18 @@ private struct SessionTimelineView: View {
             .first
     }
 
+    private var messageRenderContexts: [String: MessageRenderContext] {
+        Dictionary(uniqueKeysWithValues: messages.map { message in
+            let subagentSessionsByPartID = MessagePart.resolveSubagentSessions(
+                for: message.toolParts,
+                in: availableSessions,
+                parentSessionID: message.info.sessionID,
+                baseReferenceTimeMS: message.info.time.created
+            )
+            return (message.id, MessageRenderContext(subagentSessionsByPartID: subagentSessionsByPartID))
+        })
+    }
+
     var body: some View {
         let latestTodoToolPartID = PerformanceInstrumentation.measure(
             "timeline-latest-todo",
@@ -362,6 +290,13 @@ private struct SessionTimelineView: View {
         ) {
             self.latestTodoToolPartID
         }
+        let messageRenderContexts = PerformanceInstrumentation.measure(
+            "timeline-message-render-contexts",
+            thresholdMS: 1,
+            details: "sessionID=\(sessionID) messages=\(messages.count) sessions=\(availableSessions.count)"
+        ) {
+            self.messageRenderContexts
+        }
 
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
@@ -369,7 +304,8 @@ private struct SessionTimelineView: View {
                     MessageCard(
                         message: message,
                         showsTimestamp: shouldShowTimestamp(for: index),
-                        latestTodoToolPartID: latestTodoToolPartID
+                        latestTodoToolPartID: latestTodoToolPartID,
+                        renderContext: messageRenderContexts[message.id] ?? MessageRenderContext(subagentSessionsByPartID: [:])
                     )
                 }
 
@@ -394,26 +330,6 @@ private struct SessionTimelineView: View {
         .background(theme.mutedSurfaceBackground.opacity(0.8))
         .performanceLayoutProbe("SessionTimelineView") {
             "sessionID=\(sessionID) messages=\(messages.count) questions=\(questions.count) thinkingBanner=\(thinkingBannerTitle != nil)"
-        }
-        .onAppear {
-            PerformanceInstrumentation.log(
-                "timeline-appear sessionID=\(sessionID) messages=\(messages.count) questions=\(questions.count)"
-            )
-        }
-        .onChange(of: messages.count) { oldValue, newValue in
-            PerformanceInstrumentation.log(
-                "timeline-message-count sessionID=\(sessionID) old=\(oldValue) new=\(newValue)"
-            )
-        }
-        .onChange(of: questions.count) { oldValue, newValue in
-            PerformanceInstrumentation.log(
-                "timeline-question-count sessionID=\(sessionID) old=\(oldValue) new=\(newValue)"
-            )
-        }
-        .onChange(of: thinkingBannerTitle) { _, newValue in
-            PerformanceInstrumentation.log(
-                "timeline-thinking-banner sessionID=\(sessionID) visible=\(newValue != nil)"
-            )
         }
     }
 
@@ -630,7 +546,7 @@ private struct SessionComposerView: View {
     }
 }
 
-private struct SlashCommandSuggestionsView: View {
+struct SuggestionListView: View {
     let theme: OpenCodeTheme
     let suggestions: [CommandOption]
     let highlightedIndex: Int?
@@ -643,7 +559,7 @@ private struct SlashCommandSuggestionsView: View {
                     onSelect(option)
                 } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(option.slashName)
+                        Text(option.name.hasPrefix("/") ? option.slashName : option.name)
                             .font(.system(size: 12, weight: .semibold, design: .monospaced))
                             .foregroundStyle(theme.primaryText)
 
@@ -680,7 +596,9 @@ private struct SlashCommandSuggestionsView: View {
     }
 }
 
-private struct SlashCommandSuggestionOverlayBridge: NSViewRepresentable {
+typealias SlashCommandSuggestionsView = SuggestionListView
+
+struct SlashCommandSuggestionOverlayBridge: NSViewRepresentable {
     let sessionID: String
     let anchor: CGRect
     let suggestions: [CommandOption]
@@ -919,23 +837,20 @@ private enum TimelineMessageLayout {
 
 private struct MessageCard: View {
     @AppStorage(ThinkingVisibilityPreferences.showsThinkingKey) private var showsThinking = true
-    @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
 
     let message: MessageEnvelope
     let showsTimestamp: Bool
     let latestTodoToolPartID: String?
+    let renderContext: SessionTimelineView.MessageRenderContext
 
-    private var subagentSessionsByPartID: [String: SessionDisplay] {
-        MessagePart.resolveSubagentSessions(
-            for: message.toolParts,
-            in: appState.sessions,
-            parentSessionID: message.info.sessionID,
-            baseReferenceTimeMS: message.info.time.created
-        )
-    }
+    @State private var bodyEvaluationCount = 0
+    @State private var previousBodyVisibleTextBytes = 0
+    @State private var previousBodyReasoningTextBytes = 0
+    @State private var previousResolvedSubagentCount = 0
 
     var body: some View {
+        let _ = recordBodyEvaluation()
         let textParts = PerformanceInstrumentation.measure(
             "message-card-text-parts",
             thresholdMS: 1,
@@ -957,17 +872,59 @@ private struct MessageCard: View {
         ) {
             message.toolParts
         }
-        let subagentSessionsByPartID = PerformanceInstrumentation.measure(
-            "message-card-subagent-resolution",
+        let subagentSessionsByPartID = renderContext.subagentSessionsByPartID
+        let _ = recordRenderContext(
+            toolPartCount: toolParts.count,
+            resolvedPartCount: subagentSessionsByPartID.count
+        )
+        let visibleText = PerformanceInstrumentation.measure(
+            "message-card-visible-text",
             thresholdMS: 1,
-            details: "sessionID=\(message.info.sessionID) messageID=\(message.id) toolParts=\(toolParts.count) sessions=\(appState.sessions.count)"
+            details: "sessionID=\(message.info.sessionID) messageID=\(message.id) textParts=\(textParts.count)"
         ) {
-            self.subagentSessionsByPartID
+            message.visibleText
         }
-        let showsMessageBubble = !message.visibleText.isEmpty
-            || (showsThinking && !message.reasoningText.isEmpty)
+        let reasoningText = PerformanceInstrumentation.measure(
+            "message-card-reasoning-text",
+            thresholdMS: 1,
+            details: "sessionID=\(message.info.sessionID) messageID=\(message.id) reasoningParts=\(reasoningParts.count)"
+        ) {
+            message.reasoningText
+        }
+        let showsMessageBubble = !visibleText.isEmpty
+            || (showsThinking && !reasoningText.isEmpty)
             || (message.stepFinish?.reason?.localizedCaseInsensitiveCompare("tool-calls") != .orderedSame && message.stepFinish != nil)
             || message.info.error != nil
+        let rendersMarkdownText = textParts.allSatisfy {
+            $0.shouldRenderMarkdown(for: message.info.role, messageIsCompleted: message.isCompleted)
+        }
+        let rendersMarkdownReasoning = reasoningParts.allSatisfy {
+            $0.shouldRenderMarkdown(for: message.info.role, messageIsCompleted: message.isCompleted)
+        }
+        let renderedMessageText = PerformanceInstrumentation.measure(
+            "message-card-render-visible-text",
+            thresholdMS: 1,
+            details: "sessionID=\(message.info.sessionID) messageID=\(message.id) bytes=\(visibleText.utf8.count) markdown=\(rendersMarkdownText)"
+        ) {
+            MarkdownTextRenderer.render(
+                text: visibleText,
+                rendersMarkdown: rendersMarkdownText,
+                theme: theme,
+                style: .body(theme: theme)
+            )
+        }
+        let renderedReasoningText = PerformanceInstrumentation.measure(
+            "message-card-render-reasoning-text",
+            thresholdMS: 1,
+            details: "sessionID=\(message.info.sessionID) messageID=\(message.id) bytes=\(reasoningText.utf8.count) markdown=\(rendersMarkdownReasoning)"
+        ) {
+            MarkdownTextRenderer.render(
+                text: reasoningText,
+                rendersMarkdown: rendersMarkdownReasoning,
+                theme: theme,
+                style: .callout(theme: theme)
+            )
+        }
 
         VStack(alignment: .leading, spacing: 8) {
             if showsTimestamp {
@@ -976,40 +933,20 @@ private struct MessageCard: View {
 
             if showsMessageBubble {
                 VStack(alignment: .leading, spacing: 10) {
-                    if !textParts.isEmpty {
-                        ForEach(textParts) { part in
-                            if let text = part.text, !text.isEmpty {
-                                MarkdownContentView(
-                                    text: text,
-                                    messageRole: message.info.role,
-                                    rendersMarkdown: part.shouldRenderMarkdown(
-                                        for: message.info.role,
-                                        messageIsCompleted: message.isCompleted
-                                    )
-                                )
-                                .multilineTextAlignment(.leading)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
+                    if !visibleText.isEmpty {
+                        SelectableMessageTextView(
+                            attributedText: renderedMessageText,
+                            linkColor: theme.accentColor
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    if showsThinking, !reasoningParts.isEmpty {
-                        ForEach(reasoningParts) { part in
-                            if let text = part.text, !text.isEmpty {
-                                MarkdownContentView(
-                                    text: text,
-                                    messageRole: message.info.role,
-                                    rendersMarkdown: part.shouldRenderMarkdown(
-                                        for: message.info.role,
-                                        messageIsCompleted: message.isCompleted
-                                    ),
-                                    baseFont: .callout,
-                                    foregroundStyle: AnyShapeStyle(.secondary)
-                                )
-                                .multilineTextAlignment(.leading)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
+                    if showsThinking, !reasoningText.isEmpty {
+                        SelectableMessageTextView(
+                            attributedText: renderedReasoningText,
+                            linkColor: theme.accentColor
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
                     if let finish = message.stepFinish, finish.reason?.localizedCaseInsensitiveCompare("tool-calls") != .orderedSame {
@@ -1047,6 +984,33 @@ private struct MessageCard: View {
     private var bubbleBackground: some View {
         RoundedRectangle(cornerRadius: 18, style: .continuous)
             .fill(message.info.role.isAssistant ? theme.assistantBubble : theme.userBubble)
+    }
+
+    private func recordBodyEvaluation() {
+        bodyEvaluationCount += 1
+
+        let visibleTextBytes = message.visibleText.utf8.count
+        let reasoningTextBytes = message.reasoningText.utf8.count
+        let visibleTextChanged = visibleTextBytes != previousBodyVisibleTextBytes
+        let reasoningTextChanged = reasoningTextBytes != previousBodyReasoningTextBytes
+        let resolvedSubagentCount = renderContext.subagentSessionsByPartID.count
+        let resolvedSubagentCountChanged = resolvedSubagentCount != previousResolvedSubagentCount
+
+        if bodyEvaluationCount == 1 || visibleTextChanged || reasoningTextChanged || resolvedSubagentCountChanged || bodyEvaluationCount.isMultiple(of: 25) {
+            PerformanceInstrumentation.log(
+                "message-card-body-eval sessionID=\(message.info.sessionID) messageID=\(message.id) count=\(bodyEvaluationCount) visibleBytes=\(visibleTextBytes) visibleChanged=\(visibleTextChanged) reasoningBytes=\(reasoningTextBytes) reasoningChanged=\(reasoningTextChanged) resolvedSubagents=\(resolvedSubagentCount) resolvedSubagentsChanged=\(resolvedSubagentCountChanged)"
+            )
+        }
+
+        previousBodyVisibleTextBytes = visibleTextBytes
+        previousBodyReasoningTextBytes = reasoningTextBytes
+        previousResolvedSubagentCount = resolvedSubagentCount
+    }
+
+    private func recordRenderContext(toolPartCount: Int, resolvedPartCount: Int) {
+        PerformanceInstrumentation.log(
+            "message-card-render-context sessionID=\(message.info.sessionID) messageID=\(message.id) toolParts=\(toolPartCount) resolved=\(resolvedPartCount) visibleBytes=\(message.visibleText.utf8.count) reasoningBytes=\(message.reasoningText.utf8.count)"
+        )
     }
 }
 

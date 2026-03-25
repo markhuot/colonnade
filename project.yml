@@ -13,10 +13,6 @@ settings:
     INFOPLIST_KEY_CFBundleDisplayName: Colonnade
     INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
     INFOPLIST_KEY_NSHumanReadableCopyright: Copyright 2026
-packages:
-  Textual:
-    url: https://github.com/gonzalezreal/textual
-    from: 0.1.0
 targets:
   OpenCode:
     type: application
@@ -40,12 +36,10 @@ targets:
         excludes:
           - PanePersistenceStore.swift
           - SessionStore.swift
-    dependencies:
-      - package: Textual
     settings:
       base:
         CODE_SIGN_STYLE: Automatic
-        DEVELOPMENT_TEAM: ""
+        DEVELOPMENT_TEAM: "47P4ZSALX4"
         SWIFT_EMIT_LOC_STRINGS: NO
       configs:
         Debug:
@@ -57,6 +51,35 @@ targets:
     scheme:
       testTargets:
         - OpenCodeTests
+  OpenCodeiOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    resources:
+      - path: OpenCodeMac/Assets.xcassets
+    info:
+      path: OpenCodeiOS/Info.plist
+      properties:
+        CFBundleDisplayName: Colonnade
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        UILaunchScreen: {}
+    sources:
+      - path: OpenCodeKit
+      - path: OpenCodePersistence
+      - path: OpenCodeFeature
+      - path: OpenCodeiOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.opencode.ios
+        PRODUCT_NAME: Colonnade
+        SUPPORTED_PLATFORMS: iphonesimulator iphoneos
+        TARGETED_DEVICE_FAMILY: 1,2
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: "47P4ZSALX4"
+        SWIFT_EMIT_LOC_STRINGS: NO
+    scheme:
+      gatherCoverageData: false
   OpenCodeTests:
     type: bundle.unit-test
     platform: macOS
@@ -64,7 +87,6 @@ targets:
       - path: OpenCodeTests
     dependencies:
       - target: OpenCode
-      - package: Textual
     settings:
       base:
         BUNDLE_LOADER: $(TEST_HOST)

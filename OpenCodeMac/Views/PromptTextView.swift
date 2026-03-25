@@ -19,9 +19,45 @@ struct PromptTextView: NSViewRepresentable {
     let onFocus: () -> Void
     let onSubmit: () -> Void
 
-    private let minLineCount = 2
-    private let maxLineCount = 15
+    private let minLineCount: Int
+    private let maxLineCount: Int
     private let textInsets = NSSize(width: 2, height: 4)
+
+    init(
+        text: Binding<String>,
+        measuredHeight: Binding<CGFloat>,
+        highlightedSuggestionIndex: Binding<Int?>,
+        cursorLocation: Binding<Int>,
+        suggestions: [CommandOption],
+        suggestionAnchor: Binding<CGRect>,
+        placeholder: String,
+        textColor: NSColor,
+        insertionPointColor: NSColor,
+        placeholderColor: NSColor,
+        focusRequestID: UUID?,
+        minLineCount: Int = 2,
+        maxLineCount: Int = 15,
+        onSelectSuggestion: @escaping (CommandOption) -> Void,
+        onFocus: @escaping () -> Void,
+        onSubmit: @escaping () -> Void
+    ) {
+        _text = text
+        _measuredHeight = measuredHeight
+        _highlightedSuggestionIndex = highlightedSuggestionIndex
+        _cursorLocation = cursorLocation
+        self.suggestions = suggestions
+        _suggestionAnchor = suggestionAnchor
+        self.placeholder = placeholder
+        self.textColor = textColor
+        self.insertionPointColor = insertionPointColor
+        self.placeholderColor = placeholderColor
+        self.focusRequestID = focusRequestID
+        self.minLineCount = minLineCount
+        self.maxLineCount = max(maxLineCount, minLineCount)
+        self.onSelectSuggestion = onSelectSuggestion
+        self.onFocus = onFocus
+        self.onSubmit = onSubmit
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(

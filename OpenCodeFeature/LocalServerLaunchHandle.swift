@@ -24,6 +24,7 @@ enum LocalServerLaunchError: LocalizedError {
 }
 
 enum LocalServerLauncher {
+#if os(macOS)
     static func launch(opencodePath: String, logger: Logger? = nil) throws -> LocalServerLaunchHandle {
         let expandedPath = NSString(string: opencodePath).expandingTildeInPath
         guard FileManager.default.isExecutableFile(atPath: expandedPath) else {
@@ -78,8 +79,17 @@ enum LocalServerLauncher {
     static func shutdownAll() {
         LocalServerLifecycle.shared.shutdownAll()
     }
+#else
+    static func launch(opencodePath: String, logger: Logger? = nil) throws -> LocalServerLaunchHandle {
+        logger?.error("Local server launch is unavailable on iOS path=\(opencodePath, privacy: .public)")
+        throw LocalServerLaunchError.launchFailed("Starting a local server from iOS is not supported. Start opencode on your Mac first, then connect from the simulator.")
+    }
+
+    static func shutdownAll() {}
+#endif
 }
 
+#if os(macOS)
 final class LocalServerProcessStorage: @unchecked Sendable {
     let process: Process
     let outputSource: DispatchSourceRead
@@ -154,3 +164,4 @@ final class LocalServerLifecycle: @unchecked Sendable {
 }
 
 private final class UUIDBox {}
+#endif

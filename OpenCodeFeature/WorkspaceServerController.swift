@@ -63,7 +63,7 @@ struct WorkspaceServerController {
         guard !status.isReachable else { return nil }
 
         let executablePath = localServerExecutablePathProvider()
-        logger.notice("Starting local server from \(executablePath, privacy: .public)")
+        DebugLogging.notice(logger, "Starting local server from \(executablePath)")
         let handle = try localServerStarter(executablePath)
         let waitResult = if let serverWaiter {
             await serverWaiter(url, .seconds(10))
@@ -100,7 +100,7 @@ struct WorkspaceServerController {
             let projects = try await apiClientProvider(serverURL).projects()
             return projects.map { $0.worktree }.sorted()
         } catch {
-            logger.notice("Project suggestions unavailable: \(error.localizedDescription, privacy: .public)")
+            DebugLogging.notice(logger, "Project suggestions unavailable: \(error.localizedDescription)")
             return []
         }
     }

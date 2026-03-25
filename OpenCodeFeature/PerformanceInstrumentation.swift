@@ -2,17 +2,48 @@ import Foundation
 import OSLog
 import SwiftUI
 
+enum DebugRuntime {
+    static var isDevelopmentBuild: Bool {
+        #if DEBUG
+            true
+        #else
+            false
+        #endif
+    }
+
+    static var isVerboseLoggingEnabled: Bool {
+        isDevelopmentBuild
+            && ProcessInfo.processInfo.environment["CI"] == nil
+            && ProcessInfo.processInfo.environment["OPENCODE_ENABLE_DEBUG_LOGGING"] != nil
+    }
+
+    static var isPerformanceInstrumentationEnabled: Bool {
+        isDevelopmentBuild
+            && ProcessInfo.processInfo.environment["CI"] == nil
+            && ProcessInfo.processInfo.environment["OPENCODE_ENABLE_PERF_LOGGING"] != nil
+    }
+}
+
+enum DebugLogging {
+    static func notice(_ logger: Logger, _ message: @autoclosure () -> String) {
+        guard DebugRuntime.isVerboseLoggingEnabled else { return }
+        let renderedMessage = message()
+        logger.notice("\(renderedMessage, privacy: .public)")
+    }
+
+    static func info(_ logger: Logger, _ message: @autoclosure () -> String) {
+        guard DebugRuntime.isVerboseLoggingEnabled else { return }
+        let renderedMessage = message()
+        logger.info("\(renderedMessage, privacy: .public)")
+    }
+}
+
 enum PerformanceInstrumentation {
     static let logger = Logger(subsystem: "ai.opencode.app", category: "performance")
     private static let clock = ContinuousClock()
 
     static var isEnabled: Bool {
-        #if DEBUG
-            ProcessInfo.processInfo.environment["CI"] == nil
-                && ProcessInfo.processInfo.environment["OPENCODE_DISABLE_PERF_LOGGING"] == nil
-        #else
-            false
-        #endif
+        DebugRuntime.isPerformanceInstrumentationEnabled
     }
 
     @discardableResult
@@ -130,7 +161,12 @@ private struct PerformanceLayoutProbe: ViewModifier {
 }
 
 extension View {
+    @ViewBuilder
     func performanceLayoutProbe(_ name: String, details: @escaping () -> String = { "" }) -> some View {
-        modifier(PerformanceLayoutProbe(name: name, details: details))
+        if PerformanceInstrumentation.isEnabled {
+            modifier(PerformanceLayoutProbe(name: name, details: details))
+        } else {
+            self
+        }
     }
 }

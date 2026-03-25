@@ -63,9 +63,6 @@ struct ChatBoardView: View {
                     "sessionCount=\(sessionIDs.count) focusedSessionID=\(focusedSessionIDText)"
                 }
                 .onAppear {
-                    PerformanceInstrumentation.log(
-                        "chat-board-appear sessionCount=\(sessionIDs.count) focusedSessionID=\(focusedSessionIDText)"
-                    )
                     PerformanceInstrumentation.end(
                         "chat-board-body",
                         from: renderStart,
@@ -73,18 +70,6 @@ struct ChatBoardView: View {
                         thresholdMS: 1
                     )
                 }
-                .onChange(of: appState.liveStore == nil) { _, isNil in
-                    PerformanceInstrumentation.log("chat-board-live-store available=\(!isNil)")
-                }
-                .onChange(of: sessionIDs.count) { oldValue, newValue in
-                    PerformanceInstrumentation.log("chat-board-session-count old=\(oldValue) new=\(newValue)")
-                }
-                .onChange(of: focusedSessionIDText) { oldValue, newValue in
-                    PerformanceInstrumentation.log("chat-board-focus old=\(oldValue) new=\(newValue)")
-                }
-            }
-            .onAppear {
-                PerformanceInstrumentation.log("chat-board-scroll-reader-appear sessionCount=\(sessionIDs.count)")
             }
         } else {
             ProgressView()

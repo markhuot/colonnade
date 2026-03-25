@@ -114,8 +114,8 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
         self.modelContextLimits = modelContextLimits
         self.openSessionIDs = openSessionIDs
 
-        logger.notice(
-            "Coordinator start directory=\(self.directory, privacy: .public) performInitialSync=\(performInitialSync, privacy: .public) openSessions=\(openSessionIDs.joined(separator: ","), privacy: .public) alreadyStarted=\(self.didStart, privacy: .public)"
+        DebugLogging.notice(logger,
+            "Coordinator start directory=\(self.directory) performInitialSync=\(performInitialSync) openSessions=\(openSessionIDs.joined(separator: ",")) alreadyStarted=\(self.didStart)"
         )
 
         if performInitialSync {
@@ -133,8 +133,8 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
 
     func updateOpenSessionIDs(_ openSessionIDs: [String]) {
         self.openSessionIDs = openSessionIDs
-        logger.notice(
-            "Coordinator open sessions updated directory=\(self.directory, privacy: .public) openSessions=\(openSessionIDs.joined(separator: ","), privacy: .public)"
+        DebugLogging.notice(logger,
+            "Coordinator open sessions updated directory=\(self.directory) openSessions=\(openSessionIDs.joined(separator: ","))"
         )
     }
 
@@ -161,11 +161,7 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
     }
 
     func refreshMessages(sessionID: String) async {
-        let callStack = Thread.callStackSymbols.prefix(12).joined(separator: " | ")
-        PerformanceInstrumentation.log(
-            "coordinator-refresh-messages-callstack directory=\(directory) sessionID=\(sessionID) stack=\(callStack)"
-        )
-        logger.notice("Refreshing messages for \(sessionID, privacy: .public)")
+        DebugLogging.notice(logger, "Refreshing messages for \(sessionID)")
         messageRefreshTasks[sessionID]?.cancel()
         messageRefreshTasks[sessionID] = Task {
             do {
@@ -179,7 +175,7 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
                 PerformanceInstrumentation.log(
                     "coordinator-refresh-messages-loaded directory=\(directory) sessionID=\(sessionID) messages=\(messages.count) totalParts=\(totalParts) messagesWithParts=\(messagesWithParts)"
                 )
-                logger.notice("Loaded messages for \(sessionID, privacy: .public) count=\(messages.count, privacy: .public)")
+                DebugLogging.notice(logger, "Loaded messages for \(sessionID) count=\(messages.count)")
                 let limits = modelContextLimits
                 await repository.replaceMessages(
                     directory: directory,
@@ -217,7 +213,7 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
     }
 
     func refreshTodos(sessionID: String) async {
-        logger.notice("Refreshing todos for \(sessionID, privacy: .public)")
+        DebugLogging.notice(logger, "Refreshing todos for \(sessionID)")
         todoRefreshTasks[sessionID]?.cancel()
         todoRefreshTasks[sessionID] = Task {
             do {
@@ -239,7 +235,7 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
     }
 
     func refreshInteractions(sessionID: String? = nil) async {
-        logger.notice("Refreshing interactions sessionID=\((sessionID ?? "all"), privacy: .public)")
+        DebugLogging.notice(logger, "Refreshing interactions sessionID=\(sessionID ?? "all")")
         do {
             let snapshot = try await workspaceService.loadInteractions(directory: directory)
             await repository.replaceInteractions(directory: directory, snapshot: snapshot, modelContextLimits: modelContextLimits)
@@ -258,7 +254,7 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
     }
 
     func refreshStatus(sessionID: String) async {
-        logger.notice("Refreshing status for \(sessionID, privacy: .public)")
+        DebugLogging.notice(logger, "Refreshing status for \(sessionID)")
         do {
             let statuses = try await workspaceService.loadStatuses(directory: directory)
             let status = statuses[sessionID]
@@ -279,12 +275,12 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
     private func startEventStream() {
         eventTask?.cancel()
         eventTask = Task {
-            self.logger.notice("Starting event stream loop directory=\(self.directory, privacy: .public)")
+            DebugLogging.notice(self.logger, "Starting event stream loop directory=\(self.directory)")
             while !Task.isCancelled {
                 do {
                     let connection = try await client.openEventStream(directory: directory)
-                    self.logger.notice(
-                        "Event stream connected directory=\(self.directory, privacy: .public) status=\(connection.response.statusCode, privacy: .public)"
+                    DebugLogging.notice(self.logger,
+                        "Event stream connected directory=\(self.directory) status=\(connection.response.statusCode)"
                     )
                     var payloadLines: [String] = []
                     var lineBuffer = Data()
@@ -316,7 +312,7 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
                     self.logger.error("Event stream ended without cancellation directory=\(self.directory, privacy: .public); reconnecting")
                 } catch is CancellationError {
                     await repository.flushBufferedStreamMutations()
-                    self.logger.notice("Event stream cancelled directory=\(self.directory, privacy: .public)")
+                    DebugLogging.notice(self.logger, "Event stream cancelled directory=\(self.directory)")
                     break
                 } catch {
                     await repository.flushBufferedStreamMutations()
@@ -331,8 +327,8 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
         do {
             let event = try payloadDecoder.decode(payload)
             let sessionID = eventSessionID(from: event) ?? "nil"
-            logger.notice(
-                "SSE event received directory=\(self.directory, privacy: .public) type=\(event.type.rawString, privacy: .public) sessionID=\(sessionID, privacy: .public)"
+            DebugLogging.notice(logger,
+                "SSE event received directory=\(self.directory) type=\(event.type.rawString) sessionID=\(sessionID)"
             )
             await handle(payload: event)
         } catch {
@@ -362,7 +358,7 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
     private func handle(payload: EventPayload) async {
         switch payload.type {
         case .serverConnected:
-            logger.notice("SSE server connected event directory=\(self.directory, privacy: .public)")
+            DebugLogging.notice(logger, "SSE server connected event directory=\(self.directory)")
             return
 
         case .sessionCreated, .sessionUpdated, .sessionDeleted:
@@ -372,8 +368,8 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
                 let lifecycle = payload.type.lifecycleEvent
             else { return }
 
-            logger.notice(
-                "Session lifecycle event directory=\(self.directory, privacy: .public) type=\(payload.type.rawString, privacy: .public) sessionID=\(session.id, privacy: .public)"
+            DebugLogging.notice(logger,
+                "Session lifecycle event directory=\(self.directory) type=\(payload.type.rawString) sessionID=\(session.id)"
             )
 
             await repository.applySessionLifecycle(
@@ -411,8 +407,8 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
                 let info = infoObject.decoded(MessageInfo.self)
             else { return }
 
-            logger.notice(
-                "Message updated event directory=\(self.directory, privacy: .public) sessionID=\(info.sessionID, privacy: .public) messageID=\(info.id, privacy: .public)"
+            DebugLogging.notice(logger,
+                "Message updated event directory=\(self.directory) sessionID=\(info.sessionID) messageID=\(info.id)"
             )
 
             await withStore { store in
@@ -499,8 +495,8 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
 
         case .todoUpdated:
             if let sessionID = payload.string(.sessionID) {
-                logger.notice(
-                    "Todo updated event directory=\(self.directory, privacy: .public) sessionID=\(sessionID, privacy: .public)"
+                DebugLogging.notice(logger,
+                    "Todo updated event directory=\(self.directory) sessionID=\(sessionID)"
                 )
                 await refreshTodos(sessionID: sessionID)
             }
@@ -513,8 +509,8 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
             return
 
         case .unknown:
-            logger.notice(
-                "Unknown SSE event directory=\(self.directory, privacy: .public) details=\(self.payloadSummary(payload), privacy: .public)"
+            DebugLogging.notice(logger,
+                "Unknown SSE event directory=\(self.directory) details=\(self.payloadSummary(payload))"
             )
             return
         }
@@ -529,20 +525,20 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
 
     private func scheduleMessageRefresh(for sessionID: String, reason: MessageRefreshReason) async {
         let rescheduled = messageRefreshTasks[sessionID] != nil
-        logger.notice(
-            "Scheduling message refresh for \(sessionID, privacy: .public) rescheduled=\(rescheduled, privacy: .public) reason=\(reason.summary, privacy: .public)"
+        DebugLogging.notice(logger,
+            "Scheduling message refresh for \(sessionID) rescheduled=\(rescheduled) reason=\(reason.summary)"
         )
         messageRefreshTasks[sessionID]?.cancel()
         messageRefreshTasks[sessionID] = Task {
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
-            logger.notice("Executing scheduled message refresh for \(sessionID, privacy: .public) reason=\(reason.summary, privacy: .public)")
+            DebugLogging.notice(logger, "Executing scheduled message refresh for \(sessionID) reason=\(reason.summary)")
             await refreshMessages(sessionID: sessionID)
         }
     }
 
     private func scheduleSessionRefresh() async {
-        logger.notice("Scheduling session refresh")
+        DebugLogging.notice(logger, "Scheduling session refresh")
         sessionRefreshTask?.cancel()
         sessionRefreshTask = Task {
             try? await Task.sleep(for: .milliseconds(250))
