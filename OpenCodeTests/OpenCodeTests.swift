@@ -260,6 +260,24 @@ final class LocalServerPreferencesControllerTests: XCTestCase {
     }
 }
 
+final class ThinkingVisibilityPreferencesTests: XCTestCase {
+    func testShowsThinkingDefaultsToTrue() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+
+        XCTAssertTrue(ThinkingVisibilityPreferences.showsThinking(from: defaults))
+    }
+
+    func testShowsThinkingPersistsFalse() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+
+        ThinkingVisibilityPreferences.setShowsThinking(false, defaults: defaults)
+
+        XCTAssertFalse(ThinkingVisibilityPreferences.showsThinking(from: defaults))
+    }
+}
+
 final class LocalServerLifecycleTests: XCTestCase {
     func testShutdownAllStopsRegisteredProcesses() throws {
         let logger = Logger(subsystem: "ai.opencode.app", category: "test")
@@ -1737,6 +1755,163 @@ final class OpenCodeAppModelTests: XCTestCase {
         XCTAssertEqual(refreshedInteractionsCount, 3)
     }
 
+    func testAnswerPermissionDismissesPromptImmediatelyAndRestoresOnFailure() async throws {
+        let connection = WorkspaceConnection(serverURL: OpenCodeAppModel.defaultServerURL, directory: "/tmp/project")
+        let store = WorkspaceLiveStore(connection: connection)
+        let session = makeSession(id: "session-1", directory: connection.directory)
+        let permission = makePermission(id: "permission-1", sessionID: session.id)
+
+        store.applyWorkspaceSnapshot(
+            WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [permission])
+        )
+
+        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
+        appState.bindLiveStore(store)
+        appState.selectedDirectory = connection.directory
+
+        appState.answerPermission(permission, reply: .once)
+
+        XCTAssertTrue(appState.isPermissionDismissed(permission))
+        XCTAssertTrue(appState.permissionForSession(session.id).isEmpty)
+
+        let failingService = MockWorkspaceService()
+        failingService.permissionReplyError = URLError(.notConnectedToInternet)
+        let failingAppState = OpenCodeAppModel(
+            workspaceService: failingService,
+            persistsWorkspacePaneState: false
+        )
+        failingAppState.bindLiveStore(store)
+        failingAppState.selectedDirectory = connection.directory
+
+        failingAppState.answerPermission(permission, reply: .once)
+        try await waitForAsyncWork()
+
+        XCTAssertFalse(failingAppState.isPermissionDismissed(permission))
+        XCTAssertEqual(failingAppState.permissionForSession(session.id), [permission])
+        XCTAssertNotNil(failingAppState.errorMessage)
+    }
+
+    func testAnswerQuestionDismissesPromptImmediatelyAndRestoresOnFailure() async throws {
+        let connection = WorkspaceConnection(serverURL: OpenCodeAppModel.defaultServerURL, directory: "/tmp/project")
+        let store = WorkspaceLiveStore(connection: connection)
+        let session = makeSession(id: "session-1", directory: connection.directory)
+        let question = makeQuestion(id: "question-1", sessionID: session.id)
+
+        store.applyWorkspaceSnapshot(
+            WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [question], permissions: [])
+        )
+
+        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
+        appState.bindLiveStore(store)
+        appState.selectedDirectory = connection.directory
+
+        appState.answerQuestion(question, answers: [["A"]])
+
+        XCTAssertTrue(appState.isQuestionDismissed(question))
+        XCTAssertTrue(appState.questionForSession(session.id).isEmpty)
+
+        let failingService = MockWorkspaceService()
+        failingService.questionReplyError = URLError(.notConnectedToInternet)
+        let failingAppState = OpenCodeAppModel(
+            workspaceService: failingService,
+            persistsWorkspacePaneState: false
+        )
+        failingAppState.bindLiveStore(store)
+        failingAppState.selectedDirectory = connection.directory
+
+        failingAppState.answerQuestion(question, answers: [["A"]])
+        try await waitForAsyncWork()
+
+        XCTAssertFalse(failingAppState.isQuestionDismissed(question))
+        XCTAssertEqual(failingAppState.questionForSession(session.id), [question])
+        XCTAssertNotNil(failingAppState.errorMessage)
+    }
+
+    func testRejectQuestionDismissesPromptImmediatelyAndRestoresOnFailure() async throws {
+        let connection = WorkspaceConnection(serverURL: OpenCodeAppModel.defaultServerURL, directory: "/tmp/project")
+        let store = WorkspaceLiveStore(connection: connection)
+        let session = makeSession(id: "session-1", directory: connection.directory)
+        let question = makeQuestion(id: "question-1", sessionID: session.id)
+
+        store.applyWorkspaceSnapshot(
+            WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [question], permissions: [])
+        )
+
+        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
+        appState.bindLiveStore(store)
+        appState.selectedDirectory = connection.directory
+
+        appState.rejectQuestion(question)
+
+        XCTAssertTrue(appState.isQuestionDismissed(question))
+        XCTAssertTrue(appState.questionForSession(session.id).isEmpty)
+
+        let failingService = MockWorkspaceService()
+        failingService.rejectQuestionError = URLError(.notConnectedToInternet)
+        let failingAppState = OpenCodeAppModel(
+            workspaceService: failingService,
+            persistsWorkspacePaneState: false
+        )
+        failingAppState.bindLiveStore(store)
+        failingAppState.selectedDirectory = connection.directory
+
+        failingAppState.rejectQuestion(question)
+        try await waitForAsyncWork()
+
+        XCTAssertFalse(failingAppState.isQuestionDismissed(question))
+        XCTAssertEqual(failingAppState.questionForSession(session.id), [question])
+        XCTAssertNotNil(failingAppState.errorMessage)
+    }
+
+    func testAnswerPermissionRefreshesStatusAndMessagesForSession() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let session = makeSession(id: "session-1", directory: directory)
+        let permission = makePermission(id: "permission-1", sessionID: session.id)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
+        )
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+        appState.answerPermission(permission, reply: .once)
+        try await waitForAsyncWork()
+
+        let refreshedStatuses = await coordinator.refreshedStatusSessionIDsSnapshot()
+        let refreshedMessages = await coordinator.refreshedMessageSessionIDsSnapshot()
+        XCTAssertEqual(refreshedStatuses, [session.id])
+        XCTAssertEqual(refreshedMessages.suffix(1), [session.id])
+    }
+
+    func testAnswerPermissionRequestsPromptFocusForSession() async throws {
+        let connection = WorkspaceConnection(serverURL: OpenCodeAppModel.defaultServerURL, directory: "/tmp/project")
+        let store = WorkspaceLiveStore(connection: connection)
+        let session = makeSession(id: "session-1", directory: connection.directory)
+        let permission = makePermission(id: "permission-1", sessionID: session.id)
+
+        store.applyWorkspaceSnapshot(
+            WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [permission])
+        )
+
+        let appState = OpenCodeAppModel(persistsWorkspacePaneState: false)
+        appState.bindLiveStore(store)
+        appState.selectedDirectory = connection.directory
+
+        appState.answerPermission(permission, reply: .once)
+
+        XCTAssertEqual(appState.focusedSessionID, session.id)
+        XCTAssertEqual(appState.promptFocusRequest?.sessionID, session.id)
+    }
+
     func testPermissionForSessionDeduplicatesEquivalentRequests() async {
         let connection = WorkspaceConnection(serverURL: OpenCodeAppModel.defaultServerURL, directory: "/tmp/project")
         let store = WorkspaceLiveStore(connection: connection)
@@ -2047,7 +2222,35 @@ final class OpenCodeAppModelTests: XCTestCase {
 
         await appState.load(directory: directory)
 
-        XCTAssertEqual(appState.availableCommandOptions().map(\.slashName), ["/happycog/release"])
+        XCTAssertEqual(appState.availableCommandOptions().map(\.slashName), ["/archive", "/close", "/happycog/release", "/new"])
+    }
+
+    func testAvailableCommandOptionsPreferLocalSlashCommandsOverRemoteDuplicates() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let session = makeSession(id: "session-1", directory: directory)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
+        )
+        workspaceService.commandCatalogResult = .init(commands: [
+            .init(name: "new", description: "Server new command", agent: nil, model: nil, template: "tmpl", subtask: nil)
+        ])
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+
+        let newCommands = appState.availableCommandOptions().filter { $0.slashName == "/new" }
+        XCTAssertEqual(newCommands.count, 1)
+        XCTAssertEqual(newCommands.first?.description, "Create a new session and focus it")
     }
 
     func testSlashCommandSuggestionsMatchNestedCommandPath() async throws {
@@ -2078,6 +2281,39 @@ final class OpenCodeAppModelTests: XCTestCase {
         appState.setDraft("/rel", for: session.id)
 
         XCTAssertEqual(appState.slashCommandSuggestions(for: session.id).map(\.slashName), ["/happycog/release"])
+    }
+
+    func testSlashCommandSuggestionsHideAfterCommandSelectionMovesCursorPastSpace() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let session = makeSession(id: "session-1", directory: directory)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
+        )
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+        appState.openSessionIDs = [session.id]
+        appState.focusedSessionID = session.id
+        appState.setDraft("/clo", for: session.id)
+
+        let closeOption = try XCTUnwrap(appState.slashCommandSuggestions(for: session.id, cursorLocation: 4).first)
+        XCTAssertEqual(closeOption.slashName, "/close")
+
+        appState.applySlashCommandSuggestion(closeOption, for: session.id)
+
+        let acceptedDraft = appState.drafts[session.id, default: ""]
+        XCTAssertEqual(acceptedDraft, "/close ")
+        XCTAssertTrue(appState.slashCommandSuggestions(for: session.id, cursorLocation: acceptedDraft.utf16.count).isEmpty)
     }
 
     func testSendMessageExecutesSlashCommandWhenDraftStartsWithSlash() async throws {
@@ -2116,6 +2352,109 @@ final class OpenCodeAppModelTests: XCTestCase {
             )
         ])
         XCTAssertTrue(workspaceService.sendMessageCalls.isEmpty)
+    }
+
+    func testSendMessageRunsLocalNewSlashCommand() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let existingSession = makeSession(id: "session-1", directory: directory)
+        let createdSession = makeSession(id: "created-session", directory: directory)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [existingSession], statuses: [:], questions: [], permissions: []),
+            createSessionResult: createdSession
+        )
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+        appState.openSessionIDs = [existingSession.id]
+        appState.focusedSessionID = existingSession.id
+        appState.drafts[existingSession.id] = "/new"
+
+        XCTAssertTrue(appState.sendMessage(sessionID: existingSession.id))
+        try await waitForAsyncWork()
+
+        XCTAssertEqual(workspaceService.createSessionCalls, [.init(directory: directory, title: nil, parentID: nil)])
+        XCTAssertTrue(workspaceService.executeCommandCalls.isEmpty)
+        XCTAssertEqual(appState.focusedSessionID, createdSession.id)
+        XCTAssertEqual(appState.promptFocusRequest?.sessionID, createdSession.id)
+    }
+
+    func testSendMessageRunsLocalCloseSlashCommand() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let session1 = makeSession(id: "session-1", directory: directory)
+        let session2 = makeSession(id: "session-2", directory: directory)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session1, session2], statuses: [:], questions: [], permissions: [])
+        )
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+        appState.openSessionIDs = [session1.id, session2.id]
+        appState.focusedSessionID = session1.id
+        appState.drafts[session1.id] = "/close"
+
+        XCTAssertTrue(appState.sendMessage(sessionID: session1.id))
+        try await waitForAsyncWork()
+
+        XCTAssertEqual(appState.openSessionIDs, [session2.id])
+        XCTAssertEqual(appState.focusedSessionID, session2.id)
+        XCTAssertTrue(workspaceService.executeCommandCalls.isEmpty)
+        let updatedOpenSessions = await coordinator.updatedOpenSessionIDsSnapshot()
+        XCTAssertEqual(updatedOpenSessions.last, [session2.id])
+    }
+
+    func testSendMessageRunsLocalArchiveSlashCommand() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let session1 = makeSession(id: "session-1", directory: directory, updatedAt: 3_000)
+        let session2 = makeSession(id: "session-2", directory: directory, updatedAt: 2_000)
+        let archived = makeSession(id: "session-1", directory: directory, updatedAt: 4_000, archivedAt: 4_000)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session1, session2], statuses: [:], questions: [], permissions: []),
+            archiveSessionResult: archived
+        )
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+        appState.openSessionIDs = [session1.id, session2.id]
+        appState.focusedSessionID = session1.id
+        appState.drafts[session1.id] = "/archive"
+
+        XCTAssertTrue(appState.sendMessage(sessionID: session1.id))
+        try await waitForAsyncWork()
+
+        XCTAssertEqual(workspaceService.archiveSessionCalls, [.init(directory: directory, sessionID: session1.id)])
+        XCTAssertEqual(appState.openSessionIDs, [session2.id])
+        XCTAssertEqual(appState.focusedSessionID, session2.id)
+        XCTAssertTrue(workspaceService.executeCommandCalls.isEmpty)
     }
 
     func testSendMessageFailureRestoresDraftAndSetsError() async throws {
@@ -2835,6 +3174,9 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
     var loadWorkspaceError: Error?
     var loadWorkspaceDelay: Duration?
     var sendMessageError: Error?
+    var permissionReplyError: Error?
+    var questionReplyError: Error?
+    var rejectQuestionError: Error?
 
     private(set) var loadWorkspaceDirectories: [String] = []
     private(set) var loadInteractionsDirectories: [String] = []
@@ -2963,14 +3305,23 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
 
     func replyToPermission(directory: String, requestID: String, reply: PermissionReply) async throws {
         record { permissionReplyCalls.append(.init(directory: directory, requestID: requestID, reply: reply)) }
+        if let permissionReplyError {
+            throw permissionReplyError
+        }
     }
 
     func replyToQuestion(directory: String, requestID: String, answers: [[String]]) async throws {
         record { questionReplyCalls.append(.init(directory: directory, requestID: requestID, answers: answers)) }
+        if let questionReplyError {
+            throw questionReplyError
+        }
     }
 
     func rejectQuestion(directory: String, requestID: String) async throws {
         record { rejectQuestionCalls.append(.init(directory: directory, requestID: requestID)) }
+        if let rejectQuestionError {
+            throw rejectQuestionError
+        }
     }
 
     private func record(_ update: () -> Void) {

@@ -7,6 +7,7 @@ struct PromptTextView: NSViewRepresentable {
     @Binding var text: String
     @Binding var measuredHeight: CGFloat
     @Binding var highlightedSuggestionIndex: Int?
+    @Binding var cursorLocation: Int
     let suggestions: [CommandOption]
     @Binding var suggestionAnchor: CGRect
     let placeholder: String
@@ -27,6 +28,7 @@ struct PromptTextView: NSViewRepresentable {
             text: $text,
             measuredHeight: $measuredHeight,
             highlightedSuggestionIndex: $highlightedSuggestionIndex,
+            cursorLocation: $cursorLocation,
             suggestionAnchor: $suggestionAnchor,
             minLineCount: minLineCount,
             maxLineCount: maxLineCount,
@@ -107,6 +109,7 @@ struct PromptTextView: NSViewRepresentable {
         @Binding var text: String
         @Binding var measuredHeight: CGFloat
         @Binding var highlightedSuggestionIndex: Int?
+        @Binding var cursorLocation: Int
         @Binding var suggestionAnchor: CGRect
         let minLineCount: Int
         let maxLineCount: Int
@@ -125,6 +128,7 @@ struct PromptTextView: NSViewRepresentable {
             text: Binding<String>,
             measuredHeight: Binding<CGFloat>,
             highlightedSuggestionIndex: Binding<Int?>,
+            cursorLocation: Binding<Int>,
             suggestionAnchor: Binding<CGRect>,
             minLineCount: Int,
             maxLineCount: Int,
@@ -142,6 +146,7 @@ struct PromptTextView: NSViewRepresentable {
             _text = text
             _measuredHeight = measuredHeight
             _highlightedSuggestionIndex = highlightedSuggestionIndex
+            _cursorLocation = cursorLocation
             _suggestionAnchor = suggestionAnchor
             self.minLineCount = minLineCount
             self.maxLineCount = maxLineCount
@@ -160,14 +165,33 @@ struct PromptTextView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             text = textView.string
+            cursorLocation = textView.selectedRange().location
             guard let scrollView = textView.enclosingScrollView else { return }
             updateHeight(for: scrollView)
         }
 
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            cursorLocation = textView.selectedRange().location
+        }
+
         func installSuggestions(_ suggestions: [CommandOption], for textView: PromptNSTextView) {
+            let previousSuggestions = self.suggestions
+            let previousSuggestionIDs = previousSuggestions.map { $0.id }
+            let suggestionIDs = suggestions.map { $0.id }
             self.suggestions = suggestions
+            let previousIndex = textView.highlightedSuggestionIndex
             textView.suggestions = suggestions
-            textView.highlightedSuggestionIndex = highlightedSuggestionIndex ?? (suggestions.isEmpty ? nil : 0)
+
+            let shouldResetSelection = suggestions.isEmpty
+                || previousSuggestionIDs != suggestionIDs
+                || previousIndex == nil
+                || (previousIndex.map { !suggestions.indices.contains($0) } ?? false)
+
+            if shouldResetSelection {
+                textView.highlightedSuggestionIndex = suggestions.isEmpty ? nil : 0
+            }
+
             updateSuggestionAnchor(for: textView)
         }
 
@@ -214,6 +238,7 @@ struct PromptTextView: NSViewRepresentable {
         func applyText(_ newValue: String, to textView: NSTextView) {
             textView.string = newValue
             textView.setSelectedRange(NSRange(location: newValue.utf16.count, length: 0))
+            cursorLocation = newValue.utf16.count
             if let textContainer = textView.textContainer {
                 textView.layoutManager?.ensureLayout(for: textContainer)
             }
@@ -365,6 +390,7 @@ final class PromptNSTextView: NSTextView {
             case "c":
                 string = ""
                 setSelectedRange(NSRange(location: 0, length: 0))
+                onHighlightedSuggestionChange?(nil)
                 didChangeText()
                 return
             default:

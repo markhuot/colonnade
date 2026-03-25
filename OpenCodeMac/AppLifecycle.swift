@@ -25,7 +25,6 @@ struct WorkspaceCommands: Commands {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private enum Constants {
-        static let showsThinkingKey = "showsThinking"
         static let thinkingMenuItemTag = 9_001
         static let viewSeparatorTag = 9_002
         static let previousPaneMenuItemTag = 9_003
@@ -56,7 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleThinkingVisibility() {
-        UserDefaults.standard.set(!showsThinking, forKey: Constants.showsThinkingKey)
+        ThinkingVisibilityPreferences.setShowsThinking(!showsThinking)
         updateThinkingMenuItemTitle()
     }
 
@@ -309,9 +308,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private var showsThinking: Bool {
-        let defaults = UserDefaults.standard
-        guard defaults.object(forKey: Constants.showsThinkingKey) != nil else { return true }
-        return defaults.bool(forKey: Constants.showsThinkingKey)
+        ThinkingVisibilityPreferences.showsThinking()
     }
 }
 

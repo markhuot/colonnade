@@ -68,3 +68,16 @@ final class LocalServerPreferencesController: ObservableObject {
         return storedPath?.isEmpty == false ? storedPath! : Constants.defaultOpencodeExecutablePath
     }
 }
+
+enum ThinkingVisibilityPreferences {
+    static let showsThinkingKey = "showsThinking"
+
+    static func showsThinking(from defaults: UserDefaults = .standard) -> Bool {
+        guard defaults.object(forKey: showsThinkingKey) != nil else { return true }
+        return defaults.bool(forKey: showsThinkingKey)
+    }
+
+    static func setShowsThinking(_ showsThinking: Bool, defaults: UserDefaults = .standard) {
+        defaults.set(showsThinking, forKey: showsThinkingKey)
+    }
+}
