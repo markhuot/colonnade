@@ -34,7 +34,6 @@ struct IOSSessionColumnView: View {
             Divider()
             IOSSessionTranscriptSection(
                 snapshot: IOSSessionTranscriptSnapshot(
-                    sessionID: sessionID,
                     transcriptRows: transcriptRows,
                     questions: questions,
                     thinkingBannerTitle: thinkingBannerTitle,
@@ -116,7 +115,6 @@ struct IOSSessionColumnView: View {
 }
 
 private struct IOSSessionTranscriptSnapshot: Equatable {
-    let sessionID: String
     let transcriptRows: [TranscriptMessageRow]
     let questions: [QuestionRequest]
     let thinkingBannerTitle: String?
@@ -548,7 +546,7 @@ private struct IOSMessageCard: View {
 
         VStack(alignment: .leading, spacing: 8) {
             if showsTimestamp {
-                IOSMessageCardHeader(message: message)
+                TranscriptMessageHeaderView(message: message)
             }
 
             if showsMessageBubble {
@@ -570,7 +568,7 @@ private struct IOSMessageCard: View {
                     }
 
                     if let finish = messageState.stepFinish, finish.reason?.localizedCaseInsensitiveCompare("tool-calls") != .orderedSame {
-                        IOSMessageFinishView(part: finish)
+                        TranscriptMessageFinishView(part: finish)
                     }
 
                     if messageState.info.error != nil {
@@ -621,22 +619,6 @@ private struct IOSMessageToolPartsView: View {
     }
 }
 
-private struct IOSMessageCardHeader: View {
-    let message: MessageEnvelope
-
-    var body: some View {
-        TranscriptMessageHeaderView(message: message)
-    }
-}
-
-private struct IOSMessageFinishView: View {
-    let part: MessagePart
-
-    var body: some View {
-        TranscriptMessageFinishView(part: part)
-    }
-}
-
 private struct IOSToolPartView: View {
     @Environment(\.openCodeTheme) private var theme
 
@@ -669,7 +651,7 @@ private struct IOSToolPartView: View {
                 }
             } label: {
                 HStack(alignment: .center, spacing: 8) {
-                    IOSToolSummaryView(style: presentation.summaryStyle)
+                    TranscriptToolSummaryView(style: presentation.summaryStyle)
 
                     Spacer(minLength: 8)
 
@@ -694,7 +676,7 @@ private struct IOSToolPartView: View {
             .buttonStyle(.plain)
 
             if isExpanded {
-                IOSToolPartDrawerView(part: resolvedPart)
+                TranscriptToolPartDrawerView(part: resolvedPart)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
@@ -715,32 +697,6 @@ private struct IOSToolPartView: View {
                 isExpanded = shouldAutoExpand
             }
         }
-    }
-}
-
-private struct IOSToolSummaryView: View {
-    let style: ToolSummaryStyle
-
-    var body: some View {
-        TranscriptToolSummaryView(style: style)
-    }
-}
-
-private struct IOSToolPartDrawerView: View {
-    let part: MessagePart
-
-    var body: some View {
-        TranscriptToolPartDrawerView(part: part)
-    }
-}
-
-private struct IOSToolPartDetailSection: View {
-    let title: String
-    let value: String
-    var isError = false
-
-    var body: some View {
-        TranscriptToolPartDetailSection(title: title, value: value, isError: isError)
     }
 }
 

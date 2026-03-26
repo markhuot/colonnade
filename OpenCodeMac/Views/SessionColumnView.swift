@@ -6,6 +6,7 @@ private enum ViewRenderDebugRegistry {
     private static var counts: [String: ViewRenderDebugCounts] = [:]
 
     static func recordBody(for key: String) -> Int {
+        guard DebugRuntime.isViewRenderCountersEnabled else { return 0 }
         var snapshot = counts[key, default: .init()]
         snapshot.body += 1
         counts[key] = snapshot
@@ -13,22 +14,26 @@ private enum ViewRenderDebugRegistry {
     }
 
     static func recordAppear(for key: String) -> ViewRenderDebugCounts {
-        mutate(key) { $0.appear += 1 }
+        guard DebugRuntime.isViewRenderCountersEnabled else { return .init() }
+        return mutate(key) { $0.appear += 1 }
     }
 
     static func recordDisappear(for key: String) -> ViewRenderDebugCounts {
-        mutate(key) { $0.disappear += 1 }
+        guard DebugRuntime.isViewRenderCountersEnabled else { return .init() }
+        return mutate(key) { $0.disappear += 1 }
     }
 
     static func recordUpdate(for key: String, bodyCount: Int) -> ViewRenderDebugCounts {
-        mutate(key) {
+        guard DebugRuntime.isViewRenderCountersEnabled else { return .init() }
+        return mutate(key) {
             $0.body = max($0.body, bodyCount)
             $0.update += 1
         }
     }
 
     static func snapshot(for key: String) -> ViewRenderDebugCounts {
-        counts[key, default: .init()]
+        guard DebugRuntime.isViewRenderCountersEnabled else { return .init() }
+        return counts[key, default: .init()]
     }
 
     private static func mutate(_ key: String, _ body: (inout ViewRenderDebugCounts) -> Void) -> ViewRenderDebugCounts {
@@ -65,6 +70,21 @@ private struct ViewRenderDebugBadge: NSViewRepresentable {
     func updateNSView(_ nsView: ViewRenderDebugBadgeNSView, context: Context) {
         nsView.debugKey = key
         nsView.apply(snapshot: ViewRenderDebugRegistry.recordUpdate(for: key, bodyCount: bodyCount))
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func renderDebugBadgeOverlay(key: String, bodyCount: Int) -> some View {
+        if DebugRuntime.isViewRenderCountersEnabled {
+            overlay(alignment: .bottomTrailing) {
+                ViewRenderDebugBadge(key: key, bodyCount: bodyCount)
+                    .fixedSize()
+                    .padding(8)
+            }
+        } else {
+            self
+        }
     }
 }
 
@@ -198,7 +218,6 @@ struct SessionColumnView: View {
             }
             SessionTranscriptSection(
                 snapshot: SessionTranscriptSnapshot(
-                    sessionID: sessionID,
                     transcriptRows: transcriptRows,
                     questions: questions,
                     thinkingBannerTitle: thinkingBannerTitle,
@@ -339,7 +358,6 @@ struct SessionColumnView: View {
 }
 
 private struct SessionTranscriptSnapshot: Equatable {
-    let sessionID: String
     let transcriptRows: [TranscriptMessageRow]
     let questions: [QuestionRequest]
     let thinkingBannerTitle: String?
@@ -361,7 +379,6 @@ private struct SessionTranscriptSection: View, Equatable {
 
     var body: some View {
         SessionTimelineView(
-            sessionID: snapshot.sessionID,
             sessionState: sessionState,
             transcriptRows: snapshot.transcriptRows,
             questions: snapshot.questions,
@@ -556,7 +573,6 @@ private struct SessionHeaderDragModifier: ViewModifier {
 private struct SessionTimelineView: View {
     @Environment(\.openCodeTheme) private var theme
 
-    let sessionID: String
     @ObservedObject var sessionState: SessionLiveState
     let transcriptRows: [TranscriptMessageRow]
     let questions: [QuestionRequest]
@@ -1206,7 +1222,7 @@ private struct MessageCard: View {
 
         VStack(alignment: .leading, spacing: 8) {
             if showsTimestamp {
-                MessageCardHeader(message: message)
+                TranscriptMessageHeaderView(message: message)
             }
 
             if showsMessageBubble {
@@ -1230,7 +1246,7 @@ private struct MessageCard: View {
                     }
 
                     if let finish = messageState.stepFinish, finish.reason?.localizedCaseInsensitiveCompare("tool-calls") != .orderedSame {
-                        MessageFinishView(part: finish)
+                        TranscriptMessageFinishView(part: finish)
                     }
 
                     if messageState.info.error != nil {
@@ -1243,11 +1259,7 @@ private struct MessageCard: View {
                 }
                 .padding(TimelineMessageLayout.messageCardPadding)
                 .background(bubbleBackground)
-                .overlay(alignment: .bottomTrailing) {
-                    ViewRenderDebugBadge(key: renderDebugKey, bodyCount: renderCount)
-                        .fixedSize()
-                        .padding(8)
-                }
+                .renderDebugBadgeOverlay(key: renderDebugKey, bodyCount: renderCount)
                 .padding(.leading, TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.messageCardPadding))
             }
         }
@@ -1293,22 +1305,6 @@ private struct MessageToolPartsView: View {
     }
 }
 
-private struct MessageCardHeader: View {
-    let message: MessageEnvelope
-
-    var body: some View {
-        TranscriptMessageHeaderView(message: message)
-    }
-}
-
-private struct MessageFinishView: View {
-    let part: MessagePart
-
-    var body: some View {
-        TranscriptMessageFinishView(part: part)
-    }
-}
-
 private struct ToolPartView: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openCodeTheme) private var theme
@@ -1347,7 +1343,7 @@ private struct ToolPartView: View {
                 }
             } label: {
                 HStack(alignment: .center, spacing: 8) {
-                        ToolSummaryView(style: presentation.summaryStyle)
+                    TranscriptToolSummaryView(style: presentation.summaryStyle)
 
                     Spacer(minLength: 8)
 
@@ -1382,7 +1378,7 @@ private struct ToolPartView: View {
             .buttonStyle(.plain)
 
             if isExpanded {
-                ToolPartDrawerView(part: resolvedPart)
+                TranscriptToolPartDrawerView(part: resolvedPart)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
@@ -1396,11 +1392,7 @@ private struct ToolPartView: View {
             cardShape
                 .stroke(theme.border.opacity(0.6), lineWidth: 1)
         )
-        .overlay(alignment: .bottomTrailing) {
-            ViewRenderDebugBadge(key: renderDebugKey, bodyCount: renderCount)
-                .fixedSize()
-                .padding(8)
-        }
+        .renderDebugBadgeOverlay(key: renderDebugKey, bodyCount: renderCount)
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
             guard part.isTodoWriteTool else { return }
@@ -1417,32 +1409,6 @@ private struct ToolPartView: View {
                 isExpanded = shouldAutoExpand
             }
         }
-    }
-}
-
-private struct ToolSummaryView: View {
-    let style: ToolSummaryStyle
-
-    var body: some View {
-        TranscriptToolSummaryView(style: style)
-    }
-}
-
-private struct ToolPartDrawerView: View {
-    let part: MessagePart
-
-    var body: some View {
-        TranscriptToolPartDrawerView(part: part)
-    }
-}
-
-private struct ToolPartDetailSection: View {
-    let title: String
-    let value: String
-    var isError = false
-
-    var body: some View {
-        TranscriptToolPartDetailSection(title: title, value: value, isError: isError)
     }
 }
 
@@ -1476,11 +1442,7 @@ private struct PermissionPromptView: View {
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(theme.errorBackground)
-        .overlay(alignment: .bottomTrailing) {
-            ViewRenderDebugBadge(key: renderDebugKey, bodyCount: renderCount)
-                .fixedSize()
-                .padding(8)
-        }
+        .renderDebugBadgeOverlay(key: renderDebugKey, bodyCount: renderCount)
     }
 }
 
@@ -1603,9 +1565,13 @@ private struct QuestionCard: View {
             onSubmitAnswers: onSubmitAnswers,
             onReject: onReject,
             trailingOverlay: {
-                ViewRenderDebugBadge(key: renderDebugKey, bodyCount: renderCount)
-                    .fixedSize()
-                    .padding(8)
+                if DebugRuntime.isViewRenderCountersEnabled {
+                    ViewRenderDebugBadge(key: renderDebugKey, bodyCount: renderCount)
+                        .fixedSize()
+                        .padding(8)
+                } else {
+                    EmptyView()
+                }
             }
         )
     }

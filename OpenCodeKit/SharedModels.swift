@@ -2102,10 +2102,6 @@ extension MessageEnvelope {
         info.time.completed != nil || stepFinish != nil
     }
 
-    var shouldRenderMarkdown: Bool {
-        !info.role.isAssistant || isCompleted
-    }
-
     var textParts: [MessagePart] {
         parts.filter { $0.type == .text }
     }
@@ -2143,10 +2139,6 @@ extension MessageEnvelope {
 extension MessagePart {
     var isCompleted: Bool {
         time?.end != nil
-    }
-
-    func shouldRenderMarkdown(for role: MessageRole, messageIsCompleted: Bool) -> Bool {
-        !role.isAssistant || messageIsCompleted || isCompleted
     }
 }
 

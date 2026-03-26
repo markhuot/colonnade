@@ -102,7 +102,6 @@
 		AC8DDEDCDEDBF4CE0F942CDC /* solarized-light.json in Resources */ = {isa = PBXBuildFile; fileRef = AAB4911DD210A17FDB19E16C /* solarized-light.json */; };
 		AEBDD85C20187AF6CEFBED24 /* poimandres.json in Resources */ = {isa = PBXBuildFile; fileRef = 5BE6D0708EDF46393B3D567E /* poimandres.json */; };
 		AF8ABCC4B3483FB2E66852DF /* WorkspaceServerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99A358BCB5B643B47216E1CC /* WorkspaceServerController.swift */; };
-		B3760A0AC29C7D5DA2DAF34E /* MarkdownTextRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF2F67B04A4F21071CA30450 /* MarkdownTextRenderer.swift */; };
 		B433571DCF61ACDDE184D224 /* dark-plus.json in Resources */ = {isa = PBXBuildFile; fileRef = 8096897F2825AD973DCA0F42 /* dark-plus.json */; };
 		B4574ECD4B355EECF6EE4F55 /* ProjectSelectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60269834F2626A995F081968 /* ProjectSelectorView.swift */; };
 		B67F090449DFE82B7426E491 /* catppuccin-macchiato.json in Resources */ = {isa = PBXBuildFile; fileRef = B5E1BB60C8335141EAE7389C /* catppuccin-macchiato.json */; };
@@ -121,7 +120,6 @@
 		C435503A29E645951DA488D6 /* gruvbox-light-hard.json in Resources */ = {isa = PBXBuildFile; fileRef = C1895EC8959F6B6E0C091AC7 /* gruvbox-light-hard.json */; };
 		C8971DC0D7CEA0890D3E07D2 /* catppuccin-latte.json in Resources */ = {isa = PBXBuildFile; fileRef = F4F9E048C1D7DB315B1D0311 /* catppuccin-latte.json */; };
 		C94B728C7894DCF3C6B73AC1 /* IOSSessionColumnView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05D7A1941B5DD9DA07CEE67 /* IOSSessionColumnView.swift */; };
-		CD561C23A20054013A0FDAA6 /* MarkdownTextRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF2F67B04A4F21071CA30450 /* MarkdownTextRenderer.swift */; };
 		D08014049317D0911ED7242B /* catppuccin-frappe.json in Resources */ = {isa = PBXBuildFile; fileRef = A9F8EA1A7231DE8BFDEDE650 /* catppuccin-frappe.json */; };
 		D102999455A3B9822D229632 /* AppWindows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19CB848A41CE116C5C722A65 /* AppWindows.swift */; };
 		D13B6E2BC5DE3BDE16487043 /* IOSProjectSelectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D7D4938C7BCBD36B5D6A3CC /* IOSProjectSelectorView.swift */; };
@@ -271,7 +269,6 @@
 		ED68EC21804BF6421F0AC533 /* dracula-soft.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "dracula-soft.json"; sourceTree = "<group>"; };
 		ED81FB8687873469E66F5443 /* houston.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = houston.json; sourceTree = "<group>"; };
 		EE08B4485E3B7EFB64154617 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		EF2F67B04A4F21071CA30450 /* MarkdownTextRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTextRenderer.swift; sourceTree = "<group>"; };
 		EF4BCCB8B9759ACAC1E0F946 /* IOSRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSRootView.swift; sourceTree = "<group>"; };
 		EF5846A30D7C0ED6B29B58DB /* night-owl-light.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "night-owl-light.json"; sourceTree = "<group>"; };
 		EFD943C72B4EB9338475E9B7 /* AppPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferences.swift; sourceTree = "<group>"; };
@@ -449,7 +446,6 @@
 				EFD943C72B4EB9338475E9B7 /* AppPreferences.swift */,
 				C3A41F374510C3BD0ADDA47C /* AppThemePreferences.swift */,
 				DB92D03586816A5EA76C1056 /* LocalServerLaunchHandle.swift */,
-				EF2F67B04A4F21071CA30450 /* MarkdownTextRenderer.swift */,
 				5D9883E2D837A231D55E1F6D /* NativeWorkspaceEventNotifier.swift */,
 				14EC8AE42C80968027536CB3 /* OpenCodeAppState.swift */,
 				CE623F9300FC8A882417FE98 /* OpenCodeThemeSupport.swift */,
@@ -694,7 +690,6 @@
 				F3BE0ADE4972ECFA5F74422B /* IOSSourcesListView.swift in Sources */,
 				91DF8D4484C5DD197246985B /* IOSWorkspaceRootContainer.swift in Sources */,
 				138215FAC39E3BA74B776623 /* LocalServerLaunchHandle.swift in Sources */,
-				CD561C23A20054013A0FDAA6 /* MarkdownTextRenderer.swift in Sources */,
 				0BB4F124672224E68EAB51C8 /* NativeWorkspaceEventNotifier.swift in Sources */,
 				6EE6A2D36A89363BA30F7E91 /* OpenCodeAPIClient.swift in Sources */,
 				09CB17BCCFE541726321D4AB /* OpenCodeAppModelFactory+iOS.swift in Sources */,
@@ -733,7 +728,6 @@
 				04B85B4F3C96ECDA6AEE9A22 /* KeyboardEventModels.swift in Sources */,
 				57A7E2BDD433D6E18AE4D239 /* LocalServerLaunchHandle.swift in Sources */,
 				8DEF4F721C360A00E8558D18 /* MacPlatformSupport.swift in Sources */,
-				B3760A0AC29C7D5DA2DAF34E /* MarkdownTextRenderer.swift in Sources */,
 				51C34F8438AAD2D2069DFECF /* NativeWorkspaceEventNotifier.swift in Sources */,
 				D4BECB841CAAE60EB9EC7517 /* OpenCodeAPIClient.swift in Sources */,
 				8FD62F37FBAEA962FBA34044 /* OpenCodeApp.swift in Sources */,

@@ -503,6 +503,7 @@ struct TranscriptQuestionCardContent<TrailingOverlay: View>: View {
     let leadingPadding: CGFloat
     let onSubmitAnswers: ([[String]]) -> Void
     let onReject: () -> Void
+    @ViewBuilder
     let trailingOverlay: () -> TrailingOverlay
 
     @State private var selections: [String: Set<String>] = [:]

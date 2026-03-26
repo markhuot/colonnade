@@ -16,6 +16,12 @@ enum DebugRuntime {
             && ProcessInfo.processInfo.environment["OPENCODE_ENABLE_DEBUG_LOGGING"] != nil
     }()
 
+    static let isViewRenderCountersEnabled: Bool = {
+        isDevelopmentBuild
+            && ProcessInfo.processInfo.environment["CI"] == nil
+            && ProcessInfo.processInfo.environment["OPENCODE_ENABLE_VIEW_RENDER_COUNTERS"] != nil
+    }()
+
 }
 
 enum DebugLogging {
