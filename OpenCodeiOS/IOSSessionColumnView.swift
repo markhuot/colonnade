@@ -523,8 +523,6 @@ private struct IOSMessageCard: View {
     let renderContext: IOSSessionTimelineView.MessageRenderContext
 
     var body: some View {
-        let textParts = message.textParts
-        let reasoningParts = message.reasoningParts
         let toolParts = message.toolParts
         let subagentSessionsByPartID = renderContext.subagentSessionsByPartID
         let visibleText = message.visibleText
@@ -533,23 +531,19 @@ private struct IOSMessageCard: View {
             || (showsThinking && !reasoningText.isEmpty)
             || (message.stepFinish?.reason?.localizedCaseInsensitiveCompare("tool-calls") != .orderedSame && message.stepFinish != nil)
             || message.info.error != nil
-        let rendersMarkdownText = textParts.allSatisfy {
-            $0.shouldRenderMarkdown(for: message.info.role, messageIsCompleted: message.isCompleted)
-        }
-        let rendersMarkdownReasoning = reasoningParts.allSatisfy {
-            $0.shouldRenderMarkdown(for: message.info.role, messageIsCompleted: message.isCompleted)
-        }
-        let renderedMessageText = MarkdownTextRenderer.render(
-            text: visibleText,
-            rendersMarkdown: rendersMarkdownText,
-            theme: theme,
-            style: .body(theme: theme)
+        let renderedMessageText = NSAttributedString(
+            string: visibleText,
+            attributes: [
+                .font: UIFont.preferredFont(forTextStyle: .body),
+                .foregroundColor: theme.primaryTextColor
+            ]
         )
-        let renderedReasoningText = MarkdownTextRenderer.render(
-            text: reasoningText,
-            rendersMarkdown: rendersMarkdownReasoning,
-            theme: theme,
-            style: .callout(theme: theme)
+        let renderedReasoningText = NSAttributedString(
+            string: reasoningText,
+            attributes: [
+                .font: UIFont.preferredFont(forTextStyle: .callout),
+                .foregroundColor: theme.secondaryTextColor
+            ]
         )
 
         VStack(alignment: .leading, spacing: 8) {

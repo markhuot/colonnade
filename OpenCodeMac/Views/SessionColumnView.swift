@@ -1045,8 +1045,6 @@ private struct MessageCard: View {
     let onInteraction: () -> Void
 
     var body: some View {
-        let textParts = message.textParts
-        let reasoningParts = message.reasoningParts
         let toolParts = message.toolParts
         let subagentSessionsByPartID = renderContext.subagentSessionsByPartID
         let visibleText = message.visibleText
@@ -1055,23 +1053,19 @@ private struct MessageCard: View {
             || (showsThinking && !reasoningText.isEmpty)
             || (message.stepFinish?.reason?.localizedCaseInsensitiveCompare("tool-calls") != .orderedSame && message.stepFinish != nil)
             || message.info.error != nil
-        let rendersMarkdownText = textParts.allSatisfy {
-            $0.shouldRenderMarkdown(for: message.info.role, messageIsCompleted: message.isCompleted)
-        }
-        let rendersMarkdownReasoning = reasoningParts.allSatisfy {
-            $0.shouldRenderMarkdown(for: message.info.role, messageIsCompleted: message.isCompleted)
-        }
-        let renderedMessageText = MarkdownTextRenderer.render(
-            text: visibleText,
-            rendersMarkdown: rendersMarkdownText,
-            theme: theme,
-            style: .body(theme: theme)
+        let renderedMessageText = NSAttributedString(
+            string: visibleText,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 14),
+                .foregroundColor: theme.primaryTextColor
+            ]
         )
-        let renderedReasoningText = MarkdownTextRenderer.render(
-            text: reasoningText,
-            rendersMarkdown: rendersMarkdownReasoning,
-            theme: theme,
-            style: .callout(theme: theme)
+        let renderedReasoningText = NSAttributedString(
+            string: reasoningText,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 13),
+                .foregroundColor: theme.secondaryTextColor
+            ]
         )
 
         VStack(alignment: .leading, spacing: 8) {
