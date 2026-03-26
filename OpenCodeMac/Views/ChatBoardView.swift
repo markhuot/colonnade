@@ -16,6 +16,8 @@ struct ChatBoardView: View {
     let sessionIDs: [String]
 
     private let paneSpacing: CGFloat = 18
+    private let paneOuterPadding: CGFloat = 20
+    private let paneBottomPadding: CGFloat = 7
     var body: some View {
         let focusedSessionID = appState.focusedSessionID
         let paneDescriptors = sessionIDs.map { sessionID in
@@ -36,7 +38,9 @@ struct ChatBoardView: View {
                             paneView(for: sessionID, liveStore: liveStore)
                         }
                     }
-                    .padding(20)
+                    .padding(.top, paneOuterPadding)
+                    .padding(.horizontal, paneOuterPadding)
+                    .padding(.bottom, paneBottomPadding)
                 }
                 .scrollIndicators(.visible)
                 .onAppear {
