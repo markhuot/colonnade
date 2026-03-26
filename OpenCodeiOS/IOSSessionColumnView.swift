@@ -240,7 +240,7 @@ private struct IOSSessionTimelineView: View {
             LazyVStack(alignment: .leading, spacing: 14) {
                 ForEach(transcriptRows) { row in
                     if let messageState = sessionState.messageState(for: row.id) {
-                        IOSMessageCard(
+                        IOSMessageRowView(
                             messageState: messageState,
                             showsTimestamp: row.showsTimestamp,
                             availableSessions: availableSessions,
@@ -493,30 +493,42 @@ private struct IOSComposerAccessoryBar: View {
     }
 }
 
-private struct IOSMessageCard: View {
-    @AppStorage(ThinkingVisibilityPreferences.showsThinkingKey) private var showsThinking = true
-    @Environment(\.openCodeTheme) private var theme
+private struct IOSMessageRowView: View {
     @ObservedObject var messageState: SessionMessageState
 
     let showsTimestamp: Bool
     let availableSessions: [SessionDisplay]
     let latestTodoToolPartID: String?
 
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            IOSMessageCard(
+                messageState: messageState,
+                showsTimestamp: showsTimestamp
+            )
+
+            IOSMessageToolPartsView(
+                messageState: messageState,
+                availableSessions: availableSessions,
+                latestTodoToolPartID: latestTodoToolPartID
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct IOSMessageCard: View {
+    @AppStorage(ThinkingVisibilityPreferences.showsThinkingKey) private var showsThinking = true
+    @Environment(\.openCodeTheme) private var theme
+    @ObservedObject var messageState: SessionMessageState
+
+    let showsTimestamp: Bool
+
     private var message: MessageEnvelope {
         messageState.snapshot
     }
 
-    private var subagentSessionsByPartID: [String: SessionDisplay] {
-        MessagePart.resolveSubagentSessions(
-            for: messageState.toolParts,
-            in: availableSessions,
-            parentSessionID: messageState.info.sessionID,
-            baseReferenceTimeMS: messageState.info.time.created
-        )
-    }
-
     var body: some View {
-        let toolParts = messageState.toolParts
         let visibleText = messageState.visibleText
         let reasoningText = messageState.reasoningText
         let showsMessageBubble = !visibleText.isEmpty
@@ -574,16 +586,38 @@ private struct IOSMessageCard: View {
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            ForEach(toolParts) { toolPart in
-                IOSToolPartView(
-                    part: toolPart,
-                    subagentSession: subagentSessionsByPartID[toolPart.id],
-                    latestTodoToolPartID: latestTodoToolPartID
-                )
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct IOSMessageToolPartsView: View {
+    @ObservedObject var messageState: SessionMessageState
+
+    let availableSessions: [SessionDisplay]
+    let latestTodoToolPartID: String?
+
+    private var toolParts: [MessagePart] {
+        messageState.toolParts
+    }
+
+    private var subagentSessionsByPartID: [String: SessionDisplay] {
+        MessagePart.resolveSubagentSessions(
+            for: toolParts,
+            in: availableSessions,
+            parentSessionID: messageState.info.sessionID,
+            baseReferenceTimeMS: messageState.info.time.created
+        )
+    }
+
+    var body: some View {
+        ForEach(toolParts) { toolPart in
+            IOSToolPartView(
+                part: toolPart,
+                subagentSession: subagentSessionsByPartID[toolPart.id],
+                latestTodoToolPartID: latestTodoToolPartID
+            )
+        }
     }
 }
 

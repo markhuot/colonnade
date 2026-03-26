@@ -84,12 +84,6 @@ private struct SidebarView: View {
             }
 
             if appState.selectedDirectory != nil {
-                Section {
-                    Button("Back to Projects") {
-                        appState.returnToProjectChooser()
-                    }
-                }
-
                 if let liveStore = appState.liveStore {
                     SessionListSection(
                         liveStore: liveStore,

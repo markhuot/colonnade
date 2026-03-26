@@ -573,7 +573,7 @@ private struct SessionTimelineView: View {
             LazyVStack(alignment: .leading, spacing: 14) {
                 ForEach(transcriptRows) { row in
                     if let messageState = sessionState.messageState(for: row.id) {
-                        MessageCard(
+                        MessageRowView(
                             messageState: messageState,
                             showsTimestamp: row.showsTimestamp,
                             availableSessions: availableSessions,
@@ -610,7 +610,8 @@ private struct SessionTimelineView: View {
             }
             .padding(18)
         }
-
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .layoutPriority(1)
         .defaultScrollAnchor(.bottom)
         .background(theme.mutedSurfaceBackground.opacity(0.8))
     }
@@ -1143,9 +1144,7 @@ private enum TimelineMessageLayout {
     }
 }
 
-private struct MessageCard: View {
-    @AppStorage(ThinkingVisibilityPreferences.showsThinkingKey) private var showsThinking = true
-    @Environment(\.openCodeTheme) private var theme
+private struct MessageRowView: View {
     @ObservedObject var messageState: SessionMessageState
 
     let showsTimestamp: Bool
@@ -1154,23 +1153,40 @@ private struct MessageCard: View {
     let workspaceConnection: WorkspaceConnection?
     let onInteraction: () -> Void
 
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            MessageCard(
+                messageState: messageState,
+                showsTimestamp: showsTimestamp,
+                onInteraction: onInteraction
+            )
+
+            MessageToolPartsView(
+                messageState: messageState,
+                availableSessions: availableSessions,
+                latestTodoToolPartID: latestTodoToolPartID,
+                workspaceConnection: workspaceConnection
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct MessageCard: View {
+    @AppStorage(ThinkingVisibilityPreferences.showsThinkingKey) private var showsThinking = true
+    @Environment(\.openCodeTheme) private var theme
+    @ObservedObject var messageState: SessionMessageState
+
+    let showsTimestamp: Bool
+    let onInteraction: () -> Void
+
     private var message: MessageEnvelope {
         messageState.snapshot
-    }
-
-    private var subagentSessionsByPartID: [String: SessionDisplay] {
-        MessagePart.resolveSubagentSessions(
-            for: messageState.toolParts,
-            in: availableSessions,
-            parentSessionID: messageState.info.sessionID,
-            baseReferenceTimeMS: messageState.info.time.created
-        )
     }
 
     var body: some View {
         let renderDebugKey = "message-card:\(message.id)"
         let renderCount = ViewRenderDebugRegistry.recordBody(for: renderDebugKey)
-        let toolParts = messageState.toolParts
         let visibleText = messageState.visibleText
         let reasoningText = messageState.reasoningText
         let showsMessageBubble = !visibleText.isEmpty
@@ -1234,16 +1250,6 @@ private struct MessageCard: View {
                 }
                 .padding(.leading, TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.messageCardPadding))
             }
-
-            ForEach(toolParts) { toolPart in
-                ToolPartView(
-                    part: toolPart,
-                    subagentSession: subagentSessionsByPartID[toolPart.id],
-                    latestTodoToolPartID: latestTodoToolPartID,
-                    workspaceConnection: workspaceConnection
-                )
-                    .padding(.leading, TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.toolCardPadding))
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1251,6 +1257,39 @@ private struct MessageCard: View {
     private var bubbleBackground: some View {
         RoundedRectangle(cornerRadius: 18, style: .continuous)
             .fill(messageState.info.role.isAssistant ? theme.assistantBubble : theme.userBubble)
+    }
+}
+
+private struct MessageToolPartsView: View {
+    @ObservedObject var messageState: SessionMessageState
+
+    let availableSessions: [SessionDisplay]
+    let latestTodoToolPartID: String?
+    let workspaceConnection: WorkspaceConnection?
+
+    private var toolParts: [MessagePart] {
+        messageState.toolParts
+    }
+
+    private var subagentSessionsByPartID: [String: SessionDisplay] {
+        MessagePart.resolveSubagentSessions(
+            for: toolParts,
+            in: availableSessions,
+            parentSessionID: messageState.info.sessionID,
+            baseReferenceTimeMS: messageState.info.time.created
+        )
+    }
+
+    var body: some View {
+        ForEach(toolParts) { toolPart in
+            ToolPartView(
+                part: toolPart,
+                subagentSession: subagentSessionsByPartID[toolPart.id],
+                latestTodoToolPartID: latestTodoToolPartID,
+                workspaceConnection: workspaceConnection
+            )
+                .padding(.leading, TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.toolCardPadding))
+        }
     }
 }
 
