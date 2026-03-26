@@ -29,6 +29,145 @@ enum SessionTranscriptSupport {
             ]
         )
     }
+
+    static func patchDetail(from patchText: String?) -> ToolPatchDetail? {
+        guard let patchText, !patchText.isEmpty else { return nil }
+
+        struct FileBuilder {
+            let id: Int
+            let path: String
+            var destinationPath: String?
+            var operation: ToolPatchFileOperation
+            var hunks: [ToolPatchHunk]
+        }
+
+        var files: [ToolPatchFile] = []
+        var currentFile: FileBuilder?
+        var currentHunkHeader: String?
+        var currentLines: [ToolPatchLine] = []
+        var nextFileID = 0
+        var nextHunkID = 0
+        var nextLineID = 0
+
+        func buildFile(from builder: FileBuilder) -> ToolPatchFile {
+            ToolPatchFile(
+                id: builder.id,
+                path: builder.path,
+                destinationPath: builder.destinationPath,
+                operation: builder.operation,
+                hunks: builder.hunks
+            )
+        }
+
+        func flushHunk() {
+            guard var file = currentFile else { return }
+            guard currentHunkHeader != nil || !currentLines.isEmpty else { return }
+
+            file.hunks.append(
+                ToolPatchHunk(
+                    id: nextHunkID,
+                    header: currentHunkHeader,
+                    lines: currentLines
+                )
+            )
+            nextHunkID += 1
+            currentFile = file
+            currentHunkHeader = nil
+            currentLines = []
+        }
+
+        func flushFile() {
+            flushHunk()
+
+            guard let file = currentFile else { return }
+            files.append(buildFile(from: file))
+            currentFile = nil
+        }
+
+        func beginFile(path: String, operation: ToolPatchFileOperation) {
+            flushFile()
+            currentFile = FileBuilder(id: nextFileID, path: path, destinationPath: nil, operation: operation, hunks: [])
+            nextFileID += 1
+        }
+
+        func updateCurrentFile(_ mutate: (inout FileBuilder) -> Void) {
+            guard var file = currentFile else { return }
+            mutate(&file)
+            currentFile = file
+        }
+
+        func appendLine(kind: ToolPatchLineKind, text: String) {
+            guard currentFile != nil else { return }
+            currentLines.append(ToolPatchLine(id: nextLineID, kind: kind, text: text))
+            nextLineID += 1
+        }
+
+        let filePrefixes: [(String, ToolPatchFileOperation)] = [
+            ("*** Update File: ", .updated),
+            ("*** Add File: ", .added),
+            ("*** Delete File: ", .deleted)
+        ]
+
+        for line in patchText.components(separatedBy: .newlines) {
+            if line == "*** Begin Patch" || line == "*** End Patch" {
+                continue
+            }
+
+            if let (prefix, operation) = filePrefixes.first(where: { line.hasPrefix($0.0) }) {
+                let path = String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+                guard !path.isEmpty else { continue }
+                beginFile(path: path, operation: operation)
+                continue
+            }
+
+            if line.hasPrefix("*** Move to: ") {
+                let destinationPath = String(line.dropFirst(13)).trimmingCharacters(in: .whitespaces)
+                guard !destinationPath.isEmpty else { continue }
+                updateCurrentFile {
+                    $0.destinationPath = destinationPath
+                    if $0.operation == .updated {
+                        $0.operation = .moved
+                    }
+                }
+                continue
+            }
+
+            if line.hasPrefix("@@") {
+                flushHunk()
+                currentHunkHeader = line
+                continue
+            }
+
+            if line.hasPrefix("+") && !line.hasPrefix("+++") {
+                appendLine(kind: .addition, text: String(line.dropFirst()))
+                continue
+            }
+
+            if line.hasPrefix("-") && !line.hasPrefix("---") {
+                appendLine(kind: .deletion, text: String(line.dropFirst()))
+                continue
+            }
+
+            if line.hasPrefix(" ") {
+                appendLine(kind: .context, text: String(line.dropFirst()))
+                continue
+            }
+
+            if line.isEmpty {
+                if currentHunkHeader != nil || !currentLines.isEmpty {
+                    appendLine(kind: .context, text: "")
+                }
+                continue
+            }
+
+            appendLine(kind: .context, text: line)
+        }
+
+        flushFile()
+
+        guard !files.isEmpty else { return nil }
+        return ToolPatchDetail(files: files)
+    }
 }
 
 struct TranscriptMessageHeaderView: View {
@@ -194,7 +333,7 @@ private struct TranscriptTaskToolSummaryView: View {
     }
 }
 
-private struct TranscriptSummaryBadge: View {
+struct TranscriptSummaryBadge: View {
     let text: String
     let tint: Color
     let background: Color
@@ -386,7 +525,7 @@ private struct TranscriptPatchFileCardView: View {
     }
 }
 
-private struct TranscriptPatchHunkView: View {
+struct TranscriptPatchHunkView: View {
     @Environment(\.openCodeTheme) private var theme
     let hunk: ToolPatchHunk
 
