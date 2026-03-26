@@ -1,5 +1,4 @@
 import Foundation
-
 #if os(macOS)
 import AppKit
 #else
@@ -33,47 +32,16 @@ enum MarkdownTextRenderer {
     ) -> NSAttributedString {
         guard !text.isEmpty else { return NSAttributedString(string: "") }
 
-        let styleName: String = switch style.baseStyle {
-        case .body:
-            "body"
-        case .callout:
-            "callout"
-        }
-
         guard rendersMarkdown, let markdown = try? AttributedString(markdown: text) else {
-            return PerformanceInstrumentation.measure(
-                "markdown-render-plain-text",
-                thresholdMS: 1,
-                details: "style=\(styleName) bytes=\(text.utf8.count)"
-            ) {
-                plainText(text, theme: theme, style: style)
-            }
+            return plainText(text, theme: theme, style: style)
         }
 
-        let blocks = PerformanceInstrumentation.measure(
-            "markdown-render-collect-blocks",
-            thresholdMS: 1,
-            details: "style=\(styleName) bytes=\(text.utf8.count)"
-        ) {
-            collectBlocks(from: markdown)
-        }
+        let blocks = collectBlocks(from: markdown)
         guard !blocks.isEmpty else {
-            return PerformanceInstrumentation.measure(
-                "markdown-render-fallback-plain-text",
-                thresholdMS: 1,
-                details: "style=\(styleName) bytes=\(text.utf8.count)"
-            ) {
-                plainText(text, theme: theme, style: style)
-            }
+            return plainText(text, theme: theme, style: style)
         }
 
-        return PerformanceInstrumentation.measure(
-            "markdown-render-compose",
-            thresholdMS: 1,
-            details: "style=\(styleName) bytes=\(text.utf8.count) blocks=\(blocks.count)"
-        ) {
-            compose(blocks: blocks, theme: theme, style: style)
-        }
+        return compose(blocks: blocks, theme: theme, style: style)
     }
 
     private static func plainText(_ text: String, theme: OpenCodeTheme, style: MarkdownTextStyle) -> NSAttributedString {
@@ -290,7 +258,7 @@ enum MarkdownTextRenderer {
     }
 
     private static func measuredWidth(for text: String, font: PlatformFont) -> CGFloat {
-        (text as NSString).size(withAttributes: [.font: font]).width
+        return (text as NSString).size(withAttributes: [.font: font]).width
     }
 
     private static func baseFont(for style: MarkdownTextStyle.BaseStyle) -> PlatformFont {
@@ -338,6 +306,17 @@ enum MarkdownTextRenderer {
         #else
         return .monospacedSystemFont(ofSize: font.pointSize * 0.95, weight: .regular)
         #endif
+    }
+}
+
+private extension MarkdownTextStyle.BaseStyle {
+    var debugName: String {
+        switch self {
+        case .body:
+            "body"
+        case .callout:
+            "callout"
+        }
     }
 }
 

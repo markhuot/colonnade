@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 struct OpenCodeSession: Codable, Identifiable, Hashable {
     struct Summary: Codable, Hashable {

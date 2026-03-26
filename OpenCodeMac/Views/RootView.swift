@@ -6,7 +6,6 @@ struct RootView: View {
     @Environment(\.openCodeTheme) private var theme
 
     var body: some View {
-        let selectedDirectoryText = appState.selectedDirectory ?? "nil"
         let openSessionIDs = appState.openSessionIDs
 
         NavigationSplitView {
@@ -25,9 +24,6 @@ struct RootView: View {
         }
         .navigationTitle(appState.projectName ?? "Choose Project")
         .foregroundStyle(theme.primaryText)
-        .performanceLayoutProbe("RootView") {
-            "selectedDirectory=\(selectedDirectoryText) openSessions=\(appState.openSessionIDs.count) isLoading=\(appState.isLoading) launchStage=\(String(describing: appState.launchStage))"
-        }
         .alert("Colonnade Error", isPresented: Binding(
             get: { appState.errorMessage != nil },
             set: { isPresented in
@@ -52,6 +48,8 @@ private struct SidebarView: View {
     @Environment(\.openCodeTheme) private var theme
     @State private var sessionPendingArchive: SessionDisplay?
     @State private var sessionPendingStop: SessionDisplay?
+    @State private var sessionPendingRename: SessionDisplay?
+    @State private var sessionRenameTitle = ""
 
     var body: some View {
         List(selection: sessionListSelection) {
@@ -90,6 +88,10 @@ private struct SidebarView: View {
                     SessionListSection(
                         liveStore: liveStore,
                         openSessionIDs: appState.openSessionIDs,
+                        onRenameRequest: {
+                            sessionPendingRename = $0
+                            sessionRenameTitle = $0.title
+                        },
                         onStopRequest: { sessionPendingStop = $0 },
                         onArchiveRequest: { sessionPendingArchive = $0 }
                     )
@@ -154,6 +156,34 @@ private struct SidebarView: View {
             Text("Stop \"\(session.title)\"? The current run will be aborted.")
         }
         .alert(
+            "Rename Session",
+            isPresented: Binding(
+                get: { sessionPendingRename != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        sessionPendingRename = nil
+                        sessionRenameTitle = ""
+                    }
+                }
+            ),
+            presenting: sessionPendingRename
+        ) { session in
+            TextField("Session title", text: $sessionRenameTitle)
+
+            Button("Rename") {
+                appState.renameSession(session.id, title: sessionRenameTitle)
+                sessionPendingRename = nil
+                sessionRenameTitle = ""
+            }
+
+            Button("Cancel", role: .cancel) {
+                sessionPendingRename = nil
+                sessionRenameTitle = ""
+            }
+        } message: { session in
+            Text("Enter a new name for \"\(session.title)\".")
+        }
+        .alert(
             "Archive Session?",
             isPresented: Binding(
                 get: { sessionPendingArchive != nil },
@@ -205,6 +235,7 @@ private struct SessionListSection: View {
     @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
 
+    let onRenameRequest: (SessionDisplay) -> Void
     let onStopRequest: (SessionDisplay) -> Void
     let onArchiveRequest: (SessionDisplay) -> Void
 
@@ -254,6 +285,14 @@ private struct SessionListSection: View {
             sessionState: sessionState
         )
         .contextMenu {
+            if let session = sessionState.session {
+                Button("Rename Session...") {
+                    onRenameRequest(session)
+                }
+
+                Divider()
+            }
+
             if let session = sessionState.session, openSessionIDSet.contains(session.id) {
                 Button("Close Session") {
                     appState.closeSession(session.id)

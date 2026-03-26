@@ -12,6 +12,7 @@ struct IOSRootView: View {
     @State private var sessionDrawerPosition: IOSSessionDrawerPosition = .expanded
     @State private var isPresentingPreferences = false
     @State private var activeComposerSessionID: String?
+    @State private var draftRegistry = SessionDraftRegistry()
 
     private var hasSelectedDirectory: Bool {
         appState.selectedDirectory != nil
@@ -36,7 +37,41 @@ struct IOSRootView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if hasSelectedDirectory {
                 if let sessionID = resolvedComposerSessionID {
-                    IOSActivePromptComposerView(sessionID: sessionID) {
+                    let draftState = draftRegistry.state(for: sessionID)
+                    IOSActivePromptComposerView(
+                        sessionID: sessionID,
+                        draftState: draftState,
+                        composerFocusRequestID: appState.promptFocusRequest?.sessionID == sessionID ? appState.promptFocusRequest?.id : nil,
+                        agentOptions: appState.agentOptions(for: sessionID),
+                        modelOptions: appState.modelOptions(for: sessionID),
+                        selectedModelOption: appState.selectedModelOption(for: sessionID),
+                        selectedAgentKey: Binding(
+                            get: { appState.selectedAgentOption(for: sessionID)?.id ?? appState.agentOptions(for: sessionID).first?.id ?? "" },
+                            set: { appState.setSelectedAgent($0, for: sessionID) }
+                        ),
+                        selectedModelKey: Binding(
+                            get: { appState.selectedModelOption(for: sessionID)?.id ?? appState.modelOptions(for: sessionID).first?.id ?? "" },
+                            set: { appState.setSelectedModel($0, for: sessionID, updateDefault: PlatformModifierKeyState.shouldUpdateDefaultModel()) }
+                        ),
+                        selectedThinkingLevel: Binding(
+                            get: {
+                                let thinkingLevels = [OpenCodeAppModel.defaultThinkingLevel] + (appState.selectedModelOption(for: sessionID)?.thinkingLevels ?? [])
+                                return appState.selectedThinkingLevel(for: sessionID) ?? thinkingLevels.first ?? ""
+                            },
+                            set: { appState.setSelectedThinkingLevel($0, for: sessionID) }
+                        ),
+                        onFocus: {
+                            appState.focusSession(sessionID)
+                        },
+                        onSubmit: {
+                            let currentDraft = draftState.text
+                            let didSend = appState.sendMessage(sessionID: sessionID, text: currentDraft)
+                            if didSend {
+                                draftState.text = ""
+                            }
+                            return didSend
+                        }
+                    ) {
                         activeComposerSessionID = nil
                     }
                     .padding(.horizontal, 12)
@@ -51,6 +86,9 @@ struct IOSRootView: View {
             if hasSelectedDirectory, resolvedComposerSessionID == nil {
                 IOSPersistentSessionDrawer(
                     position: $sessionDrawerPosition,
+                    onReturnToProjectPicker: {
+                        appState.resetServerSelection()
+                    },
                     onShowPreferences: {
                         isPresentingPreferences = true
                     },
@@ -93,6 +131,7 @@ struct IOSRootView: View {
             activateComposer(for: sessionID)
         }
         .onChange(of: appState.openSessionIDs) { _, newValue in
+            draftRegistry.retain(only: newValue)
             guard let activeComposerSessionID, !newValue.contains(activeComposerSessionID) else { return }
             self.activeComposerSessionID = appState.focusedSessionID.flatMap { newValue.contains($0) ? $0 : nil }
         }
@@ -104,6 +143,7 @@ struct IOSRootView: View {
         if hasSelectedDirectory {
             IOSSessionBoardContainerView(
                 activeComposerSessionID: resolvedComposerSessionID,
+                draftRegistry: draftRegistry,
                 onDeactivateComposer: {
                     activeComposerSessionID = nil
                 },
@@ -139,6 +179,7 @@ private struct IOSPersistentSessionDrawer: View {
 
     @Binding var position: IOSSessionDrawerPosition
 
+    let onReturnToProjectPicker: () -> Void
     let onShowPreferences: () -> Void
     let onCreateSession: () -> Void
     let onSessionSelected: (SessionDisplay) -> Void
@@ -183,6 +224,15 @@ private struct IOSPersistentSessionDrawer: View {
 
                 if showsExpandedContent {
                     HStack {
+                        Button {
+                            onReturnToProjectPicker()
+                        } label: {
+                            Image(systemName: "chevron.backward")
+                                .font(.body.weight(.semibold))
+                                .frame(width: 32, height: 32)
+                        }
+                        .buttonStyle(.bordered)
+
                         Button {
                             onShowPreferences()
                         } label: {
@@ -287,6 +337,7 @@ private struct IOSSessionBoardContainerView: View {
     @EnvironmentObject private var appState: OpenCodeAppModel
 
     let activeComposerSessionID: String?
+    let draftRegistry: SessionDraftRegistry
     let onDeactivateComposer: () -> Void
     let onActivateComposer: (String) -> Void
 
@@ -294,6 +345,7 @@ private struct IOSSessionBoardContainerView: View {
         IOSSessionBoardView(
             initialSessionID: initialSessionID,
             activeComposerSessionID: activeComposerSessionID,
+            draftRegistry: draftRegistry,
             onDeactivateComposer: onDeactivateComposer,
             onActivateComposer: onActivateComposer
         )

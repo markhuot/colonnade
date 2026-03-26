@@ -165,16 +165,7 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
         messageRefreshTasks[sessionID]?.cancel()
         messageRefreshTasks[sessionID] = Task {
             do {
-                let refreshStart = PerformanceInstrumentation.begin(
-                    "coordinator-refresh-messages",
-                    details: "directory=\(directory) sessionID=\(sessionID)"
-                )
                 let messages = try await workspaceService.loadMessages(directory: directory, sessionID: sessionID)
-                let totalParts = messages.reduce(0) { $0 + $1.parts.count }
-                let messagesWithParts = messages.filter { !$0.parts.isEmpty }.count
-                PerformanceInstrumentation.log(
-                    "coordinator-refresh-messages-loaded directory=\(directory) sessionID=\(sessionID) messages=\(messages.count) totalParts=\(totalParts) messagesWithParts=\(messagesWithParts)"
-                )
                 DebugLogging.notice(logger, "Loaded messages for \(sessionID) count=\(messages.count)")
                 let limits = modelContextLimits
                 await repository.replaceMessages(
@@ -196,17 +187,8 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
                     store.replaceMessages(sessionID: sessionID, messages: messages)
                     store.markMessagesHydrated(sessionID: sessionID, updatedAtMS: hydratedUpdatedAtMS)
                 }
-                PerformanceInstrumentation.end(
-                    "coordinator-refresh-messages",
-                    from: refreshStart,
-                    details: "directory=\(directory) sessionID=\(sessionID) messages=\(messages.count) totalParts=\(totalParts)",
-                    thresholdMS: 1
-                )
             } catch {
                 logger.error("Refresh messages failed for \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                PerformanceInstrumentation.log(
-                    "coordinator-refresh-messages-failed directory=\(directory) sessionID=\(sessionID) error=\(error.localizedDescription)"
-                )
             }
         }
         await messageRefreshTasks[sessionID]?.value
@@ -440,9 +422,6 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
             switch payload.type {
             case .messagePartUpdated:
                 if let partObject = payload.object(.part), let part = partObject.decoded(MessagePart.self) {
-                    PerformanceInstrumentation.log(
-                        "event-message-part-updated directory=\(directory) sessionID=\(sessionID) messageID=\(part.messageID ?? "nil") partID=\(part.id) type=\(part.type.rawString)"
-                    )
                     let appliedPart = await withStore { store in
                         store.applyMessagePart(part)
                     }
@@ -459,9 +438,6 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
                 }
                 let field = MessagePartDeltaField(rawString: payload.string(.field) ?? "")
                 let delta = payload.string(.delta) ?? ""
-                PerformanceInstrumentation.log(
-                    "event-message-part-delta directory=\(directory) sessionID=\(sessionID) partID=\(partID) field=\(field.rawString) deltaBytes=\(delta.utf8.count)"
-                )
                 let applied = await withStore { store in
                     store.applyMessagePartDelta(sessionID: sessionID, partID: partID, field: field, delta: delta)
                 }
@@ -475,9 +451,6 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
                     await scheduleMessageRefresh(for: sessionID, reason: .partRemovedMiss(partID: nil))
                     return
                 }
-                PerformanceInstrumentation.log(
-                    "event-message-part-removed directory=\(directory) sessionID=\(sessionID) partID=\(partID)"
-                )
                 let removed = await withStore { store in
                     store.removeMessagePart(sessionID: sessionID, partID: partID)
                 }

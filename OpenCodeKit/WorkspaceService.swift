@@ -4,6 +4,7 @@ protocol WorkspaceServiceProtocol: Sendable {
     func loadWorkspace(directory: String) async throws -> WorkspaceSnapshot
     func loadInteractions(directory: String) async throws -> InteractionSnapshot
     func createSession(directory: String, title: String?, parentID: String?) async throws -> OpenCodeSession
+    func renameSession(directory: String, sessionID: String, title: String) async throws -> OpenCodeSession
     func archiveSession(directory: String, sessionID: String) async throws -> OpenCodeSession
     func stopSession(directory: String, sessionID: String) async throws
     func loadCommandCatalog() async throws -> CommandCatalog
@@ -62,6 +63,10 @@ struct WorkspaceService: WorkspaceServiceProtocol {
 
     func createSession(directory: String, title: String? = nil, parentID: String? = nil) async throws -> OpenCodeSession {
         try await client.createSession(directory: directory, title: title, parentID: parentID)
+    }
+
+    func renameSession(directory: String, sessionID: String, title: String) async throws -> OpenCodeSession {
+        try await client.renameSession(directory: directory, sessionID: sessionID, title: title)
     }
 
     func archiveSession(directory: String, sessionID: String) async throws -> OpenCodeSession {

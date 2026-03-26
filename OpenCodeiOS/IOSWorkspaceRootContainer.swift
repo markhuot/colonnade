@@ -12,9 +12,6 @@ struct IOSWorkspaceRootContainer: View {
     var body: some View {
         IOSRootView()
             .environmentObject(appState)
-            .performanceLayoutProbe("IOSWorkspaceRootContainer") {
-                "project=\(appState.projectName ?? "nil") selectedDirectory=\(appState.selectedDirectory ?? "nil") isLoading=\(appState.isLoading)"
-            }
             .task {
                 appState.configurePreferredDefaultModelPersistence(
                     provider: { modelPreferencesController.preferredDefaultModelReference },

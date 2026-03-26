@@ -888,6 +888,16 @@ final class WorkspaceServiceTests: XCTestCase {
         XCTAssertEqual(client.abortSessionCalls, [.init(directory: "/tmp/project", sessionID: "session-1")])
     }
 
+    func testRenameSessionUsesInjectedClient() async throws {
+        let renamedSession = makeSession(id: "session-1")
+        let client = MockOpenCodeAPIClient(renamedSessionResult: renamedSession)
+
+        let session = try await WorkspaceService(client: client).renameSession(directory: "/tmp/project", sessionID: "session-1", title: "Renamed")
+
+        XCTAssertEqual(client.renameSessionCalls, [.init(directory: "/tmp/project", sessionID: "session-1", title: "Renamed")])
+        XCTAssertEqual(session, renamedSession)
+    }
+
     func testLoadCommandCatalogReturnsValuesFromInjectedClient() async throws {
         let client = MockOpenCodeAPIClient(commands: .init(commands: [
             .init(name: "happycog/release", description: "Release branch helper", agent: nil, model: nil, template: "tmpl", subtask: nil)
@@ -959,8 +969,7 @@ final class OpenCodeAppModelTests: XCTestCase {
         await appState.load(directory: directory)
         appState.openSessionIDs = [session.id]
         appState.setSelectedModel("anthropic/claude-sonnet", for: session.id)
-        appState.drafts[session.id] = "Ship it"
-        appState.sendMessage(sessionID: session.id)
+        appState.sendMessage(sessionID: session.id, text: "Ship it")
         try await Task.sleep(for: .milliseconds(150))
 
         XCTAssertEqual(workspaceService.sendMessageCalls.count, 1)
@@ -1001,6 +1010,42 @@ final class OpenCodeAppModelTests: XCTestCase {
         XCTAssertEqual(refreshedMessages.suffix(1), [session.id])
         let refreshedInteractions = await coordinator.refreshedInteractionsCountSnapshot()
         XCTAssertEqual(refreshedInteractions, 1)
+    }
+
+    func testRenameSessionUsesInjectedServiceAndUpdatesVisibleSessions() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let session = makeSession(id: "session-1", directory: directory)
+        let renamed = OpenCodeSession(
+            id: session.id,
+            slug: session.slug,
+            projectID: session.projectID,
+            workspaceID: session.workspaceID,
+            directory: session.directory,
+            parentID: session.parentID,
+            title: "Renamed Session",
+            version: session.version,
+            summary: session.summary,
+            time: .init(created: session.time.created, updated: session.time.updated + 1, compacting: session.time.compacting, archived: session.time.archived)
+        )
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: []),
+            renameSessionResult: renamed
+        )
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+        appState.renameSession(session.id, title: "  Renamed Session  ")
+        try await waitForAsyncWork()
+
+        XCTAssertEqual(workspaceService.renameSessionCalls, [.init(directory: directory, sessionID: session.id, title: "Renamed Session")])
+        XCTAssertEqual(appState.visibleSessions.first?.title, "Renamed Session")
     }
 
     func testFocusPreviousPaneMovesFocusAndRequestsPromptFocus() {
@@ -1582,6 +1627,41 @@ final class OpenCodeAppModelTests: XCTestCase {
 
         XCTAssertEqual(appState.recentRemoteConnections, ["https://example.com"])
         XCTAssertEqual(RecentRemoteConnectionsPreferences.load(from: defaults), ["https://example.com"])
+    }
+
+    func testResetServerSelectionReturnsIOSAppToProjectPicker() async throws {
+        let directory = "/remote/project"
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(
+                sessions: [makeSession(id: "session-1", directory: directory)],
+                statuses: [:],
+                questions: [],
+                permissions: []
+            )
+        )
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: PersistenceRepository(persistence: PersistenceController(inMemory: true)),
+            persistsWorkspacePaneState: false,
+            supportsLocalServer: false,
+            initialServerURL: URL(string: "https://example.com")!
+        )
+
+        await appState.load(directory: directory)
+        appState.remoteProjectSuggestions = ["/remote/other"]
+        appState.remoteDirectoryText = directory
+
+        appState.resetServerSelection()
+
+        XCTAssertNil(appState.selectedDirectory)
+        XCTAssertEqual(appState.openSessionIDs, [])
+        XCTAssertNil(appState.focusedSessionID)
+        XCTAssertNil(appState.liveStore)
+        XCTAssertEqual(appState.launchStage, .remoteServerEntry)
+        XCTAssertEqual(appState.serverURL, OpenCodeAppModel.defaultServerURL)
+        XCTAssertEqual(appState.remoteProjectSuggestions, [])
+        XCTAssertEqual(appState.remoteDirectoryText, "")
     }
 
     func testRecentRemoteConnectionsKeepMostRecentFiveUniqueValues() {
@@ -2169,6 +2249,37 @@ final class OpenCodeAppModelTests: XCTestCase {
         XCTAssertEqual(appState.modelOptions(for: session.id).first?.reference, ModelReference(providerID: "openai", modelID: "gpt-4.1"))
     }
 
+    func testModelOptionsRemainStableAcrossDraftChangesAndUpdateForPreferredDefault() async throws {
+        let directory = try makeTemporaryDirectory()
+        let persistence = PersistenceController(inMemory: true)
+        let repository = PersistenceRepository(persistence: persistence)
+        let session = makeSession(id: "session-1", directory: directory)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
+        )
+        workspaceService.modelCatalogResult = makeRichModelCatalog()
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+        try await waitForAsyncWork(milliseconds: 100)
+
+        let initialOptions = appState.modelOptions(for: session.id)
+        let optionsAfterDraftChange = appState.modelOptions(for: session.id)
+
+        XCTAssertEqual(initialOptions, optionsAfterDraftChange)
+
+        appState.setPreferredDefaultModel(ModelReference(providerID: "openai", modelID: "gpt-4.1"))
+        let optionsAfterDefaultChange = appState.modelOptions(for: session.id)
+
+        XCTAssertEqual(optionsAfterDefaultChange.first?.reference, ModelReference(providerID: "openai", modelID: "gpt-4.1"))
+        XCTAssertNotEqual(initialOptions, optionsAfterDefaultChange)
+    }
+
     func testLoadPrefersRecentAgentSelection() async throws {
         let directory = try makeTemporaryDirectory()
         let persistence = PersistenceController(inMemory: true)
@@ -2306,9 +2417,7 @@ final class OpenCodeAppModelTests: XCTestCase {
 
         await appState.load(directory: directory)
         appState.setSelectedAgent("planner", for: session.id)
-        appState.drafts[session.id] = "Hello world"
-
-        appState.sendMessage(sessionID: session.id)
+        appState.sendMessage(sessionID: session.id, text: "Hello world")
         try await waitForAsyncWork()
 
         XCTAssertEqual(workspaceService.sendMessageCalls.first?.agent, "planner")
@@ -2393,9 +2502,7 @@ final class OpenCodeAppModelTests: XCTestCase {
         await appState.load(directory: directory)
         appState.openSessionIDs = [session.id]
         appState.focusedSessionID = session.id
-        appState.setDraft("/rel", for: session.id)
-
-        XCTAssertEqual(appState.slashCommandSuggestions(for: session.id).map(\.slashName), ["/happycog/release"])
+        XCTAssertEqual(appState.slashCommandSuggestions(for: "/rel", sessionID: session.id).map(\.slashName), ["/happycog/release"])
     }
 
     func testSlashCommandSuggestionsHideAfterCommandSelectionMovesCursorPastSpace() async throws {
@@ -2419,16 +2526,13 @@ final class OpenCodeAppModelTests: XCTestCase {
         await appState.load(directory: directory)
         appState.openSessionIDs = [session.id]
         appState.focusedSessionID = session.id
-        appState.setDraft("/clo", for: session.id)
-
-        let closeOption = try XCTUnwrap(appState.slashCommandSuggestions(for: session.id, cursorLocation: 4).first)
+        let closeOption = try XCTUnwrap(appState.slashCommandSuggestions(for: "/clo", sessionID: session.id, cursorLocation: 4).first)
         XCTAssertEqual(closeOption.slashName, "/close")
 
-        appState.applySlashCommandSuggestion(closeOption, for: session.id)
+        let acceptedDraft = try XCTUnwrap(appState.applyingSlashCommandSuggestion(closeOption, to: "/clo", sessionID: session.id))
 
-        let acceptedDraft = appState.drafts[session.id, default: ""]
         XCTAssertEqual(acceptedDraft, "/close ")
-        XCTAssertTrue(appState.slashCommandSuggestions(for: session.id, cursorLocation: acceptedDraft.utf16.count).isEmpty)
+        XCTAssertTrue(appState.slashCommandSuggestions(for: acceptedDraft, sessionID: session.id, cursorLocation: acceptedDraft.utf16.count).isEmpty)
     }
 
     func testSendMessageExecutesSlashCommandWhenDraftStartsWithSlash() async throws {
@@ -2451,9 +2555,7 @@ final class OpenCodeAppModelTests: XCTestCase {
 
         await appState.load(directory: directory)
         appState.openSessionIDs = [session.id]
-        appState.drafts[session.id] = "/happycog/release 2.3.4 360"
-
-        appState.sendMessage(sessionID: session.id)
+        appState.sendMessage(sessionID: session.id, text: "/happycog/release 2.3.4 360")
         try await waitForAsyncWork()
 
         XCTAssertEqual(workspaceService.executeCommandCalls, [
@@ -2492,9 +2594,7 @@ final class OpenCodeAppModelTests: XCTestCase {
         await appState.load(directory: directory)
         appState.openSessionIDs = [existingSession.id]
         appState.focusedSessionID = existingSession.id
-        appState.drafts[existingSession.id] = "/new"
-
-        XCTAssertTrue(appState.sendMessage(sessionID: existingSession.id))
+        XCTAssertTrue(appState.sendMessage(sessionID: existingSession.id, text: "/new"))
         try await waitForAsyncWork()
 
         XCTAssertEqual(workspaceService.createSessionCalls, [.init(directory: directory, title: nil, parentID: nil)])
@@ -2525,9 +2625,7 @@ final class OpenCodeAppModelTests: XCTestCase {
         await appState.load(directory: directory)
         appState.openSessionIDs = [session1.id, session2.id]
         appState.focusedSessionID = session1.id
-        appState.drafts[session1.id] = "/close"
-
-        XCTAssertTrue(appState.sendMessage(sessionID: session1.id))
+        XCTAssertTrue(appState.sendMessage(sessionID: session1.id, text: "/close"))
         try await waitForAsyncWork()
 
         XCTAssertEqual(appState.openSessionIDs, [session2.id])
@@ -2561,9 +2659,7 @@ final class OpenCodeAppModelTests: XCTestCase {
         await appState.load(directory: directory)
         appState.openSessionIDs = [session1.id, session2.id]
         appState.focusedSessionID = session1.id
-        appState.drafts[session1.id] = "/archive"
-
-        XCTAssertTrue(appState.sendMessage(sessionID: session1.id))
+        XCTAssertTrue(appState.sendMessage(sessionID: session1.id, text: "/archive"))
         try await waitForAsyncWork()
 
         XCTAssertEqual(workspaceService.archiveSessionCalls, [.init(directory: directory, sessionID: session1.id)])
@@ -2592,12 +2688,9 @@ final class OpenCodeAppModelTests: XCTestCase {
         )
 
         await appState.load(directory: directory)
-        appState.drafts[session.id] = "Hello world"
-
-        appState.sendMessage(sessionID: session.id)
+        appState.sendMessage(sessionID: session.id, text: "Hello world")
         try await waitForAsyncWork()
 
-        XCTAssertEqual(appState.drafts[session.id], "Hello world")
         XCTAssertNotNil(appState.errorMessage)
         XCTAssertEqual(workspaceService.sendMessageCalls.count, 1)
     }
@@ -3387,6 +3480,12 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
         let sessionID: String
     }
 
+    struct RenameSessionCall: Equatable {
+        let directory: String
+        let sessionID: String
+        let title: String
+    }
+
     struct PermissionReplyCall: Equatable {
         let directory: String
         let requestID: String
@@ -3409,6 +3508,7 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
     var workspaceSnapshotResult: WorkspaceSnapshot
     var interactionSnapshotResult: InteractionSnapshot
     var createSessionResult: OpenCodeSession
+    var renameSessionResult: OpenCodeSession
     var archiveSessionResult: OpenCodeSession
     var commandCatalogResult: CommandCatalog
     var loadSessionsResult: [OpenCodeSession]
@@ -3428,6 +3528,7 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
     private(set) var loadWorkspaceDirectories: [String] = []
     private(set) var loadInteractionsDirectories: [String] = []
     private(set) var createSessionCalls: [CreateSessionCall] = []
+    private(set) var renameSessionCalls: [RenameSessionCall] = []
     private(set) var archiveSessionCalls: [SessionCall] = []
     private(set) var stopSessionCalls: [SessionCall] = []
     private(set) var executeCommandCalls: [CommandCall] = []
@@ -3444,6 +3545,7 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
         workspaceSnapshotResult: WorkspaceSnapshot = WorkspaceSnapshot(sessions: [], statuses: [:], questions: [], permissions: []),
         interactionSnapshotResult: InteractionSnapshot = InteractionSnapshot(questions: [], permissions: []),
         createSessionResult: OpenCodeSession = makeSession(id: "created-session"),
+        renameSessionResult: OpenCodeSession = makeSession(id: "renamed-session"),
         archiveSessionResult: OpenCodeSession = makeSession(id: "archived-session"),
         commandCatalogResult: CommandCatalog = .init(commands: []),
         loadSessionsResult: [OpenCodeSession] = [],
@@ -3457,6 +3559,7 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
         self.workspaceSnapshotResult = workspaceSnapshotResult
         self.interactionSnapshotResult = interactionSnapshotResult
         self.createSessionResult = createSessionResult
+        self.renameSessionResult = renameSessionResult
         self.archiveSessionResult = archiveSessionResult
         self.commandCatalogResult = commandCatalogResult
         self.loadSessionsResult = loadSessionsResult
@@ -3487,6 +3590,11 @@ private final class MockWorkspaceService: WorkspaceServiceProtocol, @unchecked S
     func createSession(directory: String, title: String?, parentID: String?) async throws -> OpenCodeSession {
         record { createSessionCalls.append(.init(directory: directory, title: title, parentID: parentID)) }
         return createSessionResult
+    }
+
+    func renameSession(directory: String, sessionID: String, title: String) async throws -> OpenCodeSession {
+        record { renameSessionCalls.append(.init(directory: directory, sessionID: sessionID, title: title)) }
+        return renameSessionResult
     }
 
     func archiveSession(directory: String, sessionID: String) async throws -> OpenCodeSession {
@@ -3721,6 +3829,12 @@ private final class MockWorkspaceEventNotifier: WorkspaceEventNotifying, @unchec
 }
 
 private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked Sendable {
+    struct RenameSessionCall: Equatable {
+        let directory: String
+        let sessionID: String
+        let title: String
+    }
+
     let sessionsResult: [OpenCodeSession]
     let statusesResult: [String: SessionStatus]
     let questionsResult: [QuestionRequest]
@@ -3729,12 +3843,14 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
     let projectsResult: [OpenCodeProject]
     let commandsResult: CommandCatalog
     let agentCatalogResult: AgentCatalog
+    let renamedSessionResult: OpenCodeSession
 
     private let lock = NSLock()
     private(set) var recordedDirectories: [String] = []
     private(set) var healthCallCount = 0
     private(set) var projectsCallCount = 0
     private(set) var abortSessionCalls: [MockWorkspaceService.SessionCall] = []
+    private(set) var renameSessionCalls: [RenameSessionCall] = []
 
     init(
         sessions: [OpenCodeSession] = [],
@@ -3744,7 +3860,8 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
         health: OpenCodeServerHealth = .init(healthy: true, version: "1.0.0"),
         projects: [OpenCodeProject] = [],
         commands: CommandCatalog = .init(commands: []),
-        agentCatalog: AgentCatalog = .init(agents: [])
+        agentCatalog: AgentCatalog = .init(agents: []),
+        renamedSessionResult: OpenCodeSession = makeSession(id: "renamed-session")
     ) {
         sessionsResult = sessions
         statusesResult = statuses
@@ -3754,6 +3871,7 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
         projectsResult = projects
         commandsResult = commands
         agentCatalogResult = agentCatalog
+        self.renamedSessionResult = renamedSessionResult
     }
 
     func health() async throws -> OpenCodeServerHealth {
@@ -3801,6 +3919,14 @@ private final class MockOpenCodeAPIClient: OpenCodeAPIClientProtocol, @unchecked
     func createSession(directory: String, title: String?, parentID: String?) async throws -> OpenCodeSession {
         record(directory)
         throw TestError.unimplemented
+    }
+
+    func renameSession(directory: String, sessionID: String, title: String) async throws -> OpenCodeSession {
+        recordSync {
+            recordedDirectories.append(directory)
+            renameSessionCalls.append(.init(directory: directory, sessionID: sessionID, title: title))
+        }
+        return renamedSessionResult
     }
 
     func archiveSession(directory: String, sessionID: String, archivedAtMS: Double) async throws -> OpenCodeSession {

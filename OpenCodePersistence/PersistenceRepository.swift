@@ -395,9 +395,6 @@ actor PersistenceRepository {
         logger.notice(
             "Loaded snapshot directory=\((directory ?? snapshot.selectedDirectory ?? "nil"), privacy: .public) sessions=\(snapshot.sessions.count, privacy: .public) messageSessions=\(snapshot.messagesBySession.count, privacy: .public) messages=\(openMessageCount, privacy: .public) durationMS=\(duration.milliseconds, privacy: .public)"
         )
-        PerformanceInstrumentation.log(
-            "persistence-snapshot-load directory=\(directory ?? snapshot.selectedDirectory ?? "nil") flushMS=\(Self.formatMilliseconds(flushMS)) workspaceFetchMS=\(Self.formatMilliseconds(metrics.workspaceFetchMS)) sessionFetchMS=\(Self.formatMilliseconds(metrics.sessionFetchMS)) messageFetchMS=\(Self.formatMilliseconds(metrics.messageFetchMS)) partFetchMS=\(Self.formatMilliseconds(metrics.partFetchMS)) partGroupingMS=\(Self.formatMilliseconds(metrics.partGroupingMS)) messageDecodeMS=\(Self.formatMilliseconds(metrics.messageDecodeMS)) questionFetchMS=\(Self.formatMilliseconds(metrics.questionFetchMS)) permissionFetchMS=\(Self.formatMilliseconds(metrics.permissionFetchMS)) paneFetchMS=\(Self.formatMilliseconds(metrics.paneFetchMS)) totalMS=\(Self.formatMilliseconds(Self.durationMilliseconds(duration))) sessions=\(snapshot.sessions.count) messageSessions=\(metrics.messageSessionCount) messages=\(metrics.totalMessageCount) parts=\(metrics.totalPartCount) sessionEntities=\(metrics.sessionEntityCount) messageEntities=\(metrics.messageEntityCount) partEntities=\(metrics.partEntityCount) questions=\(metrics.questionEntityCount) permissions=\(metrics.permissionEntityCount) panes=\(metrics.paneEntityCount) preferredSessionsOnly=\(decodeOnlyPreferredSessions) preferredSessionCount=\(preferredMessageSessionIDs.count)"
-        )
         return snapshot
     }
 
@@ -465,10 +462,6 @@ actor PersistenceRepository {
         openSessionIDs: [String]
     ) async {
         await flushBufferedStreamMutationsIfNeeded()
-        let openSessionIDSet = Set(openSessionIDs)
-        let openMessageCountsStart = ContinuousClock.now
-        let beforeOpenMessageCounts = await loadOpenSessionMessageCounts(directory: directory, sessionIDs: openSessionIDs)
-        let openMessageCountsLoadMS = Self.durationMilliseconds(openMessageCountsStart.duration(to: .now))
         logger.notice(
             "Applying workspace snapshot directory=\(directory, privacy: .public) sessions=\(snapshot.sessions.count, privacy: .public) statuses=\(snapshot.statuses.count, privacy: .public) openSessions=\(openSessionIDs.count, privacy: .public)"
         )
@@ -498,19 +491,6 @@ actor PersistenceRepository {
             Self.recomputeSessionDerivedState(workspaceID: workspaceID, modelContextLimits: modelContextLimits, context: context)
             try? context.save()
         }
-        let afterOpenMessageCountsStart = ContinuousClock.now
-        let afterOpenMessageCounts = await loadOpenSessionMessageCounts(directory: directory, sessionIDs: openSessionIDs)
-        let afterOpenMessageCountsLoadMS = Self.durationMilliseconds(afterOpenMessageCountsStart.duration(to: .now))
-        let openSessionMessageChanges = openSessionIDs.compactMap { sessionID -> String? in
-            let oldValue = beforeOpenMessageCounts[sessionID, default: 0]
-            let newValue = afterOpenMessageCounts[sessionID, default: 0]
-            guard oldValue != newValue else { return nil }
-            return "\(sessionID):\(oldValue)->\(newValue)"
-        }
-        let insertedOpenSessions = snapshot.sessions.filter { openSessionIDSet.contains($0.id) && beforeOpenMessageCounts[$0.id] == nil }.count
-        PerformanceInstrumentation.log(
-            "persistence-apply-workspace-snapshot directory=\(directory) openSessions=\(openSessionIDs.count) insertedOpenSessions=\(insertedOpenSessions) openMessageChanges=\(openSessionMessageChanges.isEmpty ? "none" : openSessionMessageChanges.joined(separator: ",")) preCountLoadMS=\(Self.formatMilliseconds(openMessageCountsLoadMS)) postCountLoadMS=\(Self.formatMilliseconds(afterOpenMessageCountsLoadMS))"
-        )
         logger.notice("Applied workspace snapshot directory=\(directory, privacy: .public)")
     }
 
@@ -531,9 +511,6 @@ actor PersistenceRepository {
         await flushBufferedStreamMutationsIfNeeded()
         let partCount = messages.reduce(0) { $0 + $1.parts.count }
         let lastMessageID = messages.last?.id ?? "nil"
-        let beforeCountsStart = ContinuousClock.now
-        let previousCounts = await loadMessageCounts(directory: directory, sessionID: sessionID)
-        let beforeCountsLoadMS = Self.durationMilliseconds(beforeCountsStart.duration(to: .now))
         logger.notice(
             "Replacing messages sessionID=\(sessionID, privacy: .public) count=\(messages.count, privacy: .public) parts=\(partCount, privacy: .public) lastMessageID=\(lastMessageID, privacy: .public)"
         )
@@ -545,12 +522,6 @@ actor PersistenceRepository {
             Self.recomputeSessionDerivedState(workspaceID: workspaceID, modelContextLimits: modelContextLimits, context: context, sessionIDs: [sessionID])
             try? context.save()
         }
-        let afterCountsStart = ContinuousClock.now
-        let updatedCounts = await loadMessageCounts(directory: directory, sessionID: sessionID)
-        let afterCountsLoadMS = Self.durationMilliseconds(afterCountsStart.duration(to: .now))
-        PerformanceInstrumentation.log(
-            "persistence-replace-messages sessionID=\(sessionID) oldMessages=\(previousCounts.messages) newMessages=\(updatedCounts.messages) oldParts=\(previousCounts.parts) newParts=\(updatedCounts.parts) payloadMessages=\(messages.count) payloadParts=\(partCount) preCountLoadMS=\(Self.formatMilliseconds(beforeCountsLoadMS)) postCountLoadMS=\(Self.formatMilliseconds(afterCountsLoadMS))"
-        )
         logger.notice(
             "Replaced messages sessionID=\(sessionID, privacy: .public) count=\(messages.count, privacy: .public) parts=\(partCount, privacy: .public)"
         )

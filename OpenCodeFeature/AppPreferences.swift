@@ -120,3 +120,40 @@ enum RecentRemoteConnectionsPreferences {
         return normalizedValues
     }
 }
+
+@MainActor
+final class SessionDraftState: ObservableObject {
+    @Published var text: String
+
+    init(text: String = "") {
+        self.text = text
+    }
+}
+
+@MainActor
+final class SessionDraftRegistry {
+    private var draftStates: [String: SessionDraftState] = [:]
+
+    func state(for sessionID: String) -> SessionDraftState {
+        if let state = draftStates[sessionID] {
+            return state
+        }
+
+        let state = SessionDraftState()
+        draftStates[sessionID] = state
+        return state
+    }
+
+    func remove(sessionID: String) {
+        draftStates.removeValue(forKey: sessionID)
+    }
+
+    func removeAll() {
+        draftStates.removeAll()
+    }
+
+    func retain(only sessionIDs: some Sequence<String>) {
+        let allowedIDs = Set(sessionIDs)
+        draftStates = draftStates.filter { allowedIDs.contains($0.key) }
+    }
+}

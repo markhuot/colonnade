@@ -6,6 +6,7 @@ struct IOSSessionBoardView: View {
 
     let initialSessionID: String
     let activeComposerSessionID: String?
+    let draftRegistry: SessionDraftRegistry
     let onDeactivateComposer: () -> Void
     let onActivateComposer: (String) -> Void
 
@@ -14,11 +15,13 @@ struct IOSSessionBoardView: View {
     init(
         initialSessionID: String,
         activeComposerSessionID: String? = nil,
+        draftRegistry: SessionDraftRegistry,
         onDeactivateComposer: @escaping () -> Void = {},
         onActivateComposer: @escaping (String) -> Void = { _ in }
     ) {
         self.initialSessionID = initialSessionID
         self.activeComposerSessionID = activeComposerSessionID
+        self.draftRegistry = draftRegistry
         self.onDeactivateComposer = onDeactivateComposer
         self.onActivateComposer = onActivateComposer
         _selectedPageSessionID = State(initialValue: initialSessionID)
@@ -87,6 +90,7 @@ struct IOSSessionBoardView: View {
                         IOSSessionColumnView(
                             sessionState: sessionState,
                             sessionID: sessionID,
+                            draftState: draftRegistry.state(for: sessionID),
                             isComposerActive: activeComposerSessionID == sessionID,
                             onActivateComposer: onActivateComposer
                         )

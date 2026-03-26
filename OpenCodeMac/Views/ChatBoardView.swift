@@ -11,13 +11,13 @@ struct ChatBoardView: View {
     @State private var transientPaneWidths: [String: CGFloat] = [:]
     @State private var draggedSessionID: String?
     @State private var draggedPaneOffset: CGFloat = 0
+    @State private var draftRegistry = SessionDraftRegistry()
 
     let sessionIDs: [String]
 
     private let paneSpacing: CGFloat = 18
     var body: some View {
         let focusedSessionID = appState.focusedSessionID
-        let focusedSessionIDText = focusedSessionID ?? "nil"
         let paneDescriptors = sessionIDs.map { sessionID in
             ChatBoardPaneDescriptor(sessionID: sessionID, width: paneWidth(for: sessionID))
         }
@@ -29,11 +29,6 @@ struct ChatBoardView: View {
                 description: Text("Choose a session from the sidebar or create a new one.")
             )
         } else if let liveStore = appState.liveStore {
-            let renderStart = PerformanceInstrumentation.begin(
-                "chat-board-body",
-                details: "sessionCount=\(sessionIDs.count) focusedSessionID=\(focusedSessionIDText)"
-            )
-
             ScrollViewReader { proxy in
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: 18) {
@@ -59,16 +54,8 @@ struct ChatBoardView: View {
                     }
                     scrollToFocusedSession(with: proxy)
                 }
-                .performanceLayoutProbe("ChatBoardView") {
-                    "sessionCount=\(sessionIDs.count) focusedSessionID=\(focusedSessionIDText)"
-                }
-                .onAppear {
-                    PerformanceInstrumentation.end(
-                        "chat-board-body",
-                        from: renderStart,
-                        details: "sessionCount=\(sessionIDs.count)",
-                        thresholdMS: 1
-                    )
+                .onChange(of: sessionIDs) { _, newValue in
+                    draftRegistry.retain(only: newValue)
                 }
             }
         } else {
@@ -88,6 +75,7 @@ struct ChatBoardView: View {
 
         SessionColumnView(
             sessionState: state,
+            draftState: draftRegistry.state(for: sessionID),
             sessionID: sessionID,
             onPaneDragChanged: { translation in
                 handlePaneDragChanged(sessionID: sessionID, translation: translation)

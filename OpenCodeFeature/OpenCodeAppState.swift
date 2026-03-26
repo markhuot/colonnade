@@ -25,7 +25,6 @@ final class OpenCodeAppModel: ObservableObject {
     @Published var serverURL: URL
     @Published var openSessionIDs: [String] = []
     @Published var focusedSessionID: String?
-    @Published var drafts: [String: String] = [:]
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var launchStage: LaunchStage = .checkingLocalServer
@@ -72,10 +71,24 @@ final class OpenCodeAppModel: ObservableObject {
     private var modelContextLimits: [ModelContextKey: Int] = [:]
     private var localServerHandle: LocalServerLaunchHandle?
     private var loadSequence = 0
+    private var cachedBaseModelOptionsKey: BaseModelOptionsCacheKey?
+    private var cachedBaseModelOptions: [ModelOption] = []
+    private var cachedModelOptionsBySession: [String: SessionModelOptionsCacheEntry] = [:]
 
     let defaultPaneWidth: CGFloat = 720
     let minPaneWidth: CGFloat = 360
     let maxPaneWidth: CGFloat = 960
+
+    private struct BaseModelOptionsCacheKey: Hashable {
+        let modelCatalog: ModelCatalog
+        let preferredDefaultModelReference: ModelReference?
+    }
+
+    private struct SessionModelOptionsCacheEntry {
+        let baseKey: BaseModelOptionsCacheKey
+        let recentModel: ModelReference?
+        let options: [ModelOption]
+    }
 
     init(
         client: (any OpenCodeAPIClientProtocol)? = nil,
@@ -181,7 +194,11 @@ final class OpenCodeAppModel: ObservableObject {
     }
 
     func availableModelOptions() -> [ModelOption] {
-        buildModelOptions(recentModel: nil)
+        let baseKey = BaseModelOptionsCacheKey(
+            modelCatalog: modelCatalog,
+            preferredDefaultModelReference: preferredDefaultModelReference
+        )
+        return buildModelOptions(recentModel: nil, baseKey: baseKey)
     }
 
     func availableAgentOptions() -> [AgentOption] {
@@ -414,45 +431,17 @@ final class OpenCodeAppModel: ObservableObject {
         let connection = WorkspaceConnection(serverURL: serverURL, directory: trimmedDirectory)
         loadSequence += 1
         let loadID = loadSequence
-        let loadStart = PerformanceInstrumentation.begin(
-            "workspace-load",
-            details: "loadID=\(loadID) directory=\(trimmedDirectory) server=\(self.serverURL.absoluteString)"
-        )
 
         DebugLogging.info(logger, "Loading directory: \(trimmedDirectory) server=\(self.serverURL.absoluteString)")
         selectedDirectory = trimmedDirectory
         isLoading = true
         errorMessage = nil
 
-        let liveStoreLookupStart = PerformanceInstrumentation.begin(
-            "workspace-load-live-store",
-            details: "loadID=\(loadID) directory=\(trimmedDirectory)"
-        )
         let liveStore = await syncRegistry.store(for: connection)
-        PerformanceInstrumentation.end(
-            "workspace-load-live-store",
-            from: liveStoreLookupStart,
-            details: "loadID=\(loadID) directory=\(trimmedDirectory)",
-            thresholdMS: 1
-        )
 
-        let bindLiveStoreStart = PerformanceInstrumentation.begin(
-            "workspace-load-bind-live-store",
-            details: "loadID=\(loadID) directory=\(trimmedDirectory)"
-        )
         bindLiveStore(liveStore)
-        PerformanceInstrumentation.end(
-            "workspace-load-bind-live-store",
-            from: bindLiveStoreStart,
-            details: "loadID=\(loadID) directory=\(trimmedDirectory)",
-            thresholdMS: 1
-        )
 
         do {
-            let snapshotLoadStart = PerformanceInstrumentation.begin(
-                "workspace-load-persistence-snapshot",
-                details: "loadID=\(loadID) directory=\(trimmedDirectory)"
-            )
             let preferredSnapshotSessionIDs = Set(initialOpenSessionIDs)
                 .union(openSessionIDs)
                 .union(snapshot.paneStates.values.filter { !$0.isHidden }.map(\.sessionID))
@@ -461,27 +450,11 @@ final class OpenCodeAppModel: ObservableObject {
                 preferredMessageSessionIDs: preferredSnapshotSessionIDs,
                 decodeOnlyPreferredSessions: true
             )
-            PerformanceInstrumentation.end(
-                "workspace-load-persistence-snapshot",
-                from: snapshotLoadStart,
-                details: "loadID=\(loadID) directory=\(trimmedDirectory) sessions=\(persistedSnapshot.sessions.count) messageSessions=\(persistedSnapshot.messagesBySession.count)",
-                thresholdMS: 1
-            )
             snapshot = persistedSnapshot
 
-            let applyPersistenceStart = PerformanceInstrumentation.begin(
-                "workspace-load-apply-persistence",
-                details: "loadID=\(loadID) directory=\(trimmedDirectory)"
-            )
             liveStore.replacePaneStates(persistedSnapshot.paneStates)
             liveStore.applyPersistenceSnapshot(persistedSnapshot)
             applyLoadedWorkspaceState(for: trimmedDirectory)
-            PerformanceInstrumentation.end(
-                "workspace-load-apply-persistence",
-                from: applyPersistenceStart,
-                details: "loadID=\(loadID) directory=\(trimmedDirectory) openSessions=\(openSessionIDs.count)",
-                thresholdMS: 1
-            )
 
             if persistsWorkspacePaneState {
                 Task {
@@ -492,17 +465,8 @@ final class OpenCodeAppModel: ObservableObject {
             let hasCachedWorkspaceContent = !persistedSnapshot.sessions.isEmpty
 
             if hasCachedWorkspaceContent {
-                PerformanceInstrumentation.log(
-                    "workspace-load-using-cached-content loadID=\(loadID) directory=\(trimmedDirectory) sessions=\(persistedSnapshot.sessions.count)"
-                )
                 isLoading = false
                 launchStage = connectedLaunchStage(for: serverURL)
-                PerformanceInstrumentation.end(
-                    "workspace-load",
-                    from: loadStart,
-                    details: "loadID=\(loadID) directory=\(trimmedDirectory) cached=true",
-                    thresholdMS: 1
-                )
                 Task {
                     let loadedModelContextLimits = await refreshModelMetadata(
                         loadID: loadID,
@@ -545,9 +509,6 @@ final class OpenCodeAppModel: ObservableObject {
             launchStage = connectedLaunchStage(for: serverURL)
         } catch {
             logger.error("Load failed: \(error.localizedDescription, privacy: .public)")
-            PerformanceInstrumentation.log(
-                "workspace-load-failed loadID=\(loadID) directory=\(trimmedDirectory) error=\(error.localizedDescription)"
-            )
             errorMessage = error.localizedDescription
             selectedDirectory = previousDirectory
             snapshot = previousSnapshot
@@ -555,12 +516,6 @@ final class OpenCodeAppModel: ObservableObject {
         }
 
         isLoading = false
-        PerformanceInstrumentation.end(
-            "workspace-load",
-            from: loadStart,
-            details: "loadID=\(loadID) directory=\(trimmedDirectory) cached=false",
-            thresholdMS: 1
-        )
     }
 
     private func refreshWorkspaceInBackground(
@@ -610,10 +565,6 @@ final class OpenCodeAppModel: ObservableObject {
         reportErrorsToUser: Bool,
         loadedModelContextLimits: [ModelContextKey: Int]
     ) async throws {
-        let refreshStart = PerformanceInstrumentation.begin(
-            "workspace-refresh-contents",
-            details: "loadID=\(loadID) directory=\(directory)"
-        )
         let workspaceSnapshot = try await workspaceService.loadWorkspace(directory: directory)
 
         await repository.applyWorkspaceSnapshot(
@@ -640,13 +591,6 @@ final class OpenCodeAppModel: ObservableObject {
         if reportErrorsToUser {
             errorMessage = nil
         }
-
-        PerformanceInstrumentation.end(
-            "workspace-refresh-contents",
-            from: refreshStart,
-            details: "loadID=\(loadID) directory=\(directory) sessions=\(workspaceSnapshot.sessions.count) statuses=\(workspaceSnapshot.statuses.count) questions=\(workspaceSnapshot.questions.count) permissions=\(workspaceSnapshot.permissions.count)",
-            thresholdMS: 1
-        )
     }
 
     private func refreshModelMetadata(
@@ -655,10 +599,6 @@ final class OpenCodeAppModel: ObservableObject {
         workspaceService: any WorkspaceServiceProtocol,
         liveStore: WorkspaceLiveStore
     ) async -> [ModelContextKey: Int] {
-        let metadataStart = PerformanceInstrumentation.begin(
-            "workspace-refresh-model-metadata",
-            details: "loadID=\(loadID) directory=\(connection.directory)"
-        )
         async let commandCatalogTask = workspaceService.loadCommandCatalog()
         async let modelCatalogTask = workspaceService.loadModelCatalog()
         async let agentCatalogTask = workspaceService.loadAgentCatalog()
@@ -684,6 +624,7 @@ final class OpenCodeAppModel: ObservableObject {
         do {
             let catalog = try await modelCatalogTask
             guard isCurrentLoad(loadID, for: connection), self.liveStore === liveStore else { return loadedModelContextLimits }
+            invalidateModelOptionCache()
             modelCatalog = catalog
         } catch {
             logger.error("Model catalog load failed: \(error.localizedDescription, privacy: .public)")
@@ -699,13 +640,6 @@ final class OpenCodeAppModel: ObservableObject {
         } catch {
             logger.error("Model context limit load failed: \(error.localizedDescription, privacy: .public)")
         }
-
-        PerformanceInstrumentation.end(
-            "workspace-refresh-model-metadata",
-            from: metadataStart,
-            details: "loadID=\(loadID) directory=\(connection.directory) commands=\(commandCatalog.commands.count) agents=\(agentCatalog.agents.count) providers=\(modelCatalog.providers.count) limits=\(loadedModelContextLimits.count)",
-            thresholdMS: 1
-        )
         return loadedModelContextLimits
     }
 
@@ -761,14 +695,7 @@ final class OpenCodeAppModel: ObservableObject {
                 let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
                 await coordinator.refreshTodos(sessionID: sessionID)
                 if shouldRefreshMessages(for: sessionID) {
-                    PerformanceInstrumentation.log(
-                        "open-session-refresh sessionID=\(sessionID) directory=\(workspaceConnection.directory)"
-                    )
                     await coordinator.refreshMessages(sessionID: sessionID)
-                } else {
-                    PerformanceInstrumentation.log(
-                        "open-session-refresh-skip sessionID=\(sessionID) directory=\(workspaceConnection.directory)"
-                    )
                 }
             }
         }
@@ -934,6 +861,31 @@ final class OpenCodeAppModel: ObservableObject {
         }
     }
 
+    func renameSession(_ sessionID: String, title: String) {
+        guard let selectedDirectory else { return }
+        guard let existingSession = sessions.first(where: { $0.id == sessionID }) else { return }
+
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty, trimmedTitle != existingSession.title else { return }
+
+        Task {
+            do {
+                let workspaceService = workspaceServiceProvider(serverURL)
+                let session = try await workspaceService.renameSession(directory: selectedDirectory, sessionID: sessionID, title: trimmedTitle)
+                await repository.applySessionLifecycle(
+                    directory: selectedDirectory,
+                    session: session,
+                    lifecycle: .updated,
+                    modelContextLimits: modelContextLimits
+                )
+                liveStore?.applySessionLifecycle(session: session, lifecycle: .updated)
+            } catch {
+                logger.error("Rename session failed for \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
     func stopSession(_ sessionID: String) {
         guard let selectedDirectory else { return }
         guard sessions.contains(where: { $0.id == sessionID }) else { return }
@@ -978,7 +930,7 @@ final class OpenCodeAppModel: ObservableObject {
 
     func modelOptions(for sessionID: String) -> [ModelOption] {
         let recentModel = recentModelReference(for: sessionID)
-        return buildModelOptions(recentModel: recentModel)
+        return cachedModelOptions(for: sessionID, recentModel: recentModel)
     }
 
     func agentOptions(for sessionID: String) -> [AgentOption] {
@@ -1024,6 +976,7 @@ final class OpenCodeAppModel: ObservableObject {
         guard preferredDefaultModelReference != reference else { return }
         preferredDefaultModelReference = reference
         preferredDefaultModelReferenceSetter(reference)
+        invalidateModelOptionCache()
         reconcileModelSelections()
     }
 
@@ -1033,22 +986,20 @@ final class OpenCodeAppModel: ObservableObject {
         selectedThinkingLevelBySession[sessionID] = level
     }
 
-    func slashCommandSuggestions(for sessionID: String, cursorLocation: Int = 0) -> [CommandOption] {
+    func slashCommandSuggestions(for draft: String, sessionID: String, cursorLocation: Int = 0) -> [CommandOption] {
         guard focusedSessionID == sessionID || openSessionIDs.contains(sessionID) else { return [] }
-        let draft = drafts[sessionID, default: ""]
         return CommandAutocomplete.suggestions(for: draft, cursorLocation: cursorLocation, commands: availableCommandOptions())
     }
 
-    func applySlashCommandSuggestion(_ option: CommandOption, for sessionID: String) {
-        let draft = drafts[sessionID, default: ""]
-        guard let updatedDraft = CommandAutocomplete.applying(option, to: draft) else { return }
-        setDraft(updatedDraft, for: sessionID)
+    func applyingSlashCommandSuggestion(_ option: CommandOption, to draft: String, sessionID: String) -> String? {
+        guard focusedSessionID == sessionID || openSessionIDs.contains(sessionID) else { return nil }
+        return CommandAutocomplete.applying(option, to: draft)
     }
 
     @discardableResult
-    func sendMessage(sessionID: String) -> Bool {
+    func sendMessage(sessionID: String, text: String) -> Bool {
         guard let selectedDirectory else { return false }
-        let draft = drafts[sessionID, default: ""].trimmingCharacters(in: .whitespacesAndNewlines)
+        let draft = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !draft.isEmpty else { return false }
 
         reconcileModelSelection(for: sessionID)
@@ -1060,8 +1011,6 @@ final class OpenCodeAppModel: ObservableObject {
             : selectedThinkingLevel(for: sessionID)
 
         if let command = CommandInvocation(draft: draft) {
-            setDraft("", for: sessionID)
-
             if handleLocalSlashCommand(command, sessionID: sessionID) {
                 return true
             }
@@ -1087,7 +1036,6 @@ final class OpenCodeAppModel: ObservableObject {
                     let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
                     await coordinator.refreshMessages(sessionID: sessionID)
                 } catch {
-                    setDraft(draft, for: sessionID)
                     logger.error("Execute slash command failed for \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
                     errorMessage = error.localizedDescription
                 }
@@ -1095,8 +1043,6 @@ final class OpenCodeAppModel: ObservableObject {
 
             return true
         }
-
-        setDraft("", for: sessionID)
 
         Task {
             do {
@@ -1122,19 +1068,12 @@ final class OpenCodeAppModel: ObservableObject {
                     "Send message forced refresh completed directory=\(selectedDirectory) sessionID=\(sessionID)"
                 )
             } catch {
-                setDraft(draft, for: sessionID)
                 logger.error("Send failed for \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 errorMessage = error.localizedDescription
             }
         }
 
         return true
-    }
-
-    func setDraft(_ draft: String, for sessionID: String) {
-        var updatedDrafts = drafts
-        updatedDrafts[sessionID] = draft
-        drafts = updatedDrafts
     }
 
     func answerPermission(_ request: PermissionRequest, reply: PermissionReply) {
@@ -1276,9 +1215,6 @@ final class OpenCodeAppModel: ObservableObject {
     }
 
     func bindLiveStore(_ liveStore: WorkspaceLiveStore) {
-        PerformanceInstrumentation.log(
-            "workspace-bind-live-store directory=\(liveStore.directory) currentSessions=\(liveStore.sessions.count)"
-        )
         self.liveStore = liveStore
     }
 
@@ -1373,10 +1309,59 @@ final class OpenCodeAppModel: ObservableObject {
         return options.first
     }
 
-    private func buildModelOptions(recentModel: ModelReference?) -> [ModelOption] {
-        let connectedProviderIDs = Set(modelCatalog.connectedProviderIDs)
+    private func cachedModelOptions(for sessionID: String, recentModel: ModelReference?) -> [ModelOption] {
+        let baseKey = BaseModelOptionsCacheKey(
+            modelCatalog: modelCatalog,
+            preferredDefaultModelReference: preferredDefaultModelReference
+        )
 
-        return modelCatalog.providers
+        if let entry = cachedModelOptionsBySession[sessionID],
+           entry.baseKey == baseKey,
+           entry.recentModel == recentModel {
+            return entry.options
+        }
+
+        let options = buildModelOptions(recentModel: recentModel, baseKey: baseKey)
+        cachedModelOptionsBySession[sessionID] = SessionModelOptionsCacheEntry(
+            baseKey: baseKey,
+            recentModel: recentModel,
+            options: options
+        )
+        return options
+    }
+
+    private func invalidateModelOptionCache() {
+        cachedBaseModelOptionsKey = nil
+        cachedBaseModelOptions = []
+        cachedModelOptionsBySession = [:]
+    }
+
+    private func buildModelOptions(recentModel: ModelReference?, baseKey: BaseModelOptionsCacheKey) -> [ModelOption] {
+        let baseOptions = cachedBaseModelOptions(for: baseKey)
+            .map { option in
+                ModelOption(
+                    providerID: option.providerID,
+                    providerName: option.providerName,
+                    modelID: option.modelID,
+                    modelName: option.modelName,
+                    supportsReasoning: option.supportsReasoning,
+                    thinkingLevels: option.thinkingLevels,
+                    isServerDefault: option.isServerDefault,
+                    isPreferredDefault: option.isPreferredDefault,
+                    isRecent: recentModel == option.reference
+                )
+            }
+
+        return sortModelOptions(baseOptions)
+    }
+
+    private func cachedBaseModelOptions(for key: BaseModelOptionsCacheKey) -> [ModelOption] {
+        if cachedBaseModelOptionsKey == key {
+            return cachedBaseModelOptions
+        }
+
+        let connectedProviderIDs = Set(key.modelCatalog.connectedProviderIDs)
+        let options = key.modelCatalog.providers
             .filter { connectedProviderIDs.contains($0.id) }
             .sorted { ($0.name ?? $0.id).localizedCaseInsensitiveCompare($1.name ?? $1.id) == .orderedAscending }
             .flatMap { provider in
@@ -1388,6 +1373,7 @@ final class OpenCodeAppModel: ObservableObject {
                         guard model.capabilities?.input?.text != false else { return false }
                         guard model.capabilities?.output?.text != false else { return false }
                         return true
+
                     }
                     .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
                     .map { model in
@@ -1400,21 +1386,28 @@ final class OpenCodeAppModel: ObservableObject {
                             modelName: model.name,
                             supportsReasoning: model.capabilities?.reasoning == true && !thinkingLevels.isEmpty,
                             thinkingLevels: thinkingLevels,
-                            isServerDefault: modelCatalog.defaultModels[provider.id] == model.id,
-                            isPreferredDefault: preferredDefaultModelReference == reference,
-                            isRecent: recentModel == reference
+                            isServerDefault: key.modelCatalog.defaultModels[provider.id] == model.id,
+                            isPreferredDefault: key.preferredDefaultModelReference == reference,
+                            isRecent: false
                         )
                     }
             }
-            .sorted { lhs, rhs in
-                if lhs.isRecent != rhs.isRecent { return lhs.isRecent }
-                if lhs.isPreferredDefault != rhs.isPreferredDefault { return lhs.isPreferredDefault }
-                if lhs.isServerDefault != rhs.isServerDefault { return lhs.isServerDefault }
-                if lhs.providerName != rhs.providerName {
-                    return lhs.providerName.localizedCaseInsensitiveCompare(rhs.providerName) == .orderedAscending
-                }
-                return lhs.modelName.localizedCaseInsensitiveCompare(rhs.modelName) == .orderedAscending
+
+        cachedBaseModelOptionsKey = key
+        cachedBaseModelOptions = sortModelOptions(options)
+        return cachedBaseModelOptions
+    }
+
+    private func sortModelOptions(_ options: [ModelOption]) -> [ModelOption] {
+        options.sorted { lhs, rhs in
+            if lhs.isRecent != rhs.isRecent { return lhs.isRecent }
+            if lhs.isPreferredDefault != rhs.isPreferredDefault { return lhs.isPreferredDefault }
+            if lhs.isServerDefault != rhs.isServerDefault { return lhs.isServerDefault }
+            if lhs.providerName != rhs.providerName {
+                return lhs.providerName.localizedCaseInsensitiveCompare(rhs.providerName) == .orderedAscending
             }
+            return lhs.modelName.localizedCaseInsensitiveCompare(rhs.modelName) == .orderedAscending
+        }
     }
 
     private func buildAgentOptions(recentAgentID: String?) -> [AgentOption] {
@@ -1599,6 +1592,7 @@ final class OpenCodeAppModel: ObservableObject {
         paneWidths = [:]
         commandCatalog = CommandCatalog(commands: [])
         agentCatalog = AgentCatalog(agents: [])
+        invalidateModelOptionCache()
         modelCatalog = ModelCatalog(providers: [], defaultModels: [:], connectedProviderIDs: [])
         preferredDefaultModelReference = preferredDefaultModelReferenceProvider()
         selectedAgentBySession = [:]

@@ -1,5 +1,4 @@
 import AppKit
-import OSLog
 import SwiftUI
 
 private extension View {
@@ -31,6 +30,7 @@ struct SessionColumnView: View {
     @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
     @ObservedObject var sessionState: SessionLiveState
+    let draftState: SessionDraftState
 
     let sessionID: String
     var chrome: SessionColumnChrome = .pane
@@ -42,14 +42,14 @@ struct SessionColumnView: View {
         let messages = sessionState.messages
         let questions = appState.questionForSession(sessionID)
         let permissions = deduplicatedPermissions(sessionState.permissions)
-        let chromeName = chrome == .pane ? "pane" : "window"
+        let availableSessions = appState.sessions
+        let workspaceConnection = appState.workspaceConnection
         let thinkingBannerTitle = latestThinkingBannerTitle(
             session: session,
             messages: messages,
             questions: questions,
             permissions: permissions
         )
-
         VStack(spacing: 0) {
             if chrome == .pane {
                 SessionHeaderView(
@@ -63,23 +63,88 @@ struct SessionColumnView: View {
                 )
                 Divider()
             }
-            SessionTimelineView(
-                sessionID: sessionID,
-                messages: messages,
-                questions: questions,
-                thinkingBannerTitle: thinkingBannerTitle,
-                availableSessions: appState.sessions
+            SessionTranscriptSection(
+                snapshot: SessionTranscriptSnapshot(
+                    sessionID: sessionID,
+                    messages: messages,
+                    questions: questions,
+                    thinkingBannerTitle: thinkingBannerTitle,
+                    availableSessions: availableSessions,
+                    workspaceConnection: workspaceConnection
+                ),
+                onFocusSession: { sessionID in
+                    appState.focusSession(sessionID)
+                },
+                onAnswerQuestion: { request, answers in
+                    appState.answerQuestion(request, answers: answers)
+                },
+                onRejectQuestion: { request in
+                    appState.rejectQuestion(request)
+                }
             )
+            .equatable()
             Divider()
-            SessionComposerView(sessionID: sessionID, permissions: permissions, sessionState: sessionState)
+            SessionComposerSection(
+                draftState: draftState,
+                sessionID: sessionID,
+                permissions: permissions,
+                isFocused: isFocused,
+                focusSession: {
+                    appState.focusSession(sessionID)
+                },
+                focusPermissionPrompt: {
+                    appState.focusSession(sessionID, focusPrompt: true)
+                },
+                answerPermission: { request, reply in
+                    appState.answerPermission(request, reply: reply)
+                },
+                sendMessage: { draft in
+                    appState.sendMessage(sessionID: sessionID, text: draft)
+                },
+                commandSuggestionProvider: { draft, cursorLocation in
+                    appState.slashCommandSuggestions(for: draft, sessionID: sessionID, cursorLocation: cursorLocation)
+                },
+                applySlashCommandSuggestion: { option, draft in
+                    appState.applyingSlashCommandSuggestion(option, to: draft, sessionID: sessionID)
+                },
+                modelOptionsProvider: {
+                    appState.modelOptions(for: sessionID)
+                },
+                agentOptionsProvider: {
+                    appState.agentOptions(for: sessionID)
+                },
+                selectedModelOptionProvider: {
+                    appState.selectedModelOption(for: sessionID)
+                },
+                selectedAgentKey: Binding(
+                    get: {
+                        let agentOptions = appState.agentOptions(for: sessionID)
+                        return appState.selectedAgentOption(for: sessionID)?.id ?? agentOptions.first?.id ?? ""
+                    },
+                    set: { appState.setSelectedAgent($0, for: sessionID) }
+                ),
+                selectedModelKey: Binding(
+                    get: {
+                        let modelOptions = appState.modelOptions(for: sessionID)
+                        return appState.selectedModelOption(for: sessionID)?.id ?? modelOptions.first?.id ?? ""
+                    },
+                    set: { appState.setSelectedModel($0, for: sessionID, updateDefault: MacModifierKeyState.isOptionPressed()) }
+                ),
+                selectedThinkingLevel: Binding(
+                    get: {
+                        let selectedModelOption = appState.selectedModelOption(for: sessionID)
+                        let thinkingLevels = [OpenCodeAppModel.defaultThinkingLevel] + (selectedModelOption?.thinkingLevels ?? [])
+                        return appState.selectedThinkingLevel(for: sessionID) ?? thinkingLevels.first ?? ""
+                    },
+                    set: { appState.setSelectedThinkingLevel($0, for: sessionID) }
+                ),
+                composerFocusRequestID: appState.promptFocusRequest?.sessionID == sessionID ? appState.promptFocusRequest?.id : nil
+            )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipPaneContent(if: chrome == .pane, cornerRadius: Self.paneCornerRadius)
         .background(backgroundView)
         .overlay { overlayView }
-        .performanceLayoutProbe("SessionColumnView") {
-            "sessionID=\(sessionID) chrome=\(chromeName) messages=\(messages.count) questions=\(questions.count) permissions=\(permissions.count) focused=\(isFocused)"
-        }
         .contentShape(Rectangle())
         .onTapGesture {
             appState.focusSession(sessionID)
@@ -134,6 +199,106 @@ struct SessionColumnView: View {
         guard session?.status?.isThinkingActive == true else { return nil }
 
         return messages.reversed().compactMap(\.latestReasoningTitle).first
+    }
+}
+
+private struct SessionTranscriptSnapshot: Equatable {
+    let sessionID: String
+    let messages: [MessageEnvelope]
+    let questions: [QuestionRequest]
+    let thinkingBannerTitle: String?
+    let availableSessions: [SessionDisplay]
+    let workspaceConnection: WorkspaceConnection?
+}
+
+private struct SessionTranscriptSection: View, Equatable {
+    let snapshot: SessionTranscriptSnapshot
+    let onFocusSession: (String) -> Void
+    let onAnswerQuestion: (QuestionRequest, [[String]]) -> Void
+    let onRejectQuestion: (QuestionRequest) -> Void
+
+    nonisolated static func == (lhs: SessionTranscriptSection, rhs: SessionTranscriptSection) -> Bool {
+        lhs.snapshot == rhs.snapshot
+    }
+
+    var body: some View {
+        SessionTimelineView(
+            sessionID: snapshot.sessionID,
+            messages: snapshot.messages,
+            questions: snapshot.questions,
+            thinkingBannerTitle: snapshot.thinkingBannerTitle,
+            availableSessions: snapshot.availableSessions,
+            workspaceConnection: snapshot.workspaceConnection,
+            onFocusSession: onFocusSession,
+            onAnswerQuestion: onAnswerQuestion,
+            onRejectQuestion: onRejectQuestion
+        )
+    }
+}
+
+private struct SessionComposerSection: View {
+    @EnvironmentObject private var appState: OpenCodeAppModel
+    @ObservedObject var draftState: SessionDraftState
+
+    let sessionID: String
+    let permissions: [PermissionRequest]
+    let isFocused: Bool
+    let focusSession: () -> Void
+    let focusPermissionPrompt: () -> Void
+    let answerPermission: (PermissionRequest, PermissionReply) -> Void
+    let sendMessage: (String) -> Bool
+    let commandSuggestionProvider: (String, Int) -> [CommandOption]
+    let applySlashCommandSuggestion: (CommandOption, String) -> String?
+    let modelOptionsProvider: () -> [ModelOption]
+    let agentOptionsProvider: () -> [AgentOption]
+    let selectedModelOptionProvider: () -> ModelOption?
+    let selectedAgentKey: Binding<String>
+    let selectedModelKey: Binding<String>
+    let selectedThinkingLevel: Binding<String>
+    let composerFocusRequestID: UUID?
+
+    var body: some View {
+        let draft = Binding(
+            get: { draftState.text },
+            set: { draftState.text = $0 }
+        )
+        let modelOptions = modelOptionsProvider()
+        let agentOptions = agentOptionsProvider()
+        let selectedModelOption = selectedModelOptionProvider()
+        let thinkingLevels = [OpenCodeAppModel.defaultThinkingLevel] + (selectedModelOption?.thinkingLevels ?? [])
+
+        SessionComposerView(
+            sessionID: sessionID,
+            permissions: permissions,
+            isFocused: isFocused,
+            draft: draft,
+            composerFocusRequestID: composerFocusRequestID,
+            agentOptions: agentOptions,
+            modelOptions: modelOptions,
+            selectedModelSupportsReasoning: selectedModelOption?.supportsReasoning == true,
+            thinkingLevels: thinkingLevels,
+            selectedAgentKey: selectedAgentKey,
+            selectedModelKey: selectedModelKey,
+            selectedThinkingLevel: selectedThinkingLevel,
+            commandSuggestionProvider: { cursorLocation in
+                commandSuggestionProvider(draftState.text, cursorLocation)
+            },
+            applySlashCommandSuggestion: { option in
+                guard let updatedDraft = applySlashCommandSuggestion(option, draftState.text) else { return }
+                draftState.text = updatedDraft
+            },
+            focusSession: focusSession,
+            focusPermissionPrompt: focusPermissionPrompt,
+            answerPermission: answerPermission,
+            sendMessage: {
+                let currentDraft = draftState.text
+                let didSend = sendMessage(currentDraft)
+                if didSend {
+                    draftState.text = ""
+                }
+                return didSend
+            }
+        )
     }
 }
 
@@ -260,7 +425,12 @@ private struct SessionTimelineView: View {
     let questions: [QuestionRequest]
     let thinkingBannerTitle: String?
     let availableSessions: [SessionDisplay]
+    let workspaceConnection: WorkspaceConnection?
+    let onFocusSession: (String) -> Void
+    let onAnswerQuestion: (QuestionRequest, [[String]]) -> Void
+    let onRejectQuestion: (QuestionRequest) -> Void
 
+    @MainActor
     private var latestTodoToolPartID: String? {
         messages
             .reversed()
@@ -271,7 +441,7 @@ private struct SessionTimelineView: View {
     }
 
     private var messageRenderContexts: [String: MessageRenderContext] {
-        Dictionary(uniqueKeysWithValues: messages.map { message in
+        return Dictionary(uniqueKeysWithValues: messages.map { message in
             let subagentSessionsByPartID = MessagePart.resolveSubagentSessions(
                 for: message.toolParts,
                 in: availableSessions,
@@ -283,20 +453,8 @@ private struct SessionTimelineView: View {
     }
 
     var body: some View {
-        let latestTodoToolPartID = PerformanceInstrumentation.measure(
-            "timeline-latest-todo",
-            thresholdMS: 1,
-            details: "sessionID=\(sessionID) messages=\(messages.count)"
-        ) {
-            self.latestTodoToolPartID
-        }
-        let messageRenderContexts = PerformanceInstrumentation.measure(
-            "timeline-message-render-contexts",
-            thresholdMS: 1,
-            details: "sessionID=\(sessionID) messages=\(messages.count) sessions=\(availableSessions.count)"
-        ) {
-            self.messageRenderContexts
-        }
+        let latestTodoToolPartID = self.latestTodoToolPartID
+        let messageRenderContexts = self.messageRenderContexts
 
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
@@ -305,12 +463,24 @@ private struct SessionTimelineView: View {
                         message: message,
                         showsTimestamp: shouldShowTimestamp(for: index),
                         latestTodoToolPartID: latestTodoToolPartID,
-                        renderContext: messageRenderContexts[message.id] ?? MessageRenderContext(subagentSessionsByPartID: [:])
+                        renderContext: messageRenderContexts[message.id] ?? MessageRenderContext(subagentSessionsByPartID: [:]),
+                        workspaceConnection: workspaceConnection,
+                        onInteraction: {
+                            onFocusSession(message.info.sessionID)
+                        }
                     )
                 }
 
                 ForEach(questions) { request in
-                    QuestionCard(request: request)
+                    QuestionCard(
+                        request: request,
+                        onSubmitAnswers: { answers in
+                            onAnswerQuestion(request, answers)
+                        },
+                        onReject: {
+                            onRejectQuestion(request)
+                        }
+                    )
                 }
 
                 if let thinkingBannerTitle {
@@ -328,9 +498,6 @@ private struct SessionTimelineView: View {
 
         .defaultScrollAnchor(.bottom)
         .background(theme.mutedSurfaceBackground.opacity(0.8))
-        .performanceLayoutProbe("SessionTimelineView") {
-            "sessionID=\(sessionID) messages=\(messages.count) questions=\(questions.count) thinkingBanner=\(thinkingBannerTitle != nil)"
-        }
     }
 
     private func shouldShowTimestamp(for index: Int) -> Bool {
@@ -340,7 +507,6 @@ private struct SessionTimelineView: View {
 }
 
 private struct SessionComposerView: View {
-    @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
 
     private static let placeholderOptions = [
@@ -358,25 +524,29 @@ private struct SessionComposerView: View {
     @State private var lastAutoFocusedPermissionID: String?
     let sessionID: String
     let permissions: [PermissionRequest]
-
-    private var isFocused: Bool {
-        appState.focusedSessionID == sessionID
-    }
+    let isFocused: Bool
+    let draft: Binding<String>
+    let composerFocusRequestID: UUID?
+    let agentOptions: [AgentOption]
+    let modelOptions: [ModelOption]
+    let selectedModelSupportsReasoning: Bool
+    let thinkingLevels: [String]
+    let selectedAgentKey: Binding<String>
+    let selectedModelKey: Binding<String>
+    let selectedThinkingLevel: Binding<String>
+    let commandSuggestionProvider: (Int) -> [CommandOption]
+    let applySlashCommandSuggestion: (CommandOption) -> Void
+    let focusSession: () -> Void
+    let focusPermissionPrompt: () -> Void
+    let answerPermission: (PermissionRequest, PermissionReply) -> Void
+    let sendMessage: () -> Bool
 
     private var activePermission: PermissionRequest? {
         permissions.first
     }
 
-    private var modelOptions: [ModelOption] {
-        appState.modelOptions(for: sessionID)
-    }
-
-    private var agentOptions: [AgentOption] {
-        appState.agentOptions(for: sessionID)
-    }
-
     private var commandSuggestions: [CommandOption] {
-        appState.slashCommandSuggestions(for: sessionID, cursorLocation: promptCursorLocation)
+        commandSuggestionProvider(promptCursorLocation)
     }
 
     private var normalizedHighlightedCommandSuggestionIndex: Int? {
@@ -386,8 +556,8 @@ private struct SessionComposerView: View {
     }
 
     private func applySlashCommandSuggestion(_ option: CommandOption) {
-        appState.applySlashCommandSuggestion(option, for: sessionID)
-        let updatedDraft = appState.drafts[sessionID, default: ""]
+        applySlashCommandSuggestion(option)
+        let updatedDraft = draft.wrappedValue
         promptCursorLocation = updatedDraft.utf16.count
         highlightedCommandSuggestionIndex = nil
     }
@@ -400,11 +570,7 @@ private struct SessionComposerView: View {
 
         guard isFocused, lastAutoFocusedPermissionID != permissionID else { return }
         lastAutoFocusedPermissionID = permissionID
-        appState.focusSession(sessionID, focusPrompt: true)
-    }
-
-    private var composerFocusRequestID: UUID? {
-        appState.promptFocusRequest?.sessionID == sessionID ? appState.promptFocusRequest?.id : nil
+        focusPermissionPrompt()
     }
 
     private var permissionFocusRequestID: UUID? {
@@ -412,37 +578,44 @@ private struct SessionComposerView: View {
         return composerFocusRequestID
     }
 
-    private var selectedAgentKey: Binding<String> {
-        Binding(
-            get: { appState.selectedAgentOption(for: sessionID)?.id ?? agentOptions.first?.id ?? "" },
-            set: { appState.setSelectedAgent($0, for: sessionID) }
-        )
-    }
-
-    private var selectedModelKey: Binding<String> {
-        Binding(
-            get: { appState.selectedModelOption(for: sessionID)?.id ?? modelOptions.first?.id ?? "" },
-            set: { appState.setSelectedModel($0, for: sessionID, updateDefault: MacModifierKeyState.isOptionPressed()) }
-        )
-    }
-
-    private var thinkingLevels: [String] {
-        [OpenCodeAppModel.defaultThinkingLevel] + (appState.selectedModelOption(for: sessionID)?.thinkingLevels ?? [])
-    }
-
-    private var selectedThinkingLevel: Binding<String> {
-        Binding(
-            get: { appState.selectedThinkingLevel(for: sessionID) ?? thinkingLevels.first ?? "" },
-            set: { appState.setSelectedThinkingLevel($0, for: sessionID) }
-        )
-    }
-
-    @ObservedObject private var sessionState: SessionLiveState
-
-    init(sessionID: String, permissions: [PermissionRequest], sessionState: SessionLiveState) {
+    init(
+        sessionID: String,
+        permissions: [PermissionRequest],
+        isFocused: Bool,
+        draft: Binding<String>,
+        composerFocusRequestID: UUID?,
+        agentOptions: [AgentOption],
+        modelOptions: [ModelOption],
+        selectedModelSupportsReasoning: Bool,
+        thinkingLevels: [String],
+        selectedAgentKey: Binding<String>,
+        selectedModelKey: Binding<String>,
+        selectedThinkingLevel: Binding<String>,
+        commandSuggestionProvider: @escaping (Int) -> [CommandOption],
+        applySlashCommandSuggestion: @escaping (CommandOption) -> Void,
+        focusSession: @escaping () -> Void,
+        focusPermissionPrompt: @escaping () -> Void,
+        answerPermission: @escaping (PermissionRequest, PermissionReply) -> Void,
+        sendMessage: @escaping () -> Bool
+    ) {
         self.sessionID = sessionID
         self.permissions = permissions
-        _sessionState = ObservedObject(wrappedValue: sessionState)
+        self.isFocused = isFocused
+        self.draft = draft
+        self.composerFocusRequestID = composerFocusRequestID
+        self.agentOptions = agentOptions
+        self.modelOptions = modelOptions
+        self.selectedModelSupportsReasoning = selectedModelSupportsReasoning
+        self.thinkingLevels = thinkingLevels
+        self.selectedAgentKey = selectedAgentKey
+        self.selectedModelKey = selectedModelKey
+        self.selectedThinkingLevel = selectedThinkingLevel
+        self.commandSuggestionProvider = commandSuggestionProvider
+        self.applySlashCommandSuggestion = applySlashCommandSuggestion
+        self.focusSession = focusSession
+        self.focusPermissionPrompt = focusPermissionPrompt
+        self.answerPermission = answerPermission
+        self.sendMessage = sendMessage
     }
 
     var body: some View {
@@ -450,10 +623,7 @@ private struct SessionComposerView: View {
             if activePermission == nil {
                 VStack(alignment: .leading, spacing: 10) {
                     PromptTextView(
-                        text: Binding(
-                            get: { appState.drafts[sessionID, default: ""] },
-                            set: { appState.setDraft($0, for: sessionID) }
-                        ),
+                        text: draft,
                         measuredHeight: $promptHeight,
                         highlightedSuggestionIndex: $highlightedCommandSuggestionIndex,
                         cursorLocation: $promptCursorLocation,
@@ -468,10 +638,10 @@ private struct SessionComposerView: View {
                             applySlashCommandSuggestion(option)
                         },
                         onFocus: {
-                            appState.focusSession(sessionID)
+                            focusSession()
                         },
                         onSubmit: {
-                            if appState.sendMessage(sessionID: sessionID) {
+                            if sendMessage() {
                                 promptHeight = PromptTextView.defaultHeight
                             }
                         }
@@ -479,39 +649,15 @@ private struct SessionComposerView: View {
                     .frame(height: promptHeight)
                     .padding(4)
 
-                    HStack(spacing: 16) {
-                        if !agentOptions.isEmpty {
-                            Picker("Agent", selection: selectedAgentKey) {
-                                ForEach(agentOptions) { option in
-                                    Text(option.menuLabel).tag(option.id)
-                                }
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.menu)
-                        }
-
-                        if !modelOptions.isEmpty {
-                            Picker("Model", selection: selectedModelKey) {
-                                ForEach(modelOptions) { option in
-                                    Text(option.menuLabel).tag(option.id)
-                                }
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.menu)
-
-                            if let selectedModel = appState.selectedModelOption(for: sessionID), selectedModel.supportsReasoning {
-                                Picker("Thinking", selection: selectedThinkingLevel) {
-                                    ForEach(thinkingLevels, id: \.self) { level in
-                                        Text(level == OpenCodeAppModel.defaultThinkingLevel ? "Default" : level.capitalized).tag(level)
-                                    }
-                                }
-                                .labelsHidden()
-                                .pickerStyle(.menu)
-                            }
-                        }
-
-                        Spacer(minLength: 12)
-                    }
+                    MacComposerAccessoryBar(
+                        agentOptions: agentOptions,
+                        modelOptions: modelOptions,
+                        thinkingLevels: thinkingLevels,
+                        selectedModelSupportsReasoning: selectedModelSupportsReasoning,
+                        selectedAgentKey: selectedAgentKey,
+                        selectedModelKey: selectedModelKey,
+                        selectedThinkingLevel: selectedThinkingLevel
+                    )
                     .padding(.leading, 0)
                     .padding(.trailing, 6)
                 }
@@ -529,7 +675,13 @@ private struct SessionComposerView: View {
                     )
                 }
             } else if let request = activePermission {
-                PermissionPromptView(request: request, focusRequestID: permissionFocusRequestID)
+                PermissionPromptView(
+                    request: request,
+                    focusRequestID: permissionFocusRequestID,
+                    onReply: { reply in
+                        answerPermission(request, reply)
+                    }
+                )
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -542,6 +694,52 @@ private struct SessionComposerView: View {
         .onChange(of: isFocused) { _, newValue in
             guard newValue else { return }
             maybeFocusPermissionPrompt(for: activePermission?.id)
+        }
+    }
+}
+
+private struct MacComposerAccessoryBar: View {
+    let agentOptions: [AgentOption]
+    let modelOptions: [ModelOption]
+    let thinkingLevels: [String]
+    let selectedModelSupportsReasoning: Bool
+    let selectedAgentKey: Binding<String>
+    let selectedModelKey: Binding<String>
+    let selectedThinkingLevel: Binding<String>
+
+    var body: some View {
+        HStack(spacing: 16) {
+            if !agentOptions.isEmpty {
+                Picker("Agent", selection: selectedAgentKey) {
+                    ForEach(agentOptions) { option in
+                        Text(option.menuLabel).tag(option.id)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+            }
+
+            if !modelOptions.isEmpty {
+                Picker("Model", selection: selectedModelKey) {
+                    ForEach(modelOptions) { option in
+                        Text(option.menuLabel).tag(option.id)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+
+                if selectedModelSupportsReasoning {
+                    Picker("Thinking", selection: selectedThinkingLevel) {
+                        ForEach(thinkingLevels, id: \.self) { level in
+                            Text(level == OpenCodeAppModel.defaultThinkingLevel ? "Default" : level.capitalized).tag(level)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                }
+            }
+
+            Spacer(minLength: 12)
         }
     }
 }
@@ -843,54 +1041,16 @@ private struct MessageCard: View {
     let showsTimestamp: Bool
     let latestTodoToolPartID: String?
     let renderContext: SessionTimelineView.MessageRenderContext
-
-    @State private var bodyEvaluationCount = 0
-    @State private var previousBodyVisibleTextBytes = 0
-    @State private var previousBodyReasoningTextBytes = 0
-    @State private var previousResolvedSubagentCount = 0
+    let workspaceConnection: WorkspaceConnection?
+    let onInteraction: () -> Void
 
     var body: some View {
-        let _ = recordBodyEvaluation()
-        let textParts = PerformanceInstrumentation.measure(
-            "message-card-text-parts",
-            thresholdMS: 1,
-            details: "sessionID=\(message.info.sessionID) messageID=\(message.id)"
-        ) {
-            message.textParts
-        }
-        let reasoningParts = PerformanceInstrumentation.measure(
-            "message-card-reasoning-parts",
-            thresholdMS: 1,
-            details: "sessionID=\(message.info.sessionID) messageID=\(message.id)"
-        ) {
-            message.reasoningParts
-        }
-        let toolParts = PerformanceInstrumentation.measure(
-            "message-card-tool-parts",
-            thresholdMS: 1,
-            details: "sessionID=\(message.info.sessionID) messageID=\(message.id)"
-        ) {
-            message.toolParts
-        }
+        let textParts = message.textParts
+        let reasoningParts = message.reasoningParts
+        let toolParts = message.toolParts
         let subagentSessionsByPartID = renderContext.subagentSessionsByPartID
-        let _ = recordRenderContext(
-            toolPartCount: toolParts.count,
-            resolvedPartCount: subagentSessionsByPartID.count
-        )
-        let visibleText = PerformanceInstrumentation.measure(
-            "message-card-visible-text",
-            thresholdMS: 1,
-            details: "sessionID=\(message.info.sessionID) messageID=\(message.id) textParts=\(textParts.count)"
-        ) {
-            message.visibleText
-        }
-        let reasoningText = PerformanceInstrumentation.measure(
-            "message-card-reasoning-text",
-            thresholdMS: 1,
-            details: "sessionID=\(message.info.sessionID) messageID=\(message.id) reasoningParts=\(reasoningParts.count)"
-        ) {
-            message.reasoningText
-        }
+        let visibleText = message.visibleText
+        let reasoningText = message.reasoningText
         let showsMessageBubble = !visibleText.isEmpty
             || (showsThinking && !reasoningText.isEmpty)
             || (message.stepFinish?.reason?.localizedCaseInsensitiveCompare("tool-calls") != .orderedSame && message.stepFinish != nil)
@@ -901,30 +1061,18 @@ private struct MessageCard: View {
         let rendersMarkdownReasoning = reasoningParts.allSatisfy {
             $0.shouldRenderMarkdown(for: message.info.role, messageIsCompleted: message.isCompleted)
         }
-        let renderedMessageText = PerformanceInstrumentation.measure(
-            "message-card-render-visible-text",
-            thresholdMS: 1,
-            details: "sessionID=\(message.info.sessionID) messageID=\(message.id) bytes=\(visibleText.utf8.count) markdown=\(rendersMarkdownText)"
-        ) {
-            MarkdownTextRenderer.render(
-                text: visibleText,
-                rendersMarkdown: rendersMarkdownText,
-                theme: theme,
-                style: .body(theme: theme)
-            )
-        }
-        let renderedReasoningText = PerformanceInstrumentation.measure(
-            "message-card-render-reasoning-text",
-            thresholdMS: 1,
-            details: "sessionID=\(message.info.sessionID) messageID=\(message.id) bytes=\(reasoningText.utf8.count) markdown=\(rendersMarkdownReasoning)"
-        ) {
-            MarkdownTextRenderer.render(
-                text: reasoningText,
-                rendersMarkdown: rendersMarkdownReasoning,
-                theme: theme,
-                style: .callout(theme: theme)
-            )
-        }
+        let renderedMessageText = MarkdownTextRenderer.render(
+            text: visibleText,
+            rendersMarkdown: rendersMarkdownText,
+            theme: theme,
+            style: .body(theme: theme)
+        )
+        let renderedReasoningText = MarkdownTextRenderer.render(
+            text: reasoningText,
+            rendersMarkdown: rendersMarkdownReasoning,
+            theme: theme,
+            style: .callout(theme: theme)
+        )
 
         VStack(alignment: .leading, spacing: 8) {
             if showsTimestamp {
@@ -936,7 +1084,8 @@ private struct MessageCard: View {
                     if !visibleText.isEmpty {
                         SelectableMessageTextView(
                             attributedText: renderedMessageText,
-                            linkColor: theme.accentColor
+                            linkColor: theme.accentColor,
+                            onInteraction: onInteraction
                         )
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -944,7 +1093,8 @@ private struct MessageCard: View {
                     if showsThinking, !reasoningText.isEmpty {
                         SelectableMessageTextView(
                             attributedText: renderedReasoningText,
-                            linkColor: theme.accentColor
+                            linkColor: theme.accentColor,
+                            onInteraction: onInteraction
                         )
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -970,47 +1120,18 @@ private struct MessageCard: View {
                 ToolPartView(
                     part: toolPart,
                     subagentSession: subagentSessionsByPartID[toolPart.id],
-                    latestTodoToolPartID: latestTodoToolPartID
+                    latestTodoToolPartID: latestTodoToolPartID,
+                    workspaceConnection: workspaceConnection
                 )
                     .padding(.leading, TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.toolCardPadding))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .performanceLayoutProbe("MessageCard") {
-            "sessionID=\(message.info.sessionID) messageID=\(message.id) role=\(message.info.role.rawString) parts=\(message.parts.count) toolParts=\(message.toolParts.count)"
-        }
     }
 
     private var bubbleBackground: some View {
         RoundedRectangle(cornerRadius: 18, style: .continuous)
             .fill(message.info.role.isAssistant ? theme.assistantBubble : theme.userBubble)
-    }
-
-    private func recordBodyEvaluation() {
-        bodyEvaluationCount += 1
-
-        let visibleTextBytes = message.visibleText.utf8.count
-        let reasoningTextBytes = message.reasoningText.utf8.count
-        let visibleTextChanged = visibleTextBytes != previousBodyVisibleTextBytes
-        let reasoningTextChanged = reasoningTextBytes != previousBodyReasoningTextBytes
-        let resolvedSubagentCount = renderContext.subagentSessionsByPartID.count
-        let resolvedSubagentCountChanged = resolvedSubagentCount != previousResolvedSubagentCount
-
-        if bodyEvaluationCount == 1 || visibleTextChanged || reasoningTextChanged || resolvedSubagentCountChanged || bodyEvaluationCount.isMultiple(of: 25) {
-            PerformanceInstrumentation.log(
-                "message-card-body-eval sessionID=\(message.info.sessionID) messageID=\(message.id) count=\(bodyEvaluationCount) visibleBytes=\(visibleTextBytes) visibleChanged=\(visibleTextChanged) reasoningBytes=\(reasoningTextBytes) reasoningChanged=\(reasoningTextChanged) resolvedSubagents=\(resolvedSubagentCount) resolvedSubagentsChanged=\(resolvedSubagentCountChanged)"
-            )
-        }
-
-        previousBodyVisibleTextBytes = visibleTextBytes
-        previousBodyReasoningTextBytes = reasoningTextBytes
-        previousResolvedSubagentCount = resolvedSubagentCount
-    }
-
-    private func recordRenderContext(toolPartCount: Int, resolvedPartCount: Int) {
-        PerformanceInstrumentation.log(
-            "message-card-render-context sessionID=\(message.info.sessionID) messageID=\(message.id) toolParts=\(toolPartCount) resolved=\(resolvedPartCount) visibleBytes=\(message.visibleText.utf8.count) reasoningBytes=\(message.reasoningText.utf8.count)"
-        )
     }
 }
 
@@ -1054,11 +1175,11 @@ private struct MessageFinishView: View {
 
 private struct ToolPartView: View {
     @Environment(\.openWindow) private var openWindow
-    @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
     let part: MessagePart
     let subagentSession: SessionDisplay?
     let latestTodoToolPartID: String?
+    let workspaceConnection: WorkspaceConnection?
     @State private var isExpanded = false
     @State private var detailedPart: MessagePart?
 
@@ -1100,7 +1221,7 @@ private struct ToolPartView: View {
 
                     if let subagentSession {
                         Button {
-                            guard let workspaceConnection = appState.workspaceConnection else { return }
+                            guard let workspaceConnection else { return }
                             openWindow(
                                 id: "session-window",
                                 value: SessionWindowContext(connection: workspaceConnection, sessionID: subagentSession.id)
@@ -1584,12 +1705,11 @@ private struct ToolPartDetailSection: View {
 }
 
 private struct PermissionPromptView: View {
-    @EnvironmentObject private var appState: OpenCodeAppModel
-
     @Environment(\.openCodeTheme) private var theme
 
     let request: PermissionRequest
     let focusRequestID: UUID?
+    let onReply: (PermissionReply) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1603,9 +1723,9 @@ private struct PermissionPromptView: View {
             }
             PermissionPromptButtonRow(
                 focusRequestID: focusRequestID,
-                onDeny: { appState.answerPermission(request, reply: .reject) },
-                onAllowAlways: { appState.answerPermission(request, reply: .always) },
-                onAllowOnce: { appState.answerPermission(request, reply: .once) }
+                onDeny: { onReply(.reject) },
+                onAllowAlways: { onReply(.always) },
+                onAllowOnce: { onReply(.once) }
             )
             .frame(height: 32)
         }
@@ -1720,10 +1840,11 @@ private struct PermissionPromptButtonRow: NSViewRepresentable {
 }
 
 private struct QuestionCard: View {
-    @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
 
     let request: QuestionRequest
+    let onSubmitAnswers: ([[String]]) -> Void
+    let onReject: () -> Void
     @State private var selections: [String: Set<String>] = [:]
 
     var body: some View {
@@ -1740,12 +1861,12 @@ private struct QuestionCard: View {
                     let answers = request.questions.map { question in
                         Array(selections[question.id, default: []])
                     }
-                    appState.answerQuestion(request, answers: answers)
+                    onSubmitAnswers(answers)
                 }
                 .buttonStyle(.borderedProminent)
 
                 Button("Reject", role: .destructive) {
-                    appState.rejectQuestion(request)
+                    onReject()
                 }
             }
         }

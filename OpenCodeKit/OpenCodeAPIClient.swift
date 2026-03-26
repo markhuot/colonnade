@@ -11,6 +11,7 @@ protocol OpenCodeAPIClientProtocol: Sendable {
     func messages(directory: String, sessionID: String) async throws -> [MessageEnvelope]
     func todos(directory: String, sessionID: String) async throws -> [SessionTodo]
     func createSession(directory: String, title: String?, parentID: String?) async throws -> OpenCodeSession
+    func renameSession(directory: String, sessionID: String, title: String) async throws -> OpenCodeSession
     func archiveSession(directory: String, sessionID: String, archivedAtMS: Double) async throws -> OpenCodeSession
     func abortSession(directory: String, sessionID: String) async throws
     func executeCommand(directory: String, sessionID: String, command: String, arguments: String, agent: String?, model: ModelReference?) async throws -> MessageEnvelope
@@ -114,6 +115,30 @@ struct OpenCodeAPIClient: @unchecked Sendable {
 
         logger.notice(
             "Create session succeeded directory=\(directory, privacy: .public) sessionID=\(session.id, privacy: .public)"
+        )
+
+        return session
+    }
+
+    func renameSession(directory: String, sessionID: String, title: String) async throws -> OpenCodeSession {
+        struct Body: Encodable {
+            let title: String
+        }
+
+        logger.notice(
+            "Rename session request directory=\(directory, privacy: .public) sessionID=\(sessionID, privacy: .public) titleBytes=\(title.utf8.count, privacy: .public)"
+        )
+
+        let session: OpenCodeSession = try await send(
+            path: "/session/\(sessionID)",
+            method: "PATCH",
+            directory: directory,
+            body: Body(title: title),
+            responseType: OpenCodeSession.self
+        )
+
+        logger.notice(
+            "Rename session succeeded directory=\(directory, privacy: .public) sessionID=\(sessionID, privacy: .public)"
         )
 
         return session
