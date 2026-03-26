@@ -26,6 +26,13 @@ struct SessionWindowView: View {
             }
         }
         .foregroundStyle(theme.primaryText)
+        .overlay(alignment: .topTrailing) {
+            if let liveStore = appState.liveStore {
+                SSEDebugOverlay(liveStore: liveStore)
+                    .padding(.top, 18)
+                    .padding(.trailing, 18)
+            }
+        }
         .background(theme.windowBackground)
         .themedWindow(theme)
     }

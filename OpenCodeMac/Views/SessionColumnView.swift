@@ -1,6 +1,139 @@
 import AppKit
 import SwiftUI
 
+@MainActor
+private enum ViewRenderDebugRegistry {
+    private static var counts: [String: ViewRenderDebugCounts] = [:]
+
+    static func recordBody(for key: String) -> Int {
+        var snapshot = counts[key, default: .init()]
+        snapshot.body += 1
+        counts[key] = snapshot
+        return snapshot.body
+    }
+
+    static func recordAppear(for key: String) -> ViewRenderDebugCounts {
+        mutate(key) { $0.appear += 1 }
+    }
+
+    static func recordDisappear(for key: String) -> ViewRenderDebugCounts {
+        mutate(key) { $0.disappear += 1 }
+    }
+
+    static func recordUpdate(for key: String, bodyCount: Int) -> ViewRenderDebugCounts {
+        mutate(key) {
+            $0.body = max($0.body, bodyCount)
+            $0.update += 1
+        }
+    }
+
+    static func snapshot(for key: String) -> ViewRenderDebugCounts {
+        counts[key, default: .init()]
+    }
+
+    private static func mutate(_ key: String, _ body: (inout ViewRenderDebugCounts) -> Void) -> ViewRenderDebugCounts {
+        var snapshot = counts[key, default: .init()]
+        body(&snapshot)
+        counts[key] = snapshot
+        return snapshot
+    }
+}
+
+private struct ViewRenderDebugCounts {
+    var body = 0
+    var appear = 0
+    var disappear = 0
+    var update = 0
+
+    var label: String {
+        "b:\(body) a:\(appear) d:\(disappear) u:\(update)"
+    }
+}
+
+private struct ViewRenderDebugBadge: NSViewRepresentable {
+    let key: String
+    let bodyCount: Int
+
+    @MainActor
+    func makeNSView(context: Context) -> ViewRenderDebugBadgeNSView {
+        let view = ViewRenderDebugBadgeNSView(debugKey: key)
+        view.apply(snapshot: ViewRenderDebugRegistry.snapshot(for: key))
+        return view
+    }
+
+    @MainActor
+    func updateNSView(_ nsView: ViewRenderDebugBadgeNSView, context: Context) {
+        nsView.debugKey = key
+        nsView.apply(snapshot: ViewRenderDebugRegistry.recordUpdate(for: key, bodyCount: bodyCount))
+    }
+}
+
+@MainActor
+private final class ViewRenderDebugBadgeNSView: NSView {
+    var debugKey: String
+
+    private let textField = NSTextField(labelWithString: "")
+    private var lastKnownWindowState = false
+
+    init(debugKey: String) {
+        self.debugKey = debugKey
+        super.init(frame: .zero)
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentHuggingPriority(.required, for: .vertical)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .vertical)
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.78).cgColor
+        layer?.shadowColor = NSColor.black.withAlphaComponent(0.28).cgColor
+        layer?.shadowOpacity = 1
+        layer?.shadowRadius = 10
+        layer?.shadowOffset = CGSize(width: 0, height: -4)
+
+        textField.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .semibold)
+        textField.textColor = .white
+        textField.lineBreakMode = .byClipping
+        addSubview(textField)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layout() {
+        super.layout()
+        textField.frame = bounds.insetBy(dx: 6, dy: 4)
+    }
+
+    override var intrinsicContentSize: NSSize {
+        let labelSize = textField.intrinsicContentSize
+        return NSSize(width: labelSize.width + 12, height: labelSize.height + 8)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+
+        let isVisible = window != nil
+        guard isVisible != lastKnownWindowState else { return }
+        lastKnownWindowState = isVisible
+
+        let snapshot = if isVisible {
+            ViewRenderDebugRegistry.recordAppear(for: debugKey)
+        } else {
+            ViewRenderDebugRegistry.recordDisappear(for: debugKey)
+        }
+
+        apply(snapshot: snapshot)
+    }
+
+    func apply(snapshot: ViewRenderDebugCounts) {
+        textField.stringValue = snapshot.label
+        invalidateIntrinsicContentSize()
+        needsLayout = true
+    }
+}
+
 private extension View {
     @ViewBuilder
     func clipPaneContent(if condition: Bool, cornerRadius: CGFloat) -> some View {
@@ -1045,6 +1178,8 @@ private struct MessageCard: View {
     let onInteraction: () -> Void
 
     var body: some View {
+        let renderDebugKey = "message-card:\(message.id)"
+        let renderCount = ViewRenderDebugRegistry.recordBody(for: renderDebugKey)
         let toolParts = message.toolParts
         let subagentSessionsByPartID = renderContext.subagentSessionsByPartID
         let visibleText = message.visibleText
@@ -1107,6 +1242,11 @@ private struct MessageCard: View {
                 }
                 .padding(TimelineMessageLayout.messageCardPadding)
                 .background(bubbleBackground)
+                .overlay(alignment: .bottomTrailing) {
+                    ViewRenderDebugBadge(key: renderDebugKey, bodyCount: renderCount)
+                        .fixedSize()
+                        .padding(8)
+                }
                 .padding(.leading, TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.messageCardPadding))
             }
 
@@ -1194,6 +1334,8 @@ private struct ToolPartView: View {
     }
 
     var body: some View {
+        let renderDebugKey = "tool-card:\(part.id)"
+        let renderCount = ViewRenderDebugRegistry.recordBody(for: renderDebugKey)
         let cardShape = RoundedRectangle(cornerRadius: 12, style: .continuous)
 
         VStack(alignment: .leading, spacing: 8) {
@@ -1252,6 +1394,11 @@ private struct ToolPartView: View {
             cardShape
                 .stroke(theme.border.opacity(0.6), lineWidth: 1)
         )
+        .overlay(alignment: .bottomTrailing) {
+            ViewRenderDebugBadge(key: renderDebugKey, bodyCount: renderCount)
+                .fixedSize()
+                .padding(8)
+        }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
             guard part.isTodoWriteTool else { return }
@@ -1706,6 +1853,8 @@ private struct PermissionPromptView: View {
     let onReply: (PermissionReply) -> Void
 
     var body: some View {
+        let renderDebugKey = "permission-card:\(request.id)"
+        let renderCount = ViewRenderDebugRegistry.recordBody(for: renderDebugKey)
         VStack(alignment: .leading, spacing: 10) {
             Text("Permission Needed")
                 .font(.headline)
@@ -1726,6 +1875,11 @@ private struct PermissionPromptView: View {
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(theme.errorBackground)
+        .overlay(alignment: .bottomTrailing) {
+            ViewRenderDebugBadge(key: renderDebugKey, bodyCount: renderCount)
+                .fixedSize()
+                .padding(8)
+        }
     }
 }
 
@@ -1842,6 +1996,8 @@ private struct QuestionCard: View {
     @State private var selections: [String: Set<String>] = [:]
 
     var body: some View {
+        let renderDebugKey = "question-card:\(request.id)"
+        let renderCount = ViewRenderDebugRegistry.recordBody(for: renderDebugKey)
         VStack(alignment: .leading, spacing: 14) {
             Text("Question")
                 .font(.headline)
@@ -1869,6 +2025,11 @@ private struct QuestionCard: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(theme.accentSubtleBackground)
         )
+        .overlay(alignment: .bottomTrailing) {
+            ViewRenderDebugBadge(key: renderDebugKey, bodyCount: renderCount)
+                .fixedSize()
+                .padding(8)
+        }
         .padding(.leading, TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.promptCardPadding))
         .frame(maxWidth: .infinity, alignment: .leading)
     }

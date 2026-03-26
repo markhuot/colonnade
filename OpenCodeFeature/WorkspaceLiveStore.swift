@@ -361,6 +361,14 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
 
 @MainActor
 final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
+    struct RawSSEEventEntry: Identifiable {
+        let id: Int
+        let payload: String
+    }
+
+    private static let rawSSEEventLimit = 10_000
+    private static let rawSSEEventTrimCount = 2_000
+
     let connection: WorkspaceConnection
     private let logger = Logger(subsystem: "ai.opencode.app", category: "workspace-sync")
 
@@ -368,6 +376,7 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
 
     @Published private(set) var orderedVisibleSessionIDs: [String] = []
     @Published private(set) var paneStates: [String: SessionPaneState] = [:]
+    @Published private(set) var rawSSEEvents: [RawSSEEventEntry] = []
 
     private var notifier: any WorkspaceEventNotifying
     private var modelContextLimits: [ModelContextKey: Int] = [:]
@@ -378,6 +387,7 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
     private var questionRequestIDsBySessionID: [String: Set<String>] = [:]
     private var permissionRequestIDsBySessionID: [String: Set<String>] = [:]
     private var hasEstablishedNotificationBaseline = false
+    private var nextRawSSEEventID = 0
 
     init(connection: WorkspaceConnection, notifier: any WorkspaceEventNotifying = NoopWorkspaceEventNotifier()) {
         self.connection = connection
@@ -436,6 +446,15 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
 
     func replacePaneStates(_ paneStates: [String: SessionPaneState]) {
         self.paneStates = paneStates
+    }
+
+    func appendRawSSEEvent(_ payload: String) {
+        rawSSEEvents.append(RawSSEEventEntry(id: nextRawSSEEventID, payload: payload))
+        nextRawSSEEventID += 1
+
+        if rawSSEEvents.count > Self.rawSSEEventLimit {
+            rawSSEEvents.removeFirst(Self.rawSSEEventTrimCount)
+        }
     }
 
     func applyWorkspaceSnapshot(_ snapshot: WorkspaceSnapshot) {
