@@ -4,7 +4,6 @@ import SwiftUI
 struct SelectableMessageTextView: View {
     let attributedText: NSAttributedString
     let linkColor: PlatformColor
-    var onInteraction: (() -> Void)? = nil
 
     var body: some View {
         Group {
@@ -17,8 +16,5 @@ struct SelectableMessageTextView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onTapGesture {
-            onInteraction?()
-        }
     }
 }

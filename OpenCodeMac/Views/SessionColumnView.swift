@@ -177,11 +177,183 @@ private struct PaneShadowModifier: ViewModifier {
     }
 }
 
+enum PaneFocusOutlineState {
+    static func showsFocusOutline(
+        chrome: SessionColumnChrome,
+        openSessionCount: Int,
+        focusedSessionID: String?,
+        sessionID: String,
+        paneHasFocus: Bool
+    ) -> Bool {
+        let isSelectedSession = focusedSessionID == sessionID
+
+        guard chrome == .pane, openSessionCount > 1 else {
+            return isSelectedSession
+        }
+
+        return isSelectedSession && paneHasFocus
+    }
+}
+
+private struct PaneFocusContainer<Content: View>: NSViewRepresentable {
+    @Binding var isFocused: Bool
+    let onFocus: () -> Void
+    let content: Content
+
+    init(
+        isFocused: Binding<Bool>,
+        onFocus: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        _isFocused = isFocused
+        self.onFocus = onFocus
+        self.content = content()
+    }
+
+    func makeNSView(context: Context) -> PaneFocusContainerNSView<Content> {
+        PaneFocusContainerNSView(rootView: content, isFocused: $isFocused, onFocus: onFocus)
+    }
+
+    func updateNSView(_ nsView: PaneFocusContainerNSView<Content>, context: Context) {
+        nsView.update(rootView: content, isFocused: $isFocused, onFocus: onFocus)
+    }
+}
+
+private final class PaneFocusContainerNSView<Content: View>: NSView {
+    private let hostingView: NSHostingView<Content>
+    private var isFocusedBinding: Binding<Bool>
+    private var onFocus: () -> Void
+    private weak var observedWindow: NSWindow?
+
+    override var acceptsFirstResponder: Bool {
+        true
+    }
+
+    override var canBecomeKeyView: Bool {
+        true
+    }
+
+    init(rootView: Content, isFocused: Binding<Bool>, onFocus: @escaping () -> Void) {
+        hostingView = NSHostingView(rootView: rootView)
+        isFocusedBinding = isFocused
+        self.onFocus = onFocus
+        super.init(frame: .zero)
+
+        translatesAutoresizingMaskIntoConstraints = false
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hostingView)
+
+        NSLayoutConstraint.activate([
+            hostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            hostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            hostingView.topAnchor.constraint(equalTo: topAnchor),
+            hostingView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard observedWindow !== window else {
+            updateFocusState()
+            return
+        }
+
+        removeWindowObservers()
+        observedWindow = window
+        installWindowObservers()
+        updateFocusState()
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let didBecomeFirstResponder = super.becomeFirstResponder()
+        updateFocusState()
+        return didBecomeFirstResponder
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let didResignFirstResponder = super.resignFirstResponder()
+        updateFocusState()
+        return didResignFirstResponder
+    }
+
+    func update(rootView: Content, isFocused: Binding<Bool>, onFocus: @escaping () -> Void) {
+        hostingView.rootView = rootView
+        isFocusedBinding = isFocused
+        self.onFocus = onFocus
+        updateFocusState()
+    }
+
+    private func installWindowObservers() {
+        guard let window = observedWindow else {
+            isFocusedBinding.wrappedValue = false
+            return
+        }
+
+        let center = NotificationCenter.default
+        center.addObserver(self, selector: #selector(handleWindowStateChange), name: NSWindow.didBecomeKeyNotification, object: window)
+        center.addObserver(self, selector: #selector(handleWindowStateChange), name: NSWindow.didResignKeyNotification, object: window)
+        center.addObserver(self, selector: #selector(handleWindowStateChange), name: NSWindow.didBecomeMainNotification, object: window)
+        center.addObserver(self, selector: #selector(handleWindowStateChange), name: NSWindow.didResignMainNotification, object: window)
+        center.addObserver(self, selector: #selector(handleWindowStateChange), name: NSWindow.didUpdateNotification, object: window)
+    }
+
+    private func removeWindowObservers() {
+        guard let window = observedWindow else { return }
+
+        let center = NotificationCenter.default
+        center.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: window)
+        center.removeObserver(self, name: NSWindow.didResignKeyNotification, object: window)
+        center.removeObserver(self, name: NSWindow.didBecomeMainNotification, object: window)
+        center.removeObserver(self, name: NSWindow.didResignMainNotification, object: window)
+        center.removeObserver(self, name: NSWindow.didUpdateNotification, object: window)
+        observedWindow = nil
+    }
+
+    @objc
+    private func handleWindowStateChange() {
+        updateFocusState()
+    }
+
+    private func updateFocusState() {
+        guard let window else {
+            isFocusedBinding.wrappedValue = false
+            return
+        }
+
+        let isFocused = window.isKeyWindow && containsFirstResponder(window.firstResponder)
+        let didChangeFocus = isFocusedBinding.wrappedValue != isFocused
+        isFocusedBinding.wrappedValue = isFocused
+
+        if isFocused, didChangeFocus {
+            onFocus()
+        }
+    }
+
+    private func containsFirstResponder(_ responder: NSResponder?) -> Bool {
+        switch responder {
+        case nil:
+            false
+        case let responder as NSView:
+            responder.isDescendant(of: self)
+        case let responder as NSViewController:
+            responder.view.isDescendant(of: self)
+        default:
+            responder === self || responder === hostingView
+        }
+    }
+}
+
 struct SessionColumnView: View {
     private static let paneCornerRadius: CGFloat = 24
 
     @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
+    @State private var paneHasFocus = false
     @ObservedObject var sessionState: SessionLiveState
     let draftState: SessionDraftState
 
@@ -203,106 +375,108 @@ struct SessionColumnView: View {
             questions: questions,
             permissions: permissions
         )
-        VStack(spacing: 0) {
-            if chrome == .pane {
-                SessionHeaderView(
-                    sessionID: sessionID,
-                    session: session,
-                    indicator: session?.indicator ?? SessionIndicator.resolve(status: nil, hasPendingPermission: false),
-                    contextUsageText: session?.contextUsageText,
-                    allowsPaneDrag: chrome == .pane,
-                    onPaneDragChanged: onPaneDragChanged,
-                    onPaneDragEnded: onPaneDragEnded
-                )
-                Divider()
-            }
-            SessionTranscriptSection(
-                snapshot: SessionTranscriptSnapshot(
-                    transcriptRows: transcriptRows,
-                    questions: questions,
-                    thinkingBannerTitle: thinkingBannerTitle,
-                    availableSessions: availableSessions,
-                    latestTodoToolPartID: sessionState.latestTodoToolPartID,
-                    workspaceConnection: workspaceConnection
-                ),
-                sessionState: sessionState,
-                onFocusSession: { sessionID in
-                    appState.focusSession(sessionID)
-                },
-                onAnswerQuestion: { request, answers in
-                    appState.answerQuestion(request, answers: answers)
-                },
-                onRejectQuestion: { request in
-                    appState.rejectQuestion(request)
+        PaneFocusContainer(isFocused: $paneHasFocus, onFocus: {
+            guard appState.focusedSessionID != sessionID else { return }
+            appState.focusSession(sessionID)
+        }) {
+            VStack(spacing: 0) {
+                if chrome == .pane {
+                    SessionHeaderView(
+                        sessionID: sessionID,
+                        session: session,
+                        indicator: session?.indicator ?? SessionIndicator.resolve(status: nil, hasPendingPermission: false),
+                        contextUsageText: session?.contextUsageText,
+                        allowsPaneDrag: chrome == .pane,
+                        onPaneDragChanged: onPaneDragChanged,
+                        onPaneDragEnded: onPaneDragEnded
+                    )
+                    Divider()
                 }
-            )
-            .equatable()
-            Divider()
-            SessionComposerSection(
-                draftState: draftState,
-                sessionID: sessionID,
-                permissions: permissions,
-                isFocused: isFocused,
-                focusSession: {
-                    appState.focusSession(sessionID)
-                },
-                focusPermissionPrompt: {
-                    appState.focusSession(sessionID, focusPrompt: true)
-                },
-                answerPermission: { request, reply in
-                    appState.answerPermission(request, reply: reply)
-                },
-                sendMessage: { draft in
-                    appState.sendMessage(sessionID: sessionID, text: draft)
-                },
-                commandSuggestionProvider: { draft, cursorLocation in
-                    appState.slashCommandSuggestions(for: draft, sessionID: sessionID, cursorLocation: cursorLocation)
-                },
-                applySlashCommandSuggestion: { option, draft in
-                    appState.applyingSlashCommandSuggestion(option, to: draft, sessionID: sessionID)
-                },
-                modelOptionsProvider: {
-                    appState.modelOptions(for: sessionID)
-                },
-                agentOptionsProvider: {
-                    appState.agentOptions(for: sessionID)
-                },
-                selectedModelOptionProvider: {
-                    appState.selectedModelOption(for: sessionID)
-                },
-                selectedAgentKey: Binding(
-                    get: {
-                        let agentOptions = appState.agentOptions(for: sessionID)
-                        return appState.selectedAgentOption(for: sessionID)?.id ?? agentOptions.first?.id ?? ""
+                SessionTranscriptSection(
+                    snapshot: SessionTranscriptSnapshot(
+                        transcriptRows: transcriptRows,
+                        questions: questions,
+                        thinkingBannerTitle: thinkingBannerTitle,
+                        availableSessions: availableSessions,
+                        latestTodoToolPartID: sessionState.latestTodoToolPartID,
+                        workspaceConnection: workspaceConnection
+                    ),
+                    sessionState: sessionState,
+                    onFocusSession: { sessionID in
+                        appState.focusSession(sessionID)
                     },
-                    set: { appState.setSelectedAgent($0, for: sessionID) }
-                ),
-                selectedModelKey: Binding(
-                    get: {
-                        let modelOptions = appState.modelOptions(for: sessionID)
-                        return appState.selectedModelOption(for: sessionID)?.id ?? modelOptions.first?.id ?? ""
+                    onAnswerQuestion: { request, answers in
+                        appState.answerQuestion(request, answers: answers)
                     },
-                    set: { appState.setSelectedModel($0, for: sessionID, updateDefault: MacModifierKeyState.isOptionPressed()) }
-                ),
-                selectedThinkingLevel: Binding(
-                    get: {
-                        let selectedModelOption = appState.selectedModelOption(for: sessionID)
-                        let thinkingLevels = [OpenCodeAppModel.defaultThinkingLevel] + (selectedModelOption?.thinkingLevels ?? [])
-                        return appState.selectedThinkingLevel(for: sessionID) ?? thinkingLevels.first ?? ""
+                    onRejectQuestion: { request in
+                        appState.rejectQuestion(request)
+                    }
+                )
+                .equatable()
+                Divider()
+                SessionComposerSection(
+                    draftState: draftState,
+                    sessionID: sessionID,
+                    permissions: permissions,
+                    isFocused: isFocused,
+                    focusSession: {
+                        appState.focusSession(sessionID)
                     },
-                    set: { appState.setSelectedThinkingLevel($0, for: sessionID) }
-                ),
-                composerFocusRequestID: appState.promptFocusRequest?.sessionID == sessionID ? appState.promptFocusRequest?.id : nil
-            )
+                    focusPermissionPrompt: {
+                        appState.focusSession(sessionID, focusPrompt: true)
+                    },
+                    answerPermission: { request, reply in
+                        appState.answerPermission(request, reply: reply)
+                    },
+                    sendMessage: { draft in
+                        appState.sendMessage(sessionID: sessionID, text: draft)
+                    },
+                    commandSuggestionProvider: { draft, cursorLocation in
+                        appState.slashCommandSuggestions(for: draft, sessionID: sessionID, cursorLocation: cursorLocation)
+                    },
+                    applySlashCommandSuggestion: { option, draft in
+                        appState.applyingSlashCommandSuggestion(option, to: draft, sessionID: sessionID)
+                    },
+                    modelOptionsProvider: {
+                        appState.modelOptions(for: sessionID)
+                    },
+                    agentOptionsProvider: {
+                        appState.agentOptions(for: sessionID)
+                    },
+                    selectedModelOptionProvider: {
+                        appState.selectedModelOption(for: sessionID)
+                    },
+                    selectedAgentKey: Binding(
+                        get: {
+                            let agentOptions = appState.agentOptions(for: sessionID)
+                            return appState.selectedAgentOption(for: sessionID)?.id ?? agentOptions.first?.id ?? ""
+                        },
+                        set: { appState.setSelectedAgent($0, for: sessionID) }
+                    ),
+                    selectedModelKey: Binding(
+                        get: {
+                            let modelOptions = appState.modelOptions(for: sessionID)
+                            return appState.selectedModelOption(for: sessionID)?.id ?? modelOptions.first?.id ?? ""
+                        },
+                        set: { appState.setSelectedModel($0, for: sessionID, updateDefault: MacModifierKeyState.isOptionPressed()) }
+                    ),
+                    selectedThinkingLevel: Binding(
+                        get: {
+                            let selectedModelOption = appState.selectedModelOption(for: sessionID)
+                            let thinkingLevels = [OpenCodeAppModel.defaultThinkingLevel] + (selectedModelOption?.thinkingLevels ?? [])
+                            return appState.selectedThinkingLevel(for: sessionID) ?? thinkingLevels.first ?? ""
+                        },
+                        set: { appState.setSelectedThinkingLevel($0, for: sessionID) }
+                    ),
+                    composerFocusRequestID: appState.promptFocusRequest?.sessionID == sessionID ? appState.promptFocusRequest?.id : nil
+                )
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipPaneContent(if: chrome == .pane, cornerRadius: Self.paneCornerRadius)
         .background(backgroundView)
         .overlay { overlayView }
         .contentShape(Rectangle())
-        .onTapGesture {
-            appState.focusSession(sessionID)
-        }
     }
 
     private func deduplicatedPermissions(_ permissions: [PermissionRequest]) -> [PermissionRequest] {
@@ -315,11 +489,21 @@ struct SessionColumnView: View {
     }
 
     private var borderColor: Color {
-        appState.focusedSessionID == sessionID ? theme.accent.opacity(0.85) : theme.border.opacity(0.7)
+        showsFocusOutline ? theme.accent.opacity(0.85) : theme.border.opacity(0.7)
     }
 
     private var isFocused: Bool {
-        appState.focusedSessionID == sessionID
+        showsFocusOutline
+    }
+
+    private var showsFocusOutline: Bool {
+        PaneFocusOutlineState.showsFocusOutline(
+            chrome: chrome,
+            openSessionCount: appState.openSessionIDs.count,
+            focusedSessionID: appState.focusedSessionID,
+            sessionID: sessionID,
+            paneHasFocus: paneHasFocus
+        )
     }
 
     @ViewBuilder
@@ -338,7 +522,7 @@ struct SessionColumnView: View {
     private var overlayView: some View {
         if chrome == .pane {
             RoundedRectangle(cornerRadius: Self.paneCornerRadius, style: .continuous)
-                .strokeBorder(borderColor, lineWidth: appState.focusedSessionID == sessionID ? 2 : 1)
+                .strokeBorder(borderColor, lineWidth: showsFocusOutline ? 2 : 1)
         }
     }
 
@@ -1230,8 +1414,7 @@ private struct MessageCard: View {
                     if !visibleText.isEmpty {
                         SelectableMessageTextView(
                             attributedText: renderedMessageText,
-                            linkColor: theme.accentColor,
-                            onInteraction: onInteraction
+                            linkColor: theme.accentColor
                         )
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -1239,8 +1422,7 @@ private struct MessageCard: View {
                     if showsThinking, !reasoningText.isEmpty {
                         SelectableMessageTextView(
                             attributedText: renderedReasoningText,
-                            linkColor: theme.accentColor,
-                            onInteraction: onInteraction
+                            linkColor: theme.accentColor
                         )
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }

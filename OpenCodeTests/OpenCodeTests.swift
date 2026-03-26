@@ -59,6 +59,66 @@ final class PromptTextSynchronizationStateTests: XCTestCase {
     }
 }
 
+final class PaneFocusOutlineStateTests: XCTestCase {
+    func testShowsFocusOutlineForSinglePaneWithoutResponderFocus() {
+        XCTAssertTrue(
+            PaneFocusOutlineState.showsFocusOutline(
+                chrome: .pane,
+                openSessionCount: 1,
+                focusedSessionID: "session-1",
+                sessionID: "session-1",
+                paneHasFocus: false
+            )
+        )
+    }
+
+    func testShowsFocusOutlineForMultiPaneOnlyWhenPaneOwnsResponderFocus() {
+        XCTAssertFalse(
+            PaneFocusOutlineState.showsFocusOutline(
+                chrome: .pane,
+                openSessionCount: 2,
+                focusedSessionID: "session-1",
+                sessionID: "session-1",
+                paneHasFocus: false
+            )
+        )
+
+        XCTAssertTrue(
+            PaneFocusOutlineState.showsFocusOutline(
+                chrome: .pane,
+                openSessionCount: 2,
+                focusedSessionID: "session-1",
+                sessionID: "session-1",
+                paneHasFocus: true
+            )
+        )
+    }
+
+    func testDoesNotShowFocusOutlineForUnfocusedSessionEvenWhenPaneHasResponderFocus() {
+        XCTAssertFalse(
+            PaneFocusOutlineState.showsFocusOutline(
+                chrome: .pane,
+                openSessionCount: 2,
+                focusedSessionID: "session-2",
+                sessionID: "session-1",
+                paneHasFocus: true
+            )
+        )
+    }
+
+    func testWindowChromeFollowsSelectedSessionWithoutPaneFocusRequirement() {
+        XCTAssertTrue(
+            PaneFocusOutlineState.showsFocusOutline(
+                chrome: .window,
+                openSessionCount: 2,
+                focusedSessionID: "session-1",
+                sessionID: "session-1",
+                paneHasFocus: false
+            )
+        )
+    }
+}
+
 final class MessageInfoTests: XCTestCase {
     func testModelContextKeyFallsBackToNestedModelReference() {
         let info = MessageInfo(
