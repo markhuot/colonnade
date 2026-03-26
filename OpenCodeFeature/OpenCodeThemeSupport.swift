@@ -189,35 +189,19 @@ extension ThemeController {
 
 private enum OpenCodeThemeCatalogBridge {
     static var themeIDs: [OpenCodeThemeID] {
-        #if os(macOS)
         TextMateThemeCatalog.shared.themeIDs
-        #else
-        []
-        #endif
     }
 
     static func displayName(for id: OpenCodeThemeID) -> String? {
-        #if os(macOS)
         TextMateThemeCatalog.shared.displayName(for: id)
-        #else
-        nil
-        #endif
     }
 
     static func contains(_ id: OpenCodeThemeID) -> Bool {
-        #if os(macOS)
         TextMateThemeCatalog.shared.contains(id)
-        #else
-        false
-        #endif
     }
 
     static func theme(for id: OpenCodeThemeID) -> OpenCodeTheme? {
-        #if os(macOS)
         TextMateThemeCatalog.shared.theme(for: id)
-        #else
-        nil
-        #endif
     }
 }
 

@@ -55,6 +55,7 @@
 		61AA5E1DDAD2F793845D1B6F /* WorkspaceLiveStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CD055A8CF30370EB27BC136 /* WorkspaceLiveStore.swift */; };
 		638FF0EEF34DB42709AABC41 /* github-dark-high-contrast.json in Resources */ = {isa = PBXBuildFile; fileRef = 8C9BB12F02012CEECDD6415B /* github-dark-high-contrast.json */; };
 		6439F65887B850B434BE346F /* StringBackedTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9BC06B4419E9F0B86B33F7D /* StringBackedTypes.swift */; };
+		652EC4573ABE5BA6B24EDF09 /* SessionTranscriptComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CBEFE6E79C61D29CBCA29B1 /* SessionTranscriptComponents.swift */; };
 		654407EF2F3879A33F57AABF /* OpenCodeAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14EC8AE42C80968027536CB3 /* OpenCodeAppState.swift */; };
 		6687419C56078DDC306BDE83 /* kanagawa-wave.json in Resources */ = {isa = PBXBuildFile; fileRef = FB3971C471171607289748ED /* kanagawa-wave.json */; };
 		66D071668B5F7426FD276F55 /* EventPayloadDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B5F441F6600EE62CD4A7904 /* EventPayloadDecoder.swift */; };
@@ -78,6 +79,8 @@
 		888C91D1FF013A270CDC5CA8 /* SessionColumnView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778068AAF9758A3F61A1475A /* SessionColumnView.swift */; };
 		8AE08AE7F03B9D743B4ECF0A /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 948E6EB35491F76F49BF2C95 /* SharedModels.swift */; };
 		8D3D463D3C062A11B3DE2EC0 /* material-theme.json in Resources */ = {isa = PBXBuildFile; fileRef = FD2A9584BC590B57E80EF78E /* material-theme.json */; };
+		AA11BB22CC33DD44EE55FF67 /* TextMateThemes in Resources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE55FF66 /* TextMateThemes */; };
+		AA11BB22CC33DD44EE55FF68 /* TextMateThemeSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C5BEA44E4DA2BE5030F4662 /* TextMateThemeSupport.swift */; };
 		8DEF4F721C360A00E8558D18 /* MacPlatformSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC073AFE7627557BF4B8BCD3 /* MacPlatformSupport.swift */; };
 		8F64EED4634E70D260C22E0C /* OpenCodeThemeSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE623F9300FC8A882417FE98 /* OpenCodeThemeSupport.swift */; };
 		8FD62F37FBAEA962FBA34044 /* OpenCodeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99772D8985ED8E66530DBAC8 /* OpenCodeApp.swift */; };
@@ -128,6 +131,7 @@
 		E248B295358F1B2372D37822 /* OpenCodeAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14EC8AE42C80968027536CB3 /* OpenCodeAppState.swift */; };
 		E48D3E2925BAA82B75234D4E /* SessionStatusIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45252529EECA126D84F56366 /* SessionStatusIcon.swift */; };
 		E500A2D8A84B0CCD2AC99AA6 /* kanagawa-dragon.json in Resources */ = {isa = PBXBuildFile; fileRef = 509E011CD946A6C6CF5C4EF7 /* kanagawa-dragon.json */; };
+		E6FBDEF7AF6EDB7ABB36295D /* SessionTranscriptComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CBEFE6E79C61D29CBCA29B1 /* SessionTranscriptComponents.swift */; };
 		E74DC968160574670FEDFC13 /* solarized-dark.json in Resources */ = {isa = PBXBuildFile; fileRef = 0103559676CCE9B40CA11ED5 /* solarized-dark.json */; };
 		E7CB6573DF3E6A80A09AA22C /* StringBackedTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9BC06B4419E9F0B86B33F7D /* StringBackedTypes.swift */; };
 		E98F308CD2662C8ACB198EB2 /* github-light-default.json in Resources */ = {isa = PBXBuildFile; fileRef = 7CEF7ECA5CA3C49CD6BDE781 /* github-light-default.json */; };
@@ -183,6 +187,7 @@
 		379F10DC5029744C6C8E0C85 /* gruvbox-dark-soft.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "gruvbox-dark-soft.json"; sourceTree = "<group>"; };
 		3894A8BEC5EFB694981DA999 /* LICENSE */ = {isa = PBXFileReference; path = LICENSE; sourceTree = "<group>"; };
 		39B532C575D9A84EE08B9C08 /* vitesse-dark.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "vitesse-dark.json"; sourceTree = "<group>"; };
+		3CBEFE6E79C61D29CBCA29B1 /* SessionTranscriptComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTranscriptComponents.swift; sourceTree = "<group>"; };
 		3D518BF612D30E065D56EA9D /* plastic.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = plastic.json; sourceTree = "<group>"; };
 		409F8DF23EB26E76C9B024BB /* PersistenceCoders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceCoders.swift; sourceTree = "<group>"; };
 		45252529EECA126D84F56366 /* SessionStatusIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStatusIcon.swift; sourceTree = "<group>"; };
@@ -224,6 +229,7 @@
 		86D53F3642426144041B7D76 /* horizon.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = horizon.json; sourceTree = "<group>"; };
 		8C9BB12F02012CEECDD6415B /* github-dark-high-contrast.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "github-dark-high-contrast.json"; sourceTree = "<group>"; };
 		9202654BBC3150149FCBE6E5 /* github-dark.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "github-dark.json"; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE55FF66 /* TextMateThemes */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TextMateThemes; path = OpenCodeMac/TextMateThemes; sourceTree = SOURCE_ROOT; };
 		9261222A02062CA80AF4B2A4 /* OpenCodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeTests.swift; sourceTree = "<group>"; };
 		948E6EB35491F76F49BF2C95 /* SharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedModels.swift; sourceTree = "<group>"; };
 		9916DBB4131BBC03B70B8410 /* WorkspaceSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSyncCoordinator.swift; sourceTree = "<group>"; };
@@ -390,6 +396,7 @@
 			isa = PBXGroup;
 			children = (
 				FAC43FEF9E7A43B8E4A4C9DC /* Assets.xcassets */,
+				AA11BB22CC33DD44EE55FF66 /* TextMateThemes */,
 				EE08B4485E3B7EFB64154617 /* Info.plist */,
 				83B30A347BFEACE43032386F /* IOSPreferencesView.swift */,
 				9D7D4938C7BCBD36B5D6A3CC /* IOSProjectSelectorView.swift */,
@@ -449,6 +456,7 @@
 				5FF8457353B92E0582F3C6AD /* PerformanceInstrumentation.swift */,
 				34AE90FF1AC8E73461BC2636 /* SelectableMessageTextView.swift */,
 				45252529EECA126D84F56366 /* SessionStatusIcon.swift */,
+				3CBEFE6E79C61D29CBCA29B1 /* SessionTranscriptComponents.swift */,
 				5CD055A8CF30370EB27BC136 /* WorkspaceLiveStore.swift */,
 				99A358BCB5B643B47216E1CC /* WorkspaceServerController.swift */,
 				9916DBB4131BBC03B70B8410 /* WorkspaceSyncCoordinator.swift */,
@@ -656,6 +664,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				3ABA4597D265974FD1131608 /* Assets.xcassets in Resources */,
+				AA11BB22CC33DD44EE55FF67 /* TextMateThemes in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -691,6 +700,7 @@
 				09CB17BCCFE541726321D4AB /* OpenCodeAppModelFactory+iOS.swift in Sources */,
 				654407EF2F3879A33F57AABF /* OpenCodeAppState.swift in Sources */,
 				ECB93FF1C4FD13C7968AFA64 /* OpenCodeThemeSupport.swift in Sources */,
+				AA11BB22CC33DD44EE55FF68 /* TextMateThemeSupport.swift in Sources */,
 				7DEFFD6DAE0BFAEBD6E924D0 /* OpenCodeiOSApp.swift in Sources */,
 				7CB517A9F22E08DA03003303 /* PerformanceInstrumentation.swift in Sources */,
 				17671C5D4419FE69366A0E27 /* Persistence.swift in Sources */,
@@ -699,6 +709,7 @@
 				A2879BFC88CD6D696561EDBD /* PlatformSupport.swift in Sources */,
 				9CE95CEE6467564850BF57FD /* SelectableMessageTextView.swift in Sources */,
 				E48D3E2925BAA82B75234D4E /* SessionStatusIcon.swift in Sources */,
+				E6FBDEF7AF6EDB7ABB36295D /* SessionTranscriptComponents.swift in Sources */,
 				540C121B89B208C78370FD74 /* SharedModels.swift in Sources */,
 				6439F65887B850B434BE346F /* StringBackedTypes.swift in Sources */,
 				364D64BE0E5278A480FFB755 /* WorkspaceLiveStore.swift in Sources */,
@@ -741,6 +752,7 @@
 				948FBE34A50EF22D51602E51 /* SelectableMessageTextView.swift in Sources */,
 				888C91D1FF013A270CDC5CA8 /* SessionColumnView.swift in Sources */,
 				BE4063BD28A12541EB254CD5 /* SessionStatusIcon.swift in Sources */,
+				652EC4573ABE5BA6B24EDF09 /* SessionTranscriptComponents.swift in Sources */,
 				B8CB8D66585A1797D11C7C42 /* SessionWindowView.swift in Sources */,
 				8AE08AE7F03B9D743B4ECF0A /* SharedModels.swift in Sources */,
 				E7CB6573DF3E6A80A09AA22C /* StringBackedTypes.swift in Sources */,

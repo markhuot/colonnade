@@ -125,6 +125,10 @@ struct ProjectSelectorView: View {
             }
         case .remoteDirectoryEntry:
             VStack(alignment: .leading, spacing: 14) {
+                if !appState.recentProjectDirectories.isEmpty {
+                    recentProjectsSection
+                }
+
                 PromptTextView(
                     text: $appState.remoteDirectoryText,
                     measuredHeight: .constant(PromptTextView.defaultHeight),
@@ -162,7 +166,7 @@ struct ProjectSelectorView: View {
                     }
                     .buttonStyle(.borderedProminent)
 
-                    Button("Change Server") {
+                    Button("Back") {
                         appState.showRemoteServerEntry()
                     }
                     .buttonStyle(.bordered)
@@ -193,6 +197,28 @@ struct ProjectSelectorView: View {
                 ForEach(appState.recentRemoteConnections, id: \.self) { connection in
                     Button(connection) {
                         appState.connectToRecentRemoteServer(connection)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(theme.mutedSurfaceBackground)
+                    .clipShape(Capsule())
+                }
+            }
+            .frame(maxWidth: 700, alignment: .leading)
+        }
+    }
+
+    private var recentProjectsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Recent Projects")
+                .font(.headline)
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), alignment: .leading)], alignment: .leading, spacing: 8) {
+                ForEach(appState.recentProjectDirectories, id: \.self) { directory in
+                    Button(directory) {
+                        appState.connectToRecentProjectDirectory(directory)
                     }
                     .buttonStyle(.plain)
                     .padding(.horizontal, 12)

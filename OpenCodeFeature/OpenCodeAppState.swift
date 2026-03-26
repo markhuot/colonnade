@@ -22,7 +22,15 @@ final class OpenCodeAppModel: ObservableObject {
     }
 
     @Published var selectedDirectory: String?
-    @Published var serverURL: URL
+    @Published var serverURL: URL {
+        didSet {
+            guard oldValue != serverURL else { return }
+            recentProjectDirectories = RecentProjectDirectoriesPreferences.load(
+                for: serverURL,
+                from: recentProjectDirectoriesDefaults
+            )
+        }
+    }
     @Published var openSessionIDs: [String] = []
     @Published var focusedSessionID: String?
     @Published var isLoading = false
@@ -32,6 +40,7 @@ final class OpenCodeAppModel: ObservableObject {
     @Published var remoteDirectoryText: String = ""
     @Published var remoteProjectSuggestions: [String] = []
     @Published private(set) var recentRemoteConnections: [String] = []
+    @Published private(set) var recentProjectDirectories: [String] = []
     @Published private(set) var isStartingLocalServer = false
     @Published private(set) var isValidatingRemoteServer = false
     @Published private(set) var promptFocusRequest: SessionPromptFocusRequest?
@@ -54,6 +63,7 @@ final class OpenCodeAppModel: ObservableObject {
     private let syncRegistry: any WorkspaceSyncRegistryProtocol
     private let serverController: WorkspaceServerController
     private let recentRemoteConnectionsDefaults: UserDefaults
+    private let recentProjectDirectoriesDefaults: UserDefaults
     private let persistsWorkspacePaneState: Bool
     private let restoresLastSelectedDirectory: Bool
     private let supportsLocalServer: Bool
@@ -74,6 +84,7 @@ final class OpenCodeAppModel: ObservableObject {
     private var cachedBaseModelOptionsKey: BaseModelOptionsCacheKey?
     private var cachedBaseModelOptions: [ModelOption] = []
     private var cachedModelOptionsBySession: [String: SessionModelOptionsCacheEntry] = [:]
+    private var shouldResyncOpenSessionsOnForeground = false
 
     let defaultPaneWidth: CGFloat = 720
     let minPaneWidth: CGFloat = 360
@@ -108,6 +119,7 @@ final class OpenCodeAppModel: ObservableObject {
         preferredDefaultModelReferenceProvider: @escaping () -> ModelReference? = { nil },
         preferredDefaultModelReferenceSetter: @escaping (ModelReference?) -> Void = { _ in },
         recentRemoteConnectionsDefaults: UserDefaults = .standard,
+        recentProjectDirectoriesDefaults: UserDefaults = .standard,
         directoryChooser: @escaping @MainActor () -> Void = {},
         serverWaiter: (@Sendable (URL, Duration) async -> ServerStartupWaitResult)? = nil
     ) {
@@ -117,11 +129,16 @@ final class OpenCodeAppModel: ObservableObject {
         self.restoresLastSelectedDirectory = restoresLastSelectedDirectory
         self.supportsLocalServer = supportsLocalServer
         self.recentRemoteConnectionsDefaults = recentRemoteConnectionsDefaults
+        self.recentProjectDirectoriesDefaults = recentProjectDirectoriesDefaults
         self.initialServerURL = initialServerURL
         self.serverURL = initialServerURL
         self.initialDirectory = initialDirectory
         self.initialOpenSessionIDs = initialOpenSessionIDs
         recentRemoteConnections = RecentRemoteConnectionsPreferences.load(from: recentRemoteConnectionsDefaults)
+        recentProjectDirectories = RecentProjectDirectoriesPreferences.load(
+            for: initialServerURL,
+            from: recentProjectDirectoriesDefaults
+        )
 
         if let apiClientProviderOverride {
             apiClientProvider = apiClientProviderOverride
@@ -308,6 +325,18 @@ final class OpenCodeAppModel: ObservableObject {
         launchStage = .remoteServerEntry
     }
 
+    func returnToProjectChooser() {
+        let previousDirectory = selectedDirectory
+        let previousLaunchStage = launchStage
+        clearWorkspaceSelection()
+
+        if let previousDirectory, previousLaunchStage == .remoteDirectoryEntry {
+            remoteDirectoryText = previousDirectory
+        }
+
+        launchStage = connectedLaunchStage(for: serverURL)
+    }
+
     func openLocalDirectory() {
         guard supportsLocalServer else {
             errorMessage = "Local workspaces aren't available on iOS. Connect to a remote opencode server instead."
@@ -371,6 +400,10 @@ final class OpenCodeAppModel: ObservableObject {
                     connection.normalizedURLText,
                     defaults: recentRemoteConnectionsDefaults
                 )
+                recentProjectDirectories = RecentProjectDirectoriesPreferences.load(
+                    for: connection.serverURL,
+                    from: recentProjectDirectoriesDefaults
+                )
                 launchStage = .remoteDirectoryEntry
                 remoteProjectSuggestions = connection.projectSuggestions
             } catch {
@@ -392,6 +425,16 @@ final class OpenCodeAppModel: ObservableObject {
     func connectToRecentRemoteServer(_ urlText: String) {
         remoteServerURLText = urlText
         connectToRemoteServer()
+    }
+
+    func connectToRecentProjectDirectory(_ directory: String) {
+        if serverURL == Self.defaultServerURL {
+            connectToLocalDirectory(directory)
+            return
+        }
+
+        remoteDirectoryText = directory
+        connectToRemoteDirectory()
     }
 
     func remoteDirectorySuggestionOptions(limit: Int = 8) -> [CommandOption] {
@@ -440,6 +483,7 @@ final class OpenCodeAppModel: ObservableObject {
         selectedDirectory = trimmedDirectory
         isLoading = true
         errorMessage = nil
+        shouldResyncOpenSessionsOnForeground = false
 
         let liveStore = await syncRegistry.store(for: connection)
 
@@ -471,6 +515,7 @@ final class OpenCodeAppModel: ObservableObject {
             if hasCachedWorkspaceContent {
                 isLoading = false
                 launchStage = connectedLaunchStage(for: serverURL)
+                rememberRecentProjectDirectory(trimmedDirectory)
                 Task {
                     let loadedModelContextLimits = await refreshModelMetadata(
                         loadID: loadID,
@@ -510,6 +555,7 @@ final class OpenCodeAppModel: ObservableObject {
                 reportErrorsToUser: false,
                 loadedModelContextLimits: loadedModelContextLimits
             )
+            rememberRecentProjectDirectory(trimmedDirectory)
             launchStage = connectedLaunchStage(for: serverURL)
         } catch {
             logger.error("Load failed: \(error.localizedDescription, privacy: .public)")
@@ -674,6 +720,25 @@ final class OpenCodeAppModel: ObservableObject {
         guard let selectedDirectory else { return }
         Task {
             await load(directory: selectedDirectory)
+        }
+    }
+
+    func noteAppDidEnterBackground() {
+        shouldResyncOpenSessionsOnForeground = workspaceConnection != nil && !openSessionIDs.isEmpty
+    }
+
+    func noteAppDidBecomeActive() {
+        guard shouldResyncOpenSessionsOnForeground else { return }
+        shouldResyncOpenSessionsOnForeground = false
+
+        let sessionIDs = openSessionIDs
+        guard !sessionIDs.isEmpty else { return }
+
+        Task {
+            await syncOpenSessions()
+            guard let workspaceConnection else { return }
+            let coordinator = await syncRegistry.coordinator(for: workspaceConnection)
+            await refreshOpenSessions(sessionIDs, using: coordinator)
         }
     }
 
@@ -1170,6 +1235,15 @@ final class OpenCodeAppModel: ObservableObject {
         await coordinator.updateOpenSessionIDs(openSessionIDs)
     }
 
+    private func refreshOpenSessions(_ sessionIDs: [String], using coordinator: any WorkspaceSyncCoordinating) async {
+        for sessionID in sessionIDs {
+            await coordinator.refreshTodos(sessionID: sessionID)
+            if shouldRefreshMessages(for: sessionID) {
+                await coordinator.refreshMessages(sessionID: sessionID)
+            }
+        }
+    }
+
     private func initialLaunchStage() -> LaunchStage {
         supportsLocalServer ? .chooseServerMode : .remoteServerEntry
     }
@@ -1588,6 +1662,7 @@ final class OpenCodeAppModel: ObservableObject {
     }
 
     private func clearWorkspaceSelection() {
+        shouldResyncOpenSessionsOnForeground = false
         selectedDirectory = nil
         openSessionIDs = []
         focusedSessionID = nil
@@ -1604,6 +1679,14 @@ final class OpenCodeAppModel: ObservableObject {
         selectedThinkingLevelBySession = [:]
         dismissedPermissionRequestIDs = []
         dismissedQuestionRequestIDs = []
+    }
+
+    private func rememberRecentProjectDirectory(_ directory: String) {
+        recentProjectDirectories = RecentProjectDirectoriesPreferences.remember(
+            directory,
+            for: serverURL,
+            defaults: recentProjectDirectoriesDefaults
+        )
     }
 
 }

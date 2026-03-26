@@ -1,6 +1,38 @@
 import AppKit
 import SwiftUI
 
+struct PromptTextSynchronizationState {
+    private(set) var lastSynchronizedText: String
+    private(set) var pendingLocallyEditedText: String?
+
+    init(text: String) {
+        lastSynchronizedText = text
+    }
+
+    mutating func noteLocalEdit(_ text: String) {
+        pendingLocallyEditedText = text
+    }
+
+    mutating func noteSynchronizedText(_ text: String) {
+        lastSynchronizedText = text
+        if pendingLocallyEditedText == text {
+            pendingLocallyEditedText = nil
+        }
+    }
+
+    func shouldApplyExternalText(_ incomingText: String, currentViewText: String) -> Bool {
+        guard incomingText != currentViewText else { return false }
+
+        guard let pendingLocallyEditedText,
+              pendingLocallyEditedText == currentViewText,
+              incomingText == lastSynchronizedText else {
+            return true
+        }
+
+        return false
+    }
+}
+
 struct PromptTextView: NSViewRepresentable {
     static let defaultHeight: CGFloat = 40
 
@@ -132,7 +164,9 @@ struct PromptTextView: NSViewRepresentable {
         textView.textColor = textColor
         textView.insertionPointColor = insertionPointColor
         textView.placeholderColor = placeholderColor
-        if textView.string != text {
+        if textView.string == text {
+            context.coordinator.noteSynchronizedText(text)
+        } else if context.coordinator.shouldApplyExternalText(text, currentViewText: textView.string) {
             context.coordinator.applyText(text, to: textView)
         }
         context.coordinator.installSuggestions(suggestions, for: textView)
@@ -156,6 +190,7 @@ struct PromptTextView: NSViewRepresentable {
         let insertionPointColor: NSColor
         let placeholderColor: NSColor
         private var lastAppliedFocusRequestID: UUID?
+        private var textSynchronizationState: PromptTextSynchronizationState
         private let onSelectSuggestion: (CommandOption) -> Void
         let onFocus: () -> Void
         let onSubmit: () -> Void
@@ -192,6 +227,7 @@ struct PromptTextView: NSViewRepresentable {
             self.textColor = textColor
             self.insertionPointColor = insertionPointColor
             self.placeholderColor = placeholderColor
+            textSynchronizationState = PromptTextSynchronizationState(text: text.wrappedValue)
             lastAppliedFocusRequestID = nil
             self.onSelectSuggestion = onSelectSuggestion
             self.onFocus = onFocus
@@ -200,6 +236,7 @@ struct PromptTextView: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
+            textSynchronizationState.noteLocalEdit(textView.string)
             text = textView.string
             cursorLocation = textView.selectedRange().location
             guard let scrollView = textView.enclosingScrollView else { return }
@@ -272,6 +309,7 @@ struct PromptTextView: NSViewRepresentable {
         }
 
         func applyText(_ newValue: String, to textView: NSTextView) {
+            textSynchronizationState.noteSynchronizedText(newValue)
             textView.string = newValue
             textView.setSelectedRange(NSRange(location: newValue.utf16.count, length: 0))
             cursorLocation = newValue.utf16.count
@@ -294,6 +332,14 @@ struct PromptTextView: NSViewRepresentable {
             DispatchQueue.main.async {
                 textView.window?.makeFirstResponder(textView)
             }
+        }
+
+        func noteSynchronizedText(_ text: String) {
+            textSynchronizationState.noteSynchronizedText(text)
+        }
+
+        func shouldApplyExternalText(_ incomingText: String, currentViewText: String) -> Bool {
+            textSynchronizationState.shouldApplyExternalText(incomingText, currentViewText: currentViewText)
         }
 
         private func updateSuggestionAnchor(for textView: PromptNSTextView) {

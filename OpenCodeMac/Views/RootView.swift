@@ -24,13 +24,6 @@ struct RootView: View {
         }
         .navigationTitle(appState.projectName ?? "Choose Project")
         .foregroundStyle(theme.primaryText)
-        .overlay(alignment: .topTrailing) {
-            if let liveStore = appState.liveStore {
-                SSEDebugOverlay(liveStore: liveStore)
-                    .padding(.top, 18)
-                    .padding(.trailing, 18)
-            }
-        }
         .alert("Colonnade Error", isPresented: Binding(
             get: { appState.errorMessage != nil },
             set: { isPresented in
@@ -47,39 +40,6 @@ struct RootView: View {
         }
         .background(theme.windowBackground)
         .themedWindow(theme)
-    }
-}
-
-struct SSEDebugOverlay: View {
-    @ObservedObject var liveStore: WorkspaceLiveStore
-    @Environment(\.openCodeTheme) private var theme
-
-    var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 6) {
-                ForEach(liveStore.rawSSEEvents) { event in
-                    Text(verbatim: event.payload)
-                        .font(.system(size: 11, weight: .regular, design: .monospaced))
-                        .foregroundStyle(theme.primaryText)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
-        }
-        .defaultScrollAnchor(.bottom)
-        .frame(width: 420, height: 260)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(theme.surfaceBackground.opacity(0.96))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(theme.border.opacity(0.8), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.28), radius: 20, x: 0, y: 10)
-        .padding(.leading, 12)
     }
 }
 
@@ -114,7 +74,7 @@ private struct SidebarView: View {
                             appState.resetServerSelection()
                         }
                     case .remoteDirectoryEntry:
-                        Button("Change Server") {
+                        Button("Back to Server") {
                             appState.showRemoteServerEntry()
                         }
                     case .checkingLocalServer:
@@ -124,6 +84,12 @@ private struct SidebarView: View {
             }
 
             if appState.selectedDirectory != nil {
+                Section {
+                    Button("Back to Projects") {
+                        appState.returnToProjectChooser()
+                    }
+                }
+
                 if let liveStore = appState.liveStore {
                     SessionListSection(
                         liveStore: liveStore,

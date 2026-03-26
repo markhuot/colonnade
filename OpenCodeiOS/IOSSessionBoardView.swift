@@ -6,6 +6,7 @@ struct IOSSessionBoardView: View {
 
     let initialSessionID: String
     let activeComposerSessionID: String?
+    let bottomOverlayClearance: CGFloat
     let draftRegistry: SessionDraftRegistry
     let onDeactivateComposer: () -> Void
     let onActivateComposer: (String) -> Void
@@ -15,12 +16,14 @@ struct IOSSessionBoardView: View {
     init(
         initialSessionID: String,
         activeComposerSessionID: String? = nil,
+        bottomOverlayClearance: CGFloat = 0,
         draftRegistry: SessionDraftRegistry,
         onDeactivateComposer: @escaping () -> Void = {},
         onActivateComposer: @escaping (String) -> Void = { _ in }
     ) {
         self.initialSessionID = initialSessionID
         self.activeComposerSessionID = activeComposerSessionID
+        self.bottomOverlayClearance = bottomOverlayClearance
         self.draftRegistry = draftRegistry
         self.onDeactivateComposer = onDeactivateComposer
         self.onActivateComposer = onActivateComposer
@@ -38,12 +41,13 @@ struct IOSSessionBoardView: View {
             } else if let liveStore = appState.liveStore {
                 GeometryReader { geometry in
                     let cardWidth = max(geometry.size.width * 0.9, 320)
+                    let cardHeight = max(geometry.size.height - bottomOverlayClearance, 320)
                     let horizontalInset = max((geometry.size.width - cardWidth) / 2, 0)
 
                     sessionScroller(
                         liveStore: liveStore,
                         cardWidth: cardWidth,
-                        cardHeight: geometry.size.height - 1,
+                        cardHeight: cardHeight,
                         horizontalInset: horizontalInset
                     )
                 }
@@ -86,16 +90,18 @@ struct IOSSessionBoardView: View {
             LazyHStack(spacing: 9) {
                 ForEach(appState.openSessionIDs, id: \.self) { sessionID in
                     let sessionState = liveStore.sessionState(for: sessionID)
+                    let draftState = draftRegistry.state(for: sessionID)
+                    let isComposerActive = activeComposerSessionID == sessionID
 
-                        IOSSessionColumnView(
-                            sessionState: sessionState,
-                            sessionID: sessionID,
-                            draftState: draftRegistry.state(for: sessionID),
-                            isComposerActive: activeComposerSessionID == sessionID,
-                            onActivateComposer: onActivateComposer
-                        )
-                        .frame(width: cardWidth, height: cardHeight)
-                        .id(sessionID)
+                    IOSSessionColumnView(
+                        sessionState: sessionState,
+                        draftState: draftState,
+                        sessionID: sessionID,
+                        isComposerActive: isComposerActive,
+                        onActivateComposer: onActivateComposer
+                    )
+                    .frame(width: cardWidth, height: cardHeight)
+                    .id(sessionID)
                 }
             }
             .scrollTargetLayout()

@@ -32,6 +32,33 @@ final class TodoProgressTests: XCTestCase {
     }
 }
 
+final class PromptTextSynchronizationStateTests: XCTestCase {
+    func testIgnoresStaleBindingUpdateWhileTyping() {
+        var state = PromptTextSynchronizationState(text: "")
+
+        state.noteLocalEdit("D")
+
+        XCTAssertFalse(state.shouldApplyExternalText("", currentViewText: "D"))
+    }
+
+    func testAppliesIncomingTextAfterSynchronizationAdvances() {
+        var state = PromptTextSynchronizationState(text: "")
+
+        state.noteLocalEdit("D")
+        state.noteSynchronizedText("D")
+
+        XCTAssertTrue(state.shouldApplyExternalText("Debug", currentViewText: "D"))
+    }
+
+    func testAppliesDifferentExternalTextEvenWithPendingLocalEdit() {
+        var state = PromptTextSynchronizationState(text: "")
+
+        state.noteLocalEdit("D")
+
+        XCTAssertTrue(state.shouldApplyExternalText("server", currentViewText: "D"))
+    }
+}
+
 final class MessageInfoTests: XCTestCase {
     func testModelContextKeyFallsBackToNestedModelReference() {
         let info = MessageInfo(
@@ -275,6 +302,68 @@ final class ThinkingVisibilityPreferencesTests: XCTestCase {
         ThinkingVisibilityPreferences.setShowsThinking(false, defaults: defaults)
 
         XCTAssertFalse(ThinkingVisibilityPreferences.showsThinking(from: defaults))
+    }
+}
+
+final class SessionTranscriptSupportTests: XCTestCase {
+    func testThinkingBannerTitleReturnsLatestReasoningWhenThinkingHiddenAndSessionBusy() {
+        let title = SessionTranscriptSupport.thinkingBannerTitle(
+            session: makeSessionDisplay(id: "session-1", status: .busy),
+            latestReasoningTitle: "Inspecting transcript updates",
+            questions: [],
+            permissions: [],
+            showsThinking: false
+        )
+
+        XCTAssertEqual(title, "Inspecting transcript updates")
+    }
+
+    func testThinkingBannerTitleReturnsNilWhenThinkingIsVisible() {
+        let title = SessionTranscriptSupport.thinkingBannerTitle(
+            session: makeSessionDisplay(id: "session-1", status: .busy),
+            latestReasoningTitle: "Inspecting transcript updates",
+            questions: [],
+            permissions: [],
+            showsThinking: true
+        )
+
+        XCTAssertNil(title)
+    }
+
+    func testThinkingBannerTitleReturnsNilWhenQuestionIsPending() {
+        let title = SessionTranscriptSupport.thinkingBannerTitle(
+            session: makeSessionDisplay(id: "session-1", status: .busy),
+            latestReasoningTitle: "Inspecting transcript updates",
+            questions: [makeQuestion(id: "question-1", sessionID: "session-1")],
+            permissions: [],
+            showsThinking: false
+        )
+
+        XCTAssertNil(title)
+    }
+
+    func testThinkingBannerTitleReturnsNilWhenPermissionIsPending() {
+        let title = SessionTranscriptSupport.thinkingBannerTitle(
+            session: makeSessionDisplay(id: "session-1", status: .busy),
+            latestReasoningTitle: "Inspecting transcript updates",
+            questions: [],
+            permissions: [makePermission(id: "permission-1", sessionID: "session-1")],
+            showsThinking: false
+        )
+
+        XCTAssertNil(title)
+    }
+
+    func testThinkingBannerTitleReturnsNilWhenSessionIsNotThinking() {
+        let title = SessionTranscriptSupport.thinkingBannerTitle(
+            session: makeSessionDisplay(id: "session-1", status: .idle),
+            latestReasoningTitle: "Inspecting transcript updates",
+            questions: [],
+            permissions: [],
+            showsThinking: false
+        )
+
+        XCTAssertNil(title)
     }
 }
 
@@ -1403,6 +1492,78 @@ final class OpenCodeAppModelTests: XCTestCase {
         XCTAssertEqual(refreshedMessages, [cachedSession.id])
     }
 
+    func testForegroundResyncRefreshesOpenSessionsAfterBackgroundingOnIOS() async throws {
+        let directory = try makeTemporaryDirectory()
+        let repository = PersistenceRepository(persistence: PersistenceController(inMemory: true))
+        let session = makeSession(id: "session-1", directory: directory, updatedAt: 1_000)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: []),
+            todosResult: [session.id: [SessionTodo(content: "todo", status: .pending, priority: .high)]]
+        )
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+        appState.openSessionIDs = [session.id]
+
+        appState.noteAppDidEnterBackground()
+        appState.noteAppDidBecomeActive()
+        try await waitForAsyncWork()
+
+        let updatedOpenSessions = await coordinator.updatedOpenSessionIDsSnapshot()
+        XCTAssertEqual(updatedOpenSessions.last, [session.id])
+
+        let refreshedTodos = await coordinator.refreshedTodosSessionIDsSnapshot()
+        XCTAssertEqual(refreshedTodos.suffix(1), [session.id])
+
+        let refreshedMessages = await coordinator.refreshedMessageSessionIDsSnapshot()
+        XCTAssertEqual(refreshedMessages.suffix(1), [session.id])
+    }
+
+    func testForegroundResyncDoesNothingWithoutBackgroundTransition() async throws {
+        let directory = try makeTemporaryDirectory()
+        let repository = PersistenceRepository(persistence: PersistenceController(inMemory: true))
+        let session = makeSession(id: "session-1", directory: directory, updatedAt: 1_000)
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(sessions: [session], statuses: [:], questions: [], permissions: [])
+        )
+        let coordinator = MockWorkspaceSyncCoordinator()
+        let registry = TestWorkspaceSyncRegistry(coordinator: coordinator)
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: repository,
+            syncRegistry: registry,
+            persistsWorkspacePaneState: false
+        )
+
+        await appState.load(directory: directory)
+        appState.openSessionIDs = [session.id]
+
+        let baselineOpenSessionUpdates = await coordinator.updatedOpenSessionIDsSnapshot().count
+        let baselineTodoRefreshes = await coordinator.refreshedTodosSessionIDsSnapshot().count
+        let baselineMessageRefreshes = await coordinator.refreshedMessageSessionIDsSnapshot().count
+
+        appState.noteAppDidBecomeActive()
+        try await waitForAsyncWork()
+
+        let updatedOpenSessions = await coordinator.updatedOpenSessionIDsSnapshot()
+        XCTAssertEqual(updatedOpenSessions.count, baselineOpenSessionUpdates)
+
+        let refreshedTodos = await coordinator.refreshedTodosSessionIDsSnapshot()
+        XCTAssertEqual(refreshedTodos.count, baselineTodoRefreshes)
+
+        let refreshedMessages = await coordinator.refreshedMessageSessionIDsSnapshot()
+        XCTAssertEqual(refreshedMessages.count, baselineMessageRefreshes)
+    }
+
     func testLoadWithCachedDataSurfacesBackgroundRefreshErrorsWithoutDroppingCache() async throws {
         let directory = try makeTemporaryDirectory()
         let persistence = PersistenceController(inMemory: true)
@@ -1629,6 +1790,27 @@ final class OpenCodeAppModelTests: XCTestCase {
         XCTAssertEqual(RecentRemoteConnectionsPreferences.load(from: defaults), ["https://example.com"])
     }
 
+    func testConnectToRemoteServerLoadsServerSpecificRecentProjects() async throws {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        RecentProjectDirectoriesPreferences.remember("/projects/a", for: URL(string: "https://example.com")!, defaults: defaults)
+        RecentProjectDirectoriesPreferences.remember("/projects/b", for: URL(string: "https://other.example.com")!, defaults: defaults)
+        let client = MockOpenCodeAPIClient(health: .init(healthy: true, version: "1.0.0"), projects: [])
+
+        let appState = OpenCodeAppModel(
+            repository: PersistenceRepository(persistence: PersistenceController(inMemory: true)),
+            persistsWorkspacePaneState: false,
+            apiClientProviderOverride: { _ in client },
+            recentProjectDirectoriesDefaults: defaults
+        )
+        appState.remoteServerURLText = "example.com"
+
+        appState.connectToRemoteServer()
+        try await waitForAsyncWork()
+
+        XCTAssertEqual(appState.recentProjectDirectories, ["/projects/a"])
+    }
+
     func testResetServerSelectionReturnsIOSAppToProjectPicker() async throws {
         let directory = "/remote/project"
         let workspaceService = MockWorkspaceService(
@@ -1664,6 +1846,37 @@ final class OpenCodeAppModelTests: XCTestCase {
         XCTAssertEqual(appState.remoteDirectoryText, "")
     }
 
+    func testReturnToProjectChooserKeepsCurrentServerAndDirectoryDraft() async throws {
+        let directory = "/remote/project"
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(
+                sessions: [makeSession(id: "session-1", directory: directory)],
+                statuses: [:],
+                questions: [],
+                permissions: []
+            )
+        )
+        let serverURL = URL(string: "https://example.com")!
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: PersistenceRepository(persistence: PersistenceController(inMemory: true)),
+            persistsWorkspacePaneState: false,
+            supportsLocalServer: false,
+            initialServerURL: serverURL
+        )
+
+        await appState.load(directory: directory)
+        appState.launchStage = .remoteDirectoryEntry
+
+        appState.returnToProjectChooser()
+
+        XCTAssertNil(appState.selectedDirectory)
+        XCTAssertEqual(appState.serverURL, serverURL)
+        XCTAssertEqual(appState.launchStage, .remoteDirectoryEntry)
+        XCTAssertEqual(appState.remoteDirectoryText, directory)
+    }
+
     func testRecentRemoteConnectionsKeepMostRecentFiveUniqueValues() {
         let defaults = UserDefaults(suiteName: #function)!
         defaults.removePersistentDomain(forName: #function)
@@ -1692,6 +1905,86 @@ final class OpenCodeAppModelTests: XCTestCase {
                 "https://two.example.com"
             ]
         )
+    }
+
+    func testRecentProjectDirectoriesAreStoredPerServer() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let primaryServer = URL(string: "https://one.example.com")!
+        let secondaryServer = URL(string: "https://two.example.com")!
+
+        RecentProjectDirectoriesPreferences.remember("/projects/one-a", for: primaryServer, defaults: defaults)
+        RecentProjectDirectoriesPreferences.remember("/projects/two-a", for: secondaryServer, defaults: defaults)
+        RecentProjectDirectoriesPreferences.remember("/projects/one-b", for: primaryServer, defaults: defaults)
+
+        XCTAssertEqual(
+            RecentProjectDirectoriesPreferences.load(for: primaryServer, from: defaults),
+            ["/projects/one-b", "/projects/one-a"]
+        )
+        XCTAssertEqual(
+            RecentProjectDirectoriesPreferences.load(for: secondaryServer, from: defaults),
+            ["/projects/two-a"]
+        )
+    }
+
+    func testRecentProjectDirectoriesKeepMostRecentFiveUniqueValuesPerServer() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let serverURL = URL(string: "https://example.com")!
+
+        let entries = [
+            "/projects/one",
+            "/projects/two",
+            "/projects/three",
+            "/projects/four",
+            "/projects/five",
+            "/projects/six",
+            "/projects/three"
+        ]
+
+        for entry in entries {
+            RecentProjectDirectoriesPreferences.remember(entry, for: serverURL, defaults: defaults)
+        }
+
+        XCTAssertEqual(
+            RecentProjectDirectoriesPreferences.load(for: serverURL, from: defaults),
+            [
+                "/projects/three",
+                "/projects/six",
+                "/projects/five",
+                "/projects/four",
+                "/projects/two"
+            ]
+        )
+    }
+
+    func testLoadStoresRecentProjectDirectoryForServer() async throws {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let directory = "/remote/project"
+        let serverURL = URL(string: "https://example.com")!
+        let workspaceService = MockWorkspaceService(
+            workspaceSnapshotResult: WorkspaceSnapshot(
+                sessions: [makeSession(id: "session-1", directory: directory)],
+                statuses: [:],
+                questions: [],
+                permissions: []
+            )
+        )
+
+        let appState = OpenCodeAppModel(
+            workspaceService: workspaceService,
+            repository: PersistenceRepository(persistence: PersistenceController(inMemory: true)),
+            persistsWorkspacePaneState: false,
+            supportsLocalServer: false,
+            initialServerURL: serverURL,
+            recentProjectDirectoriesDefaults: defaults
+        )
+
+        await appState.load(directory: directory)
+
+        XCTAssertEqual(appState.recentProjectDirectories, [directory])
+        XCTAssertEqual(RecentProjectDirectoriesPreferences.load(for: serverURL, from: defaults), [directory])
     }
 
     func testRemoteDirectorySuggestionOptionsReturnBestMatches() {
@@ -4140,6 +4433,28 @@ private func makeProject(id: String, worktree: String) -> OpenCodeProject {
         vcsDir: nil,
         vcs: nil,
         time: .init(created: 1_000, initialized: 1_000)
+    )
+}
+
+private func makeSessionDisplay(
+    id: String,
+    status: SessionStatus?,
+    parentID: String? = nil,
+    createdAtMS: Double = 1_000,
+    updatedAtMS: Double = 2_000
+) -> SessionDisplay {
+    SessionDisplay(
+        id: id,
+        title: "Session \(id)",
+        createdAtMS: createdAtMS,
+        updatedAtMS: updatedAtMS,
+        hydratedMessageUpdatedAtMS: nil,
+        parentID: parentID,
+        status: status,
+        hasPendingPermission: false,
+        todoProgress: nil,
+        contextUsageText: nil,
+        isArchived: false
     )
 }
 

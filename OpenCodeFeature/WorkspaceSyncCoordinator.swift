@@ -306,10 +306,6 @@ actor WorkspaceSyncCoordinator: WorkspaceSyncCoordinating {
     }
 
     private func handleEventData(_ payload: String) async {
-        await withStore { store in
-            store.appendRawSSEEvent(payload)
-        }
-
         do {
             let event = try payloadDecoder.decode(payload)
             let sessionID = eventSessionID(from: event) ?? "nil"

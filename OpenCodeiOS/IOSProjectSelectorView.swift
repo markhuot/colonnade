@@ -100,6 +100,10 @@ struct IOSProjectSelectorView: View {
 
     private var remoteDirectorySection: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if !appState.recentProjectDirectories.isEmpty {
+                recentProjectsSection
+            }
+
             IOSPromptTextEditor(
                 text: $appState.remoteDirectoryText,
                 isFocused: $isRemoteDirectoryFocused,
@@ -154,7 +158,7 @@ struct IOSProjectSelectorView: View {
             }
             .buttonStyle(.borderedProminent)
 
-            Button("Change Server") {
+            Button("Back") {
                 appState.showRemoteServerEntry()
             }
             .buttonStyle(.bordered)
@@ -170,6 +174,24 @@ struct IOSProjectSelectorView: View {
             ForEach(appState.recentRemoteConnections, id: \.self) { connection in
                 Button(connection) {
                     appState.connectToRecentRemoteServer(connection)
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(theme.surfaceBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
+    }
+
+    private var recentProjectsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Recent Projects")
+                .font(.headline)
+
+            ForEach(appState.recentProjectDirectories, id: \.self) { directory in
+                Button(directory) {
+                    appState.connectToRecentProjectDirectory(directory)
                 }
                 .buttonStyle(.plain)
                 .frame(maxWidth: .infinity, alignment: .leading)

@@ -121,6 +121,48 @@ enum RecentRemoteConnectionsPreferences {
     }
 }
 
+enum RecentProjectDirectoriesPreferences {
+    static let recentProjectDirectoriesByServerKey = "recentProjectDirectoriesByServer"
+    private static let maximumProjectCount = 5
+
+    static func load(for serverURL: URL, from defaults: UserDefaults = .standard) -> [String] {
+        let storedValues = (defaults.dictionary(forKey: recentProjectDirectoriesByServerKey) as? [String: [String]]) ?? [:]
+        return normalize(storedValues[serverURL.absoluteString] ?? [])
+    }
+
+    @discardableResult
+    static func remember(_ directory: String, for serverURL: URL, defaults: UserDefaults = .standard) -> [String] {
+        let trimmedDirectory = directory.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDirectory.isEmpty else {
+            return load(for: serverURL, from: defaults)
+        }
+
+        var storedValues = (defaults.dictionary(forKey: recentProjectDirectoriesByServerKey) as? [String: [String]]) ?? [:]
+        let serverKey = serverURL.absoluteString
+        let updatedDirectories = normalize([trimmedDirectory] + (storedValues[serverKey] ?? []))
+        storedValues[serverKey] = updatedDirectories
+        defaults.set(storedValues, forKey: recentProjectDirectoriesByServerKey)
+        return updatedDirectories
+    }
+
+    private static func normalize(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var normalizedValues: [String] = []
+
+        for value in values {
+            let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedValue.isEmpty, seen.insert(trimmedValue).inserted else { continue }
+            normalizedValues.append(trimmedValue)
+
+            if normalizedValues.count == maximumProjectCount {
+                break
+            }
+        }
+
+        return normalizedValues
+    }
+}
+
 @MainActor
 final class SessionDraftState: ObservableObject {
     @Published var text: String

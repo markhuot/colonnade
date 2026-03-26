@@ -329,11 +329,12 @@ struct SessionColumnView: View {
         questions: [QuestionRequest],
         permissions: [PermissionRequest]
     ) -> String? {
-        guard !ThinkingVisibilityPreferences.showsThinking() else { return nil }
-        guard permissions.isEmpty, questions.isEmpty else { return nil }
-        guard session?.status?.isThinkingActive == true else { return nil }
-
-        return latestReasoningTitle
+        SessionTranscriptSupport.thinkingBannerTitle(
+            session: session,
+            latestReasoningTitle: latestReasoningTitle,
+            questions: questions,
+            permissions: permissions
+        )
     }
 }
 
@@ -1176,19 +1177,15 @@ private struct MessageCard: View {
             || (showsThinking && !reasoningText.isEmpty)
             || (messageState.stepFinish?.reason?.localizedCaseInsensitiveCompare("tool-calls") != .orderedSame && messageState.stepFinish != nil)
             || messageState.info.error != nil
-        let renderedMessageText = NSAttributedString(
-            string: visibleText,
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 14),
-                .foregroundColor: theme.primaryTextColor
-            ]
+        let renderedMessageText = SessionTranscriptSupport.messageAttributedText(
+            visibleText,
+            font: NSFont.systemFont(ofSize: 14),
+            color: theme.primaryTextColor
         )
-        let renderedReasoningText = NSAttributedString(
-            string: reasoningText,
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 13),
-                .foregroundColor: theme.secondaryTextColor
-            ]
+        let renderedReasoningText = SessionTranscriptSupport.messageAttributedText(
+            reasoningText,
+            font: NSFont.systemFont(ofSize: 13),
+            color: theme.secondaryTextColor
         )
 
         VStack(alignment: .leading, spacing: 8) {
@@ -1258,40 +1255,18 @@ private struct MessageCard: View {
 }
 
 private struct MessageCardHeader: View {
-    @Environment(\.openCodeTheme) private var theme
     let message: MessageEnvelope
 
     var body: some View {
-        Text(Self.timestampFormatter.string(from: message.createdAt))
-            .frame(maxWidth: .infinity, alignment: .center)
-        .font(.caption.weight(.medium))
-        .foregroundStyle(theme.secondaryText)
+        TranscriptMessageHeaderView(message: message)
     }
-
-    private static let timestampFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        formatter.dateStyle = .none
-        return formatter
-    }()
 }
 
 private struct MessageFinishView: View {
-    @Environment(\.openCodeTheme) private var theme
     let part: MessagePart
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text(part.reason?.capitalized ?? "Finished")
-            if let total = part.tokens?.total {
-                Text("\(total) tokens")
-            }
-            if let cost = part.cost {
-                Text(String(format: "$%.4f", cost))
-            }
-        }
-        .font(.caption)
-        .foregroundStyle(theme.secondaryText)
+        TranscriptMessageFinishView(part: part)
     }
 }
 
@@ -1410,426 +1385,25 @@ private struct ToolSummaryView: View {
     let style: ToolSummaryStyle
 
     var body: some View {
-        switch style {
-        case let .standard(summary):
-            StandardToolSummaryView(summary: summary)
-        case let .patch(summary):
-            PatchToolSummaryView(summary: summary)
-        case let .read(summary):
-            ReadToolSummaryView(summary: summary)
-        case let .task(summary):
-            TaskToolSummaryView(summary: summary)
-        }
-    }
-}
-
-private struct StandardToolSummaryView: View {
-    @Environment(\.openCodeTheme) private var theme
-    let summary: ToolCallSummary
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            ToolSummaryIcon(systemName: summary.iconSystemName ?? ToolCallSummary.genericIconSystemName)
-
-            Text(summary.action)
-                .fontWeight(.semibold)
-
-            if let target = summary.target {
-                Text(verbatim: "`\(target)`")
-                    .font(.caption.monospaced())
-            }
-
-            if let additions = summary.additions {
-                Text("+\(additions)")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(theme.diffAddition)
-            }
-
-            if let deletions = summary.deletions {
-                Text("-\(deletions)")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(theme.diffDeletion)
-            }
-        }
-        .font(.caption)
-    }
-}
-
-private struct PatchToolSummaryView: View {
-    @Environment(\.openCodeTheme) private var theme
-    let summary: ToolPatchSummary
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            ToolSummaryIcon(systemName: "pencil")
-
-            Text("Patch")
-                .fontWeight(.semibold)
-
-            if let target = summary.target {
-                Text(verbatim: "`\(target)`")
-                    .font(.caption.monospaced())
-            }
-
-            if let additions = summary.additions {
-                summaryBadge(text: "+\(additions)", tint: theme.diffAddition, background: theme.diffAdditionBackground)
-            }
-
-            if let deletions = summary.deletions {
-                summaryBadge(text: "-\(deletions)", tint: theme.diffDeletion, background: theme.diffDeletionBackground)
-            }
-        }
-        .font(.caption)
-    }
-
-    private func summaryBadge(text: String, tint: Color, background: Color) -> some View {
-        Text(text)
-            .font(.caption.monospaced())
-            .foregroundStyle(tint)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(background)
-            )
-    }
-}
-
-private struct ToolSummaryIcon: View {
-    @Environment(\.openCodeTheme) private var theme
-    let systemName: String
-
-    var body: some View {
-        Image(systemName: systemName)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(theme.secondaryText)
-            .frame(width: 14, alignment: .center)
-    }
-}
-
-private struct ReadToolSummaryView: View {
-    @Environment(\.openCodeTheme) private var theme
-    let summary: ToolReadSummary
-
-    private var text: String {
-        summary.fileName ?? summary.path ?? "Read"
-    }
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            ToolSummaryIcon(systemName: "eyeglasses")
-
-            Text("Read")
-                .fontWeight(.semibold)
-
-            Text(verbatim: "`\(text)`")
-                .font(.caption.monospaced())
-                .foregroundStyle(theme.secondaryText)
-                .lineLimit(1)
-            .frame(maxWidth: 220, alignment: .leading)
-            .clipped()
-        }
-        .font(.caption)
-    }
-}
-
-private struct TaskToolSummaryView: View {
-    @Environment(\.openCodeTheme) private var theme
-    let summary: ToolTaskSummary
-
-    private var text: String {
-        summary.target ?? summary.title
-    }
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            ToolSummaryIcon(systemName: "square.stack.3d.up")
-
-            Text(summary.title)
-                .fontWeight(.semibold)
-
-            Text(verbatim: "`\(text)`")
-                .font(.caption.monospaced())
-                .foregroundStyle(theme.secondaryText)
-                .lineLimit(1)
-            .frame(maxWidth: 260, alignment: .leading)
-            .clipped()
-        }
-        .font(.caption)
+        TranscriptToolSummaryView(style: style)
     }
 }
 
 private struct ToolPartDrawerView: View {
-    @Environment(\.openCodeTheme) private var theme
     let part: MessagePart
 
     var body: some View {
-        let presentation = part.toolPresentation
-
-        VStack(alignment: .leading, spacing: 10) {
-            if let title = part.toolDrawerTitle {
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(theme.secondaryText)
-            }
-
-            ForEach(presentation.detailFields) { field in
-                ToolPartDetailSection(title: field.title, value: field.value)
-            }
-
-            switch presentation.drawerStyle {
-            case .standard:
-                EmptyView()
-            case let .patch(detail):
-                PatchToolDetailView(detail: detail)
-            case let .todo(detail):
-                TodoToolDetailView(detail: detail)
-            }
-
-            if let output = part.state?.output, !output.isEmpty, !presentation.drawerStyle.hidesRawOutput {
-                ToolPartDetailSection(title: "Result", value: output)
-            }
-
-            if let error = part.state?.error, !error.isEmpty {
-                ToolPartDetailSection(title: "Error", value: error, isError: true)
-            }
-
-            if let fallbackDetail = presentation.fallbackDetail {
-                Text(fallbackDetail)
-                    .font(.caption)
-                    .foregroundStyle(theme.secondaryText)
-            }
-        }
-    }
-}
-
-private struct TodoToolDetailView: View {
-    let detail: ToolTodoDetail
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(detail.items) { item in
-                TodoChecklistRow(item: item)
-            }
-        }
-    }
-}
-
-private struct TodoChecklistRow: View {
-    @Environment(\.openCodeTheme) private var theme
-    let item: ToolTodoItem
-
-    private var marker: String {
-        switch item.status {
-        case .completed:
-            return "[✓]"
-        case .inProgress:
-            return "[•]"
-        case .pending, .cancelled, .unknown:
-            return "[ ]"
-        }
-    }
-
-    private var foregroundStyle: AnyShapeStyle {
-        switch item.status {
-        case .completed:
-            return AnyShapeStyle(theme.secondaryText)
-        case .inProgress:
-            return AnyShapeStyle(theme.accent)
-        case .pending, .cancelled, .unknown:
-            return AnyShapeStyle(theme.primaryText)
-        }
-    }
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(marker)
-                .font(.caption.monospaced())
-                .foregroundStyle(foregroundStyle)
-
-            Text(item.content)
-                .font(.caption)
-                .foregroundStyle(foregroundStyle)
-                .strikethrough(item.status == .completed, color: theme.secondaryText)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-}
-
-private struct PatchToolDetailView: View {
-    let detail: ToolPatchDetail
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(detail.files) { file in
-                PatchFileCardView(file: file)
-            }
-        }
-    }
-}
-
-private struct PatchFileCardView: View {
-    @Environment(\.openCodeTheme) private var theme
-    let file: ToolPatchFile
-
-    private var title: String {
-        file.destinationPath ?? file.path
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-
-                Text(file.operation.rawValue.capitalized)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(theme.secondaryText)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(theme.mutedSurfaceBackground)
-                    )
-
-                if let destinationPath = file.destinationPath, destinationPath != file.path {
-                    Text("from \(file.path)")
-                        .font(.caption.monospaced())
-                        .foregroundStyle(theme.secondaryText)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 0)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(file.hunks) { hunk in
-                    PatchHunkView(hunk: hunk)
-                }
-            }
-        }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(theme.codeBlockBackground)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(theme.border.opacity(0.6), lineWidth: 1)
-        )
-    }
-}
-
-private struct PatchHunkView: View {
-    @Environment(\.openCodeTheme) private var theme
-    let hunk: ToolPatchHunk
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let header = hunk.header {
-                Text(header)
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(theme.secondaryText)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-            }
-
-            VStack(alignment: .leading, spacing: 1) {
-                ForEach(hunk.lines) { line in
-                    PatchDiffLineView(line: line)
-                }
-            }
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(theme.toolCardBackground.opacity(0.7))
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-}
-
-private struct PatchDiffLineView: View {
-    @Environment(\.openCodeTheme) private var theme
-    let line: ToolPatchLine
-
-    private var symbol: String {
-        switch line.kind {
-        case .context:
-            return " "
-        case .addition:
-            return "+"
-        case .deletion:
-            return "-"
-        }
-    }
-
-    private var foreground: Color {
-        switch line.kind {
-        case .context:
-            return theme.primaryText
-        case .addition:
-            return theme.diffAddition
-        case .deletion:
-            return theme.diffDeletion
-        }
-    }
-
-    private var background: Color {
-        switch line.kind {
-        case .context:
-            return .clear
-        case .addition:
-            return theme.diffAdditionBackground
-        case .deletion:
-            return theme.diffDeletionBackground
-        }
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            Text(symbol)
-                .foregroundStyle(foreground)
-                .frame(width: 12, alignment: .leading)
-
-            Text(verbatim: line.text.isEmpty ? " " : line.text)
-                .foregroundStyle(foreground)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .font(.system(.caption, design: .monospaced))
-        .textSelection(.enabled)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 2)
-        .background(background)
+        TranscriptToolPartDrawerView(part: part)
     }
 }
 
 private struct ToolPartDetailSection: View {
-    @Environment(\.openCodeTheme) private var theme
     let title: String
     let value: String
     var isError = false
 
-    private var resolvedTextColor: NSColor {
-        isError ? theme.errorColor : theme.primaryTextColor
-    }
-
-    private var contentHeight: CGFloat {
-        SelectableToolTextView(text: value, textColor: resolvedTextColor).idealHeight
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(theme.secondaryText)
-
-            SelectableToolTextView(
-                text: value,
-                textColor: resolvedTextColor
-            )
-            .frame(maxWidth: .infinity, minHeight: 28, idealHeight: contentHeight, maxHeight: 110)
-        }
+        TranscriptToolPartDetailSection(title: title, value: value, isError: isError)
     }
 }
 
@@ -1976,90 +1550,24 @@ private struct PermissionPromptButtonRow: NSViewRepresentable {
 }
 
 private struct QuestionCard: View {
-    @Environment(\.openCodeTheme) private var theme
-
     let request: QuestionRequest
     let onSubmitAnswers: ([[String]]) -> Void
     let onReject: () -> Void
-    @State private var selections: [String: Set<String>] = [:]
 
     var body: some View {
         let renderDebugKey = "question-card:\(request.id)"
         let renderCount = ViewRenderDebugRegistry.recordBody(for: renderDebugKey)
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Question")
-                .font(.headline)
-
-            ForEach(request.questions) { question in
-                QuestionGroupView(question: question, selections: $selections)
+        TranscriptQuestionCardContent(
+            request: request,
+            usesCheckboxToggleStyle: true,
+            leadingPadding: TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.promptCardPadding),
+            onSubmitAnswers: onSubmitAnswers,
+            onReject: onReject,
+            trailingOverlay: {
+                ViewRenderDebugBadge(key: renderDebugKey, bodyCount: renderCount)
+                    .fixedSize()
+                    .padding(8)
             }
-
-            HStack {
-                Button("Submit") {
-                    let answers = request.questions.map { question in
-                        Array(selections[question.id, default: []])
-                    }
-                    onSubmitAnswers(answers)
-                }
-                .buttonStyle(.borderedProminent)
-
-                Button("Reject", role: .destructive) {
-                    onReject()
-                }
-            }
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(theme.accentSubtleBackground)
         )
-        .overlay(alignment: .bottomTrailing) {
-            ViewRenderDebugBadge(key: renderDebugKey, bodyCount: renderCount)
-                .fixedSize()
-                .padding(8)
-        }
-        .padding(.leading, TimelineMessageLayout.leadingOffset(for: TimelineMessageLayout.promptCardPadding))
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct QuestionGroupView: View {
-    @Environment(\.openCodeTheme) private var theme
-    let question: QuestionRequest.Question
-    @Binding var selections: [String: Set<String>]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(question.header)
-                .font(.subheadline.weight(.semibold))
-            Text(question.question)
-                .font(.caption)
-                .foregroundStyle(theme.secondaryText)
-
-            ForEach(question.options, id: \.id) { option in
-                Toggle(isOn: Binding(
-                    get: { selections[question.id, default: []].contains(option.label) },
-                    set: { newValue in
-                        if question.multiple == true {
-                            if newValue {
-                                selections[question.id, default: []].insert(option.label)
-                            } else {
-                                selections[question.id, default: []].remove(option.label)
-                            }
-                        } else {
-                            selections[question.id] = newValue ? [option.label] : []
-                        }
-                    }
-                )) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(option.label)
-                        Text(option.description)
-                            .font(.caption)
-                            .foregroundStyle(theme.secondaryText)
-                    }
-                }
-                .toggleStyle(.checkbox)
-            }
-        }
     }
 }

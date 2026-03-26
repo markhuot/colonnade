@@ -5,7 +5,7 @@ struct IOSSourcesListView: View {
     @Environment(\.openCodeTheme) private var theme
     @ObservedObject var liveStore: WorkspaceLiveStore
 
-    let onCreateSession: () -> Void
+    let onBack: () -> Void
     let onSessionSelected: (SessionDisplay) -> Void
 
     @State private var sessionPendingArchive: SessionDisplay?
@@ -30,6 +30,14 @@ struct IOSSourcesListView: View {
     var body: some View {
         List {
             if appState.selectedDirectory != nil {
+                Section {
+                    Button {
+                        onBack()
+                    } label: {
+                        Label("Back to Projects", systemImage: "chevron.backward")
+                    }
+                }
+
                 section(title: "Open Sessions", sessionStates: openSessionStates, emptyText: "No open sessions")
                 section(title: "All Sessions", sessionStates: remainingSessionStates, emptyText: visibleSessionStates.isEmpty ? "No sessions yet" : "No other sessions")
             }

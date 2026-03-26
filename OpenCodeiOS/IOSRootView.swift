@@ -87,7 +87,7 @@ struct IOSRootView: View {
                 IOSPersistentSessionDrawer(
                     position: $sessionDrawerPosition,
                     onReturnToProjectPicker: {
-                        appState.resetServerSelection()
+                        appState.returnToProjectChooser()
                     },
                     onShowPreferences: {
                         isPresentingPreferences = true
@@ -143,6 +143,7 @@ struct IOSRootView: View {
         if hasSelectedDirectory {
             IOSSessionBoardContainerView(
                 activeComposerSessionID: resolvedComposerSessionID,
+                bottomOverlayClearance: resolvedComposerSessionID == nil ? IOSPersistentSessionDrawer.collapsedHeight + 12 : 0,
                 draftRegistry: draftRegistry,
                 onDeactivateComposer: {
                     activeComposerSessionID = nil
@@ -186,7 +187,7 @@ private struct IOSPersistentSessionDrawer: View {
 
     @State private var dragTranslation: CGFloat = 0
 
-    private let collapsedHeight: CGFloat = 100
+    static let collapsedHeight: CGFloat = 100
     private let drawerCornerRadius: CGFloat = 22
 
     private var activeSessionCount: Int {
@@ -261,7 +262,7 @@ private struct IOSPersistentSessionDrawer: View {
                     if let liveStore = appState.liveStore {
                         IOSSourcesListView(
                             liveStore: liveStore,
-                            onCreateSession: onCreateSession,
+                            onBack: onReturnToProjectPicker,
                             onSessionSelected: onSessionSelected
                         )
                     }
@@ -331,12 +332,17 @@ private struct IOSPersistentSessionDrawer: View {
         let projectedHeight = baseHeight - value.predictedEndTranslation.height
         return min(max(projectedHeight, collapsedHeight), expandedHeight)
     }
+
+    private var collapsedHeight: CGFloat {
+        Self.collapsedHeight
+    }
 }
 
 private struct IOSSessionBoardContainerView: View {
     @EnvironmentObject private var appState: OpenCodeAppModel
 
     let activeComposerSessionID: String?
+    let bottomOverlayClearance: CGFloat
     let draftRegistry: SessionDraftRegistry
     let onDeactivateComposer: () -> Void
     let onActivateComposer: (String) -> Void
@@ -345,6 +351,7 @@ private struct IOSSessionBoardContainerView: View {
         IOSSessionBoardView(
             initialSessionID: initialSessionID,
             activeComposerSessionID: activeComposerSessionID,
+            bottomOverlayClearance: bottomOverlayClearance,
             draftRegistry: draftRegistry,
             onDeactivateComposer: onDeactivateComposer,
             onActivateComposer: onActivateComposer
