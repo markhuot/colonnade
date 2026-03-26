@@ -193,6 +193,10 @@ final class OpenCodeAppModel: ObservableObject {
         liveStore?.allMessagesBySession(for: openSessionIDs) ?? [:]
     }
 
+    private func messages(for sessionID: String) -> [MessageEnvelope] {
+        liveStore?.existingSessionState(for: sessionID)?.messages ?? []
+    }
+
     func availableModelOptions() -> [ModelOption] {
         let baseKey = BaseModelOptionsCacheKey(
             modelCatalog: modelCatalog,
@@ -1223,7 +1227,7 @@ final class OpenCodeAppModel: ObservableObject {
     }
 
     private func recentModelReference(for sessionID: String) -> ModelReference? {
-        messagesBySession[sessionID, default: []]
+        messages(for: sessionID)
             .reversed()
             .compactMap { message -> ModelReference? in
                 guard let providerID = message.info.providerID ?? message.info.model?.providerID,
@@ -1236,7 +1240,7 @@ final class OpenCodeAppModel: ObservableObject {
     }
 
     private func recentAgentID(for sessionID: String) -> String? {
-        messagesBySession[sessionID, default: []]
+        messages(for: sessionID)
             .reversed()
             .compactMap { agentIdentifier(from: $0.info.agent) }
             .first

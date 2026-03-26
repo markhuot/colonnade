@@ -172,14 +172,14 @@ struct SessionColumnView: View {
 
     var body: some View {
         let session = sessionState.session
-        let messages = sessionState.messages
+        let transcriptRows = sessionState.transcriptRows
         let questions = appState.questionForSession(sessionID)
         let permissions = deduplicatedPermissions(sessionState.permissions)
         let availableSessions = appState.sessions
         let workspaceConnection = appState.workspaceConnection
         let thinkingBannerTitle = latestThinkingBannerTitle(
             session: session,
-            messages: messages,
+            latestReasoningTitle: sessionState.latestReasoningTitle,
             questions: questions,
             permissions: permissions
         )
@@ -199,12 +199,14 @@ struct SessionColumnView: View {
             SessionTranscriptSection(
                 snapshot: SessionTranscriptSnapshot(
                     sessionID: sessionID,
-                    messages: messages,
+                    transcriptRows: transcriptRows,
                     questions: questions,
                     thinkingBannerTitle: thinkingBannerTitle,
                     availableSessions: availableSessions,
+                    latestTodoToolPartID: sessionState.latestTodoToolPartID,
                     workspaceConnection: workspaceConnection
                 ),
+                sessionState: sessionState,
                 onFocusSession: { sessionID in
                     appState.focusSession(sessionID)
                 },
@@ -323,7 +325,7 @@ struct SessionColumnView: View {
 
     private func latestThinkingBannerTitle(
         session: SessionDisplay?,
-        messages: [MessageEnvelope],
+        latestReasoningTitle: String?,
         questions: [QuestionRequest],
         permissions: [PermissionRequest]
     ) -> String? {
@@ -331,21 +333,23 @@ struct SessionColumnView: View {
         guard permissions.isEmpty, questions.isEmpty else { return nil }
         guard session?.status?.isThinkingActive == true else { return nil }
 
-        return messages.reversed().compactMap(\.latestReasoningTitle).first
+        return latestReasoningTitle
     }
 }
 
 private struct SessionTranscriptSnapshot: Equatable {
     let sessionID: String
-    let messages: [MessageEnvelope]
+    let transcriptRows: [TranscriptMessageRow]
     let questions: [QuestionRequest]
     let thinkingBannerTitle: String?
     let availableSessions: [SessionDisplay]
+    let latestTodoToolPartID: String?
     let workspaceConnection: WorkspaceConnection?
 }
 
 private struct SessionTranscriptSection: View, Equatable {
     let snapshot: SessionTranscriptSnapshot
+    @ObservedObject var sessionState: SessionLiveState
     let onFocusSession: (String) -> Void
     let onAnswerQuestion: (QuestionRequest, [[String]]) -> Void
     let onRejectQuestion: (QuestionRequest) -> Void
@@ -357,10 +361,12 @@ private struct SessionTranscriptSection: View, Equatable {
     var body: some View {
         SessionTimelineView(
             sessionID: snapshot.sessionID,
-            messages: snapshot.messages,
+            sessionState: sessionState,
+            transcriptRows: snapshot.transcriptRows,
             questions: snapshot.questions,
             thinkingBannerTitle: snapshot.thinkingBannerTitle,
             availableSessions: snapshot.availableSessions,
+            latestTodoToolPartID: snapshot.latestTodoToolPartID,
             workspaceConnection: snapshot.workspaceConnection,
             onFocusSession: onFocusSession,
             onAnswerQuestion: onAnswerQuestion,
@@ -547,61 +553,36 @@ private struct SessionHeaderDragModifier: ViewModifier {
 }
 
 private struct SessionTimelineView: View {
-    struct MessageRenderContext: Equatable {
-        let subagentSessionsByPartID: [String: SessionDisplay]
-    }
-
     @Environment(\.openCodeTheme) private var theme
 
     let sessionID: String
-    let messages: [MessageEnvelope]
+    @ObservedObject var sessionState: SessionLiveState
+    let transcriptRows: [TranscriptMessageRow]
     let questions: [QuestionRequest]
     let thinkingBannerTitle: String?
     let availableSessions: [SessionDisplay]
+    let latestTodoToolPartID: String?
     let workspaceConnection: WorkspaceConnection?
     let onFocusSession: (String) -> Void
     let onAnswerQuestion: (QuestionRequest, [[String]]) -> Void
     let onRejectQuestion: (QuestionRequest) -> Void
 
-    @MainActor
-    private var latestTodoToolPartID: String? {
-        messages
-            .reversed()
-            .compactMap { message in
-                message.toolParts.last(where: \ .isTodoWriteTool)?.id
-            }
-            .first
-    }
-
-    private var messageRenderContexts: [String: MessageRenderContext] {
-        return Dictionary(uniqueKeysWithValues: messages.map { message in
-            let subagentSessionsByPartID = MessagePart.resolveSubagentSessions(
-                for: message.toolParts,
-                in: availableSessions,
-                parentSessionID: message.info.sessionID,
-                baseReferenceTimeMS: message.info.time.created
-            )
-            return (message.id, MessageRenderContext(subagentSessionsByPartID: subagentSessionsByPartID))
-        })
-    }
-
     var body: some View {
-        let latestTodoToolPartID = self.latestTodoToolPartID
-        let messageRenderContexts = self.messageRenderContexts
-
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
-                ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
-                    MessageCard(
-                        message: message,
-                        showsTimestamp: shouldShowTimestamp(for: index),
-                        latestTodoToolPartID: latestTodoToolPartID,
-                        renderContext: messageRenderContexts[message.id] ?? MessageRenderContext(subagentSessionsByPartID: [:]),
-                        workspaceConnection: workspaceConnection,
-                        onInteraction: {
-                            onFocusSession(message.info.sessionID)
-                        }
-                    )
+                ForEach(transcriptRows) { row in
+                    if let messageState = sessionState.messageState(for: row.id) {
+                        MessageCard(
+                            messageState: messageState,
+                            showsTimestamp: row.showsTimestamp,
+                            availableSessions: availableSessions,
+                            latestTodoToolPartID: latestTodoToolPartID,
+                            workspaceConnection: workspaceConnection,
+                            onInteraction: {
+                                onFocusSession(messageState.info.sessionID)
+                            }
+                        )
+                    }
                 }
 
                 ForEach(questions) { request in
@@ -631,11 +612,6 @@ private struct SessionTimelineView: View {
 
         .defaultScrollAnchor(.bottom)
         .background(theme.mutedSurfaceBackground.opacity(0.8))
-    }
-
-    private func shouldShowTimestamp(for index: Int) -> Bool {
-        guard index > 0 else { return true }
-        return messages[index].createdAt.timeIntervalSince(messages[index - 1].createdAt) > 300
     }
 }
 
@@ -1169,25 +1145,37 @@ private enum TimelineMessageLayout {
 private struct MessageCard: View {
     @AppStorage(ThinkingVisibilityPreferences.showsThinkingKey) private var showsThinking = true
     @Environment(\.openCodeTheme) private var theme
+    @ObservedObject var messageState: SessionMessageState
 
-    let message: MessageEnvelope
     let showsTimestamp: Bool
+    let availableSessions: [SessionDisplay]
     let latestTodoToolPartID: String?
-    let renderContext: SessionTimelineView.MessageRenderContext
     let workspaceConnection: WorkspaceConnection?
     let onInteraction: () -> Void
+
+    private var message: MessageEnvelope {
+        messageState.snapshot
+    }
+
+    private var subagentSessionsByPartID: [String: SessionDisplay] {
+        MessagePart.resolveSubagentSessions(
+            for: messageState.toolParts,
+            in: availableSessions,
+            parentSessionID: messageState.info.sessionID,
+            baseReferenceTimeMS: messageState.info.time.created
+        )
+    }
 
     var body: some View {
         let renderDebugKey = "message-card:\(message.id)"
         let renderCount = ViewRenderDebugRegistry.recordBody(for: renderDebugKey)
-        let toolParts = message.toolParts
-        let subagentSessionsByPartID = renderContext.subagentSessionsByPartID
-        let visibleText = message.visibleText
-        let reasoningText = message.reasoningText
+        let toolParts = messageState.toolParts
+        let visibleText = messageState.visibleText
+        let reasoningText = messageState.reasoningText
         let showsMessageBubble = !visibleText.isEmpty
             || (showsThinking && !reasoningText.isEmpty)
-            || (message.stepFinish?.reason?.localizedCaseInsensitiveCompare("tool-calls") != .orderedSame && message.stepFinish != nil)
-            || message.info.error != nil
+            || (messageState.stepFinish?.reason?.localizedCaseInsensitiveCompare("tool-calls") != .orderedSame && messageState.stepFinish != nil)
+            || messageState.info.error != nil
         let renderedMessageText = NSAttributedString(
             string: visibleText,
             attributes: [
@@ -1228,12 +1216,12 @@ private struct MessageCard: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    if let finish = message.stepFinish, finish.reason?.localizedCaseInsensitiveCompare("tool-calls") != .orderedSame {
+                    if let finish = messageState.stepFinish, finish.reason?.localizedCaseInsensitiveCompare("tool-calls") != .orderedSame {
                         MessageFinishView(part: finish)
                     }
 
-                    if message.info.error != nil {
-                        Text(message.info.error?.prettyDescription ?? "Unknown error")
+                    if messageState.info.error != nil {
+                        Text(messageState.info.error?.prettyDescription ?? "Unknown error")
                             .font(.caption)
                             .multilineTextAlignment(.leading)
                             .foregroundStyle(theme.error)
@@ -1265,7 +1253,7 @@ private struct MessageCard: View {
 
     private var bubbleBackground: some View {
         RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(message.info.role.isAssistant ? theme.assistantBubble : theme.userBubble)
+            .fill(messageState.info.role.isAssistant ? theme.assistantBubble : theme.userBubble)
     }
 }
 

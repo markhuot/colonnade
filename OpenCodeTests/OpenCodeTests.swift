@@ -3011,22 +3011,110 @@ final class WorkspaceSyncCoordinatorTests: XCTestCase {
         )
         let part = makeMessagePart(id: "part-1", sessionID: "session-1", messageID: "message-1")
 
-        var messageSnapshots: [[MessageEnvelope]] = []
+        var transcriptRowSnapshots: [[TranscriptMessageRow]] = []
         var cancellables = Set<AnyCancellable>()
 
-        state.$messages
+        state.$transcriptRows
+            .dropFirst()
+            .sink { transcriptRowSnapshots.append($0) }
+            .store(in: &cancellables)
+
+        state.upsertMessageInfo(messageInfo)
+
+        let messageState = try XCTUnwrap(state.messageState(for: messageInfo.id))
+        var messageSnapshots: [MessageEnvelope] = []
+
+        messageState.$snapshot
             .dropFirst()
             .sink { messageSnapshots.append($0) }
             .store(in: &cancellables)
 
-        state.upsertMessageInfo(messageInfo)
         _ = state.applyMessagePart(part)
         _ = state.applyMessagePartDelta(partID: part.id, field: .text, delta: "Hello")
 
-        XCTAssertEqual(messageSnapshots.count, 3)
-        XCTAssertEqual(messageSnapshots[0].map(\.id), ["message-1"])
-        XCTAssertEqual(messageSnapshots[1].first?.parts.count, 1)
-        XCTAssertEqual(messageSnapshots[2].first?.visibleText, "Hello")
+        XCTAssertEqual(transcriptRowSnapshots.count, 1)
+        XCTAssertEqual(transcriptRowSnapshots[0].map(\.id), ["message-1"])
+        XCTAssertEqual(messageSnapshots.count, 2)
+        XCTAssertEqual(messageSnapshots[0].parts.count, 1)
+        XCTAssertEqual(messageSnapshots[1].visibleText, "Hello")
+    }
+
+    @MainActor
+    func testStreamingTailMessageDoesNotRepublishStableMessageNode() async throws {
+        let state = SessionLiveState(id: "session-1")
+        let olderMessage = MessageInfo(
+            id: "message-1",
+            sessionID: "session-1",
+            role: .assistant,
+            time: .init(created: 1_000, completed: 1_100),
+            parentID: nil,
+            agent: nil,
+            model: nil,
+            modelID: nil,
+            providerID: nil,
+            mode: nil,
+            path: nil,
+            cost: nil,
+            tokens: nil,
+            finish: nil,
+            summary: nil,
+            error: nil
+        )
+        let newerMessage = MessageInfo(
+            id: "message-2",
+            sessionID: "session-1",
+            role: .assistant,
+            time: .init(created: 2_000, completed: nil),
+            parentID: nil,
+            agent: nil,
+            model: nil,
+            modelID: nil,
+            providerID: nil,
+            mode: nil,
+            path: nil,
+            cost: nil,
+            tokens: nil,
+            finish: nil,
+            summary: nil,
+            error: nil
+        )
+        let olderPart = makeMessagePart(id: "part-1", sessionID: "session-1", messageID: "message-1", text: "Stable")
+        let newerPart = makeMessagePart(id: "part-2", sessionID: "session-1", messageID: "message-2")
+
+        state.upsertMessageInfo(olderMessage)
+        _ = state.applyMessagePart(olderPart)
+        state.upsertMessageInfo(newerMessage)
+        _ = state.applyMessagePart(newerPart)
+
+        let stableMessageState = try XCTUnwrap(state.messageState(for: olderMessage.id))
+        let activeMessageState = try XCTUnwrap(state.messageState(for: newerMessage.id))
+
+        var stableSnapshots: [MessageEnvelope] = []
+        var activeSnapshots: [MessageEnvelope] = []
+        var transcriptRowSnapshots: [[TranscriptMessageRow]] = []
+        var cancellables = Set<AnyCancellable>()
+
+        stableMessageState.$snapshot
+            .dropFirst()
+            .sink { stableSnapshots.append($0) }
+            .store(in: &cancellables)
+
+        activeMessageState.$snapshot
+            .dropFirst()
+            .sink { activeSnapshots.append($0) }
+            .store(in: &cancellables)
+
+        state.$transcriptRows
+            .dropFirst()
+            .sink { transcriptRowSnapshots.append($0) }
+            .store(in: &cancellables)
+
+        _ = state.applyMessagePartDelta(partID: newerPart.id, field: .text, delta: "Hello")
+
+        XCTAssertTrue(stableSnapshots.isEmpty)
+        XCTAssertEqual(activeSnapshots.count, 1)
+        XCTAssertEqual(activeSnapshots[0].visibleText, "Hello")
+        XCTAssertTrue(transcriptRowSnapshots.isEmpty)
     }
 
     @MainActor

@@ -35,6 +35,48 @@ struct NoopWorkspaceEventNotifier: WorkspaceEventNotifying {
 }
 
 @MainActor
+final class SessionMessageState: ObservableObject, @unchecked Sendable {
+    @Published private(set) var snapshot: MessageEnvelope
+
+    var id: String { snapshot.id }
+
+    init(snapshot: MessageEnvelope) {
+        self.snapshot = snapshot
+    }
+
+    func replace(with snapshot: MessageEnvelope) {
+        guard self.snapshot != snapshot else { return }
+        self.snapshot = snapshot
+    }
+
+    func updateInfo(_ info: MessageInfo) {
+        guard snapshot.info != info else { return }
+        snapshot = MessageEnvelope(info: info, parts: snapshot.parts)
+    }
+
+    func updateParts(_ parts: [MessagePart]) {
+        guard snapshot.parts != parts else { return }
+        snapshot = MessageEnvelope(info: snapshot.info, parts: parts)
+    }
+
+    var info: MessageInfo { snapshot.info }
+    var parts: [MessagePart] { snapshot.parts }
+    var createdAtMS: Double { snapshot.info.time.created }
+    var createdAt: Date { snapshot.createdAt }
+    var totalTokens: Int? { snapshot.totalTokens }
+    var visibleText: String { snapshot.visibleText }
+    var reasoningText: String { snapshot.reasoningText }
+    var latestReasoningTitle: String? { snapshot.latestReasoningTitle }
+    var toolParts: [MessagePart] { snapshot.toolParts }
+    var stepFinish: MessagePart? { snapshot.stepFinish }
+}
+
+struct TranscriptMessageRow: Identifiable, Equatable {
+    let id: String
+    let showsTimestamp: Bool
+}
+
+@MainActor
 final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendable {
     private struct BufferedPartDelta: Sendable {
         let field: MessagePartDeltaField
@@ -46,7 +88,9 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
     let id: String
 
     @Published private(set) var session: SessionDisplay?
-    @Published private(set) var messages: [MessageEnvelope] = []
+    @Published private(set) var transcriptRows: [TranscriptMessageRow] = []
+    @Published private(set) var latestReasoningTitle: String?
+    @Published private(set) var latestTodoToolPartID: String?
     @Published private(set) var todos: [SessionTodo] = []
     @Published private(set) var questions: [QuestionRequest] = []
     @Published private(set) var permissions: [PermissionRequest] = []
@@ -54,6 +98,8 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
     private var sessionModel: OpenCodeSession?
     private var persistedSession: SessionDisplay?
     private var status: SessionStatus?
+    private var messageStatesByID: [String: SessionMessageState] = [:]
+    private var messageIDByPartID: [String: String] = [:]
     private var pendingPartDeltas: [String: [BufferedPartDelta]] = [:]
 
     var sessionTitle: String {
@@ -62,6 +108,18 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
 
     init(id: String) {
         self.id = id
+    }
+
+    var messages: [MessageEnvelope] {
+        orderedMessageStates().map(\.snapshot)
+    }
+
+    func orderedMessageStates() -> [SessionMessageState] {
+        transcriptRows.compactMap { messageStatesByID[$0.id] }
+    }
+
+    func messageState(for messageID: String) -> SessionMessageState? {
+        messageStatesByID[messageID]
     }
 
     func applySessionModel(_ session: OpenCodeSession) {
@@ -113,8 +171,28 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
 
     func replaceMessages(_ incomingMessages: [MessageEnvelope]) {
         let sortedMessages = incomingMessages.sorted { $0.info.time.created < $1.info.time.created }
-        guard !messageListsMatch(self.messages, sortedMessages) else { return }
-        self.messages = mergedMessagesPreservingIdentity(with: sortedMessages)
+        guard !messageListsMatch(messages, sortedMessages) else { return }
+
+        let incomingIDs = Set(sortedMessages.map(\.id))
+        for messageID in messageStatesByID.keys where !incomingIDs.contains(messageID) {
+            removeMessageState(messageID: messageID)
+        }
+
+        var nextPartIndex: [String: String] = [:]
+        for message in sortedMessages {
+            if let existing = messageStatesByID[message.id] {
+                existing.replace(with: message)
+            } else {
+                messageStatesByID[message.id] = SessionMessageState(snapshot: message)
+            }
+
+            for part in message.parts {
+                nextPartIndex[part.id] = message.id
+            }
+        }
+
+        messageIDByPartID = nextPartIndex
+        refreshTranscriptState(using: sortedMessages)
     }
 
     func replaceTodos(_ todos: [SessionTodo]) {
@@ -130,17 +208,15 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
     }
 
     func upsertMessageInfo(_ info: MessageInfo) {
-        var updatedMessages = messages
-        if let messageIndex = updatedMessages.firstIndex(where: { $0.id == info.id }) {
-            let existingParts = updatedMessages[messageIndex].parts
-            updatedMessages[messageIndex] = MessageEnvelope(info: info, parts: existingParts)
+        if let existing = messageStatesByID[info.id] {
+            existing.updateInfo(info)
         } else {
-            updatedMessages.append(MessageEnvelope(info: info, parts: []))
-            updatedMessages.sort { $0.info.time.created < $1.info.time.created }
+            messageStatesByID[info.id] = SessionMessageState(snapshot: MessageEnvelope(info: info, parts: []))
         }
-        messages = updatedMessages
+
+        refreshTranscriptState()
         DebugLogging.notice(logger,
-            "Published message info sessionID=\(self.id) messageID=\(info.id) totalMessages=\(updatedMessages.count)"
+            "Published message info sessionID=\(self.id) messageID=\(info.id) totalMessages=\(messageStatesByID.count)"
         )
     }
 
@@ -152,25 +228,25 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
             return nil
         }
 
-        var updatedMessages = messages
-        ensureMessageShell(in: &updatedMessages, messageID: messageID, createdAtMS: resolvedPart.time?.start)
+        let createdShell = ensureMessageShell(messageID: messageID, createdAtMS: resolvedPart.time?.start)
 
-        guard let messageIndex = updatedMessages.firstIndex(where: { $0.id == messageID }) else {
+        guard let messageState = messageStatesByID[messageID] else {
             DebugLogging.notice(logger,
-                "Direct part apply miss sessionID=\(self.id) messageID=\(messageID) partID=\(resolvedPart.id) reason=message-not-loaded loadedMessages=\(updatedMessages.count)"
+                "Direct part apply miss sessionID=\(self.id) messageID=\(messageID) partID=\(resolvedPart.id) reason=message-not-loaded loadedMessages=\(messageStatesByID.count)"
             )
             return nil
         }
 
-        var message = updatedMessages[messageIndex]
+        var message = messageState.snapshot
         if let partIndex = message.parts.firstIndex(where: { $0.id == resolvedPart.id }) {
             message.parts[partIndex] = resolvedPart
         } else {
             message.parts.append(resolvedPart)
             message.parts.sort(by: Self.partSort)
         }
-        updatedMessages[messageIndex] = message
-        messages = updatedMessages
+        messageState.replace(with: message)
+        messageIDByPartID[resolvedPart.id] = messageID
+        refreshTranscriptStateIfNeeded(structureChanged: createdShell)
         DebugLogging.notice(logger,
             "Published message part sessionID=\(self.id) messageID=\(messageID) partID=\(resolvedPart.id) partType=\(resolvedPart.type.rawString) messageParts=\(message.parts.count)"
         )
@@ -178,11 +254,8 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
     }
 
     func applyMessagePartDelta(partID: String, field: MessagePartDeltaField, delta: String) -> Bool {
-        var updatedMessages = messages
-
-        guard let messageIndex = updatedMessages.firstIndex(where: { message in
-            message.parts.contains(where: { $0.id == partID })
-        }) else {
+        guard let messageID = messageID(containingPartID: partID),
+              let messageState = messageStatesByID[messageID] else {
             pendingPartDeltas[partID, default: []].append(BufferedPartDelta(field: field, delta: delta))
             DebugLogging.notice(logger,
                 "Buffered part delta sessionID=\(self.id) partID=\(partID) field=\(field.rawString) deltaBytes=\(delta.utf8.count) bufferedCount=\(self.pendingPartDeltas[partID]?.count ?? 0)"
@@ -190,7 +263,7 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
             return true
         }
 
-        var message = updatedMessages[messageIndex]
+        var message = messageState.snapshot
         guard let partIndex = message.parts.firstIndex(where: { $0.id == partID }) else {
             return false
         }
@@ -198,8 +271,8 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
         var part = message.parts[partIndex]
         part.apply(delta: delta, to: field)
         message.parts[partIndex] = part
-        updatedMessages[messageIndex] = message
-        messages = updatedMessages
+        messageState.replace(with: message)
+        refreshTranscriptMetadata()
         DebugLogging.notice(logger,
             "Published part delta sessionID=\(self.id) partID=\(partID) field=\(field.rawString) visibleTextBytes=\(message.visibleText.utf8.count)"
         )
@@ -208,33 +281,30 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
 
     func removeMessagePart(partID: String) -> Bool {
         let hadBufferedDeltas = pendingPartDeltas.removeValue(forKey: partID) != nil
-        var updatedMessages = messages
-
-        guard let messageIndex = updatedMessages.firstIndex(where: { message in
-            message.parts.contains(where: { $0.id == partID })
-        }) else {
+        guard let messageID = messageID(containingPartID: partID),
+              let messageState = messageStatesByID[messageID] else {
             return hadBufferedDeltas
         }
 
-        var message = updatedMessages[messageIndex]
+        var message = messageState.snapshot
         let originalCount = message.parts.count
         message.parts.removeAll { $0.id == partID }
         guard message.parts.count != originalCount else { return hadBufferedDeltas }
-        updatedMessages[messageIndex] = message
-        messages = updatedMessages
+        messageState.replace(with: message)
+        messageIDByPartID.removeValue(forKey: partID)
+        refreshTranscriptMetadata()
         return true
     }
 
     func removeMessage(messageID: String) -> Bool {
-        let originalCount = messages.count
-        let updatedMessages = messages.filter { $0.id != messageID }
-        guard updatedMessages.count != originalCount else { return false }
-        messages = updatedMessages
+        guard messageStatesByID[messageID] != nil else { return false }
+        removeMessageState(messageID: messageID)
+        refreshTranscriptState()
         return true
     }
 
-    private func ensureMessageShell(in messages: inout [MessageEnvelope], messageID: String, createdAtMS: Double?) {
-        guard !messages.contains(where: { $0.id == messageID }) else { return }
+    private func ensureMessageShell(messageID: String, createdAtMS: Double?) -> Bool {
+        guard messageStatesByID[messageID] == nil else { return false }
 
         let created = createdAtMS ?? Date().timeIntervalSince1970 * 1000
         let info = MessageInfo(
@@ -255,8 +325,8 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
             summary: nil,
             error: nil
         )
-        messages.append(MessageEnvelope(info: info, parts: []))
-        messages.sort { $0.info.time.created < $1.info.time.created }
+        messageStatesByID[messageID] = SessionMessageState(snapshot: MessageEnvelope(info: info, parts: []))
+        return true
     }
 
     private func resolvedPartApplyingPendingDeltas(_ part: MessagePart) -> MessagePart {
@@ -271,37 +341,98 @@ final class SessionLiveState: ObservableObject, Identifiable, @unchecked Sendabl
         return resolvedPart
     }
 
-    private func mergedMessagesPreservingIdentity(with incomingMessages: [MessageEnvelope]) -> [MessageEnvelope] {
-        let existingByID = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
-        return incomingMessages.map { incomingMessage in
-            guard let existingMessage = existingByID[incomingMessage.id] else {
-                return incomingMessage
-            }
-
-            guard existingMessage != incomingMessage else {
-                return existingMessage
-            }
-
-            let mergedParts = mergedPartsPreservingIdentity(existing: existingMessage.parts, incoming: incomingMessage.parts)
-            let candidate = MessageEnvelope(info: incomingMessage.info, parts: mergedParts)
-            return candidate == existingMessage ? existingMessage : candidate
-        }
-    }
-
-    private func mergedPartsPreservingIdentity(existing: [MessagePart], incoming: [MessagePart]) -> [MessagePart] {
-        let existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
-        return incoming.map { incomingPart in
-            guard let existingPart = existingByID[incomingPart.id] else {
-                return incomingPart
-            }
-            return existingPart == incomingPart ? existingPart : incomingPart
-        }
-    }
-
     private func messageListsMatch(_ lhs: [MessageEnvelope], _ rhs: [MessageEnvelope]) -> Bool {
         guard lhs.count == rhs.count else { return false }
         return zip(lhs, rhs).allSatisfy { existingMessage, incomingMessage in
             existingMessage == incomingMessage
+        }
+    }
+
+    private func messageID(containingPartID partID: String) -> String? {
+        if let messageID = messageIDByPartID[partID] {
+            return messageID
+        }
+
+        for (messageID, messageState) in messageStatesByID where messageState.parts.contains(where: { $0.id == partID }) {
+            messageIDByPartID[partID] = messageID
+            return messageID
+        }
+
+        return nil
+    }
+
+    private func removeMessageState(messageID: String) {
+        guard let removed = messageStatesByID.removeValue(forKey: messageID) else { return }
+        for part in removed.parts {
+            messageIDByPartID.removeValue(forKey: part.id)
+            pendingPartDeltas.removeValue(forKey: part.id)
+        }
+    }
+
+    private func sortedSnapshots() -> [MessageEnvelope] {
+        messageStatesByID.values
+            .map(\.snapshot)
+            .sorted { lhs, rhs in
+                if lhs.info.time.created == rhs.info.time.created {
+                    return lhs.id < rhs.id
+                }
+                return lhs.info.time.created < rhs.info.time.created
+            }
+    }
+
+    private func refreshTranscriptState() {
+        refreshTranscriptState(using: sortedSnapshots())
+    }
+
+    private func refreshTranscriptState(using sortedMessages: [MessageEnvelope]) {
+        let nextRows = Self.makeTranscriptRows(from: sortedMessages)
+        if transcriptRows != nextRows {
+            transcriptRows = nextRows
+        }
+        refreshTranscriptMetadata(using: sortedMessages)
+    }
+
+    private func refreshTranscriptStateIfNeeded(structureChanged: Bool) {
+        let sortedMessages = sortedSnapshots()
+        if structureChanged {
+            let nextRows = Self.makeTranscriptRows(from: sortedMessages)
+            if transcriptRows != nextRows {
+                transcriptRows = nextRows
+            }
+        }
+        refreshTranscriptMetadata(using: sortedMessages)
+    }
+
+    private func refreshTranscriptMetadata() {
+        refreshTranscriptMetadata(using: sortedSnapshots())
+    }
+
+    private func refreshTranscriptMetadata(using sortedMessages: [MessageEnvelope]) {
+        let nextLatestReasoningTitle = sortedMessages.reversed().compactMap(\.latestReasoningTitle).first
+        if latestReasoningTitle != nextLatestReasoningTitle {
+            latestReasoningTitle = nextLatestReasoningTitle
+        }
+
+        let nextLatestTodoToolPartID = sortedMessages
+            .reversed()
+            .compactMap { message in
+                message.toolParts.last(where: \.isTodoWriteTool)?.id
+            }
+            .first
+        if latestTodoToolPartID != nextLatestTodoToolPartID {
+            latestTodoToolPartID = nextLatestTodoToolPartID
+        }
+    }
+
+    private static func makeTranscriptRows(from messages: [MessageEnvelope]) -> [TranscriptMessageRow] {
+        messages.enumerated().map { index, message in
+            let showsTimestamp = if index == 0 {
+                true
+            } else {
+                message.createdAt.timeIntervalSince(messages[index - 1].createdAt) > 300
+            }
+
+            return TranscriptMessageRow(id: message.id, showsTimestamp: showsTimestamp)
         }
     }
 
@@ -854,19 +985,19 @@ final class WorkspaceLiveStore: ObservableObject, @unchecked Sendable {
         incomingSessionIDs: Set<String>
     ) {
         let affectedVisibleSessions = visibleSessionIDs.union(incomingSessionIDs).sorted()
-        let messageChanges = affectedVisibleSessions.compactMap { sessionID -> String? in
+        let _ = affectedVisibleSessions.compactMap { sessionID -> String? in
             let oldValue = beforeMessageCounts[sessionID, default: 0]
             let newValue = afterMessagesBySession[sessionID, default: sessionStates[sessionID]?.messages.count ?? 0]
             guard oldValue != newValue else { return nil }
             return "\(sessionID):\(oldValue)->\(newValue)"
         }
-        let questionChanges = affectedVisibleSessions.compactMap { sessionID -> String? in
+        let _ = affectedVisibleSessions.compactMap { sessionID -> String? in
             let oldValue = beforeQuestionCounts[sessionID, default: 0]
             let newValue = afterQuestionsBySession[sessionID, default: sessionStates[sessionID]?.questions.count ?? 0]
             guard oldValue != newValue else { return nil }
             return "\(sessionID):\(oldValue)->\(newValue)"
         }
-        let permissionChanges = affectedVisibleSessions.compactMap { sessionID -> String? in
+        let _ = affectedVisibleSessions.compactMap { sessionID -> String? in
             let oldValue = beforePermissionCounts[sessionID, default: 0]
             let newValue = afterPermissionsBySession[sessionID, default: sessionStates[sessionID]?.permissions.count ?? 0]
             guard oldValue != newValue else { return nil }
