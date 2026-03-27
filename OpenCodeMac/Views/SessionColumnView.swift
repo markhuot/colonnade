@@ -349,7 +349,7 @@ private final class PaneFocusContainerNSView<Content: View>: NSView {
 }
 
 struct SessionColumnView: View {
-    private static let paneCornerRadius: CGFloat = 24
+    static let paneCornerRadius: CGFloat = 24
 
     @EnvironmentObject private var appState: OpenCodeAppModel
     @Environment(\.openCodeTheme) private var theme
@@ -359,6 +359,8 @@ struct SessionColumnView: View {
 
     let sessionID: String
     var chrome: SessionColumnChrome = .pane
+    var showsDiff = false
+    var onToggleDiff: (() -> Void)? = nil
     var onPaneDragChanged: ((CGFloat) -> Void)? = nil
     var onPaneDragEnded: (() -> Void)? = nil
 
@@ -379,97 +381,29 @@ struct SessionColumnView: View {
             guard appState.focusedSessionID != sessionID else { return }
             appState.focusSession(sessionID)
         }) {
-            VStack(spacing: 0) {
-                if chrome == .pane {
-                    SessionHeaderView(
-                        sessionID: sessionID,
-                        session: session,
-                        indicator: session?.indicator ?? SessionIndicator.resolve(status: nil, hasPendingPermission: false),
-                        contextUsageText: session?.contextUsageText,
-                        allowsPaneDrag: chrome == .pane,
-                        onPaneDragChanged: onPaneDragChanged,
-                        onPaneDragEnded: onPaneDragEnded
-                    )
-                    Divider()
-                }
-                SessionTranscriptSection(
-                    snapshot: SessionTranscriptSnapshot(
-                        transcriptRows: transcriptRows,
-                        questions: questions,
-                        thinkingBannerTitle: thinkingBannerTitle,
-                        availableSessions: availableSessions,
-                        latestTodoToolPartID: sessionState.latestTodoToolPartID,
-                        workspaceConnection: workspaceConnection
-                    ),
-                    sessionState: sessionState,
-                    onFocusSession: { sessionID in
-                        appState.focusSession(sessionID)
-                    },
-                    onAnswerQuestion: { request, answers in
-                        appState.answerQuestion(request, answers: answers)
-                    },
-                    onRejectQuestion: { request in
-                        appState.rejectQuestion(request)
-                    }
-                )
-                .equatable()
-                Divider()
-                SessionComposerSection(
-                    draftState: draftState,
-                    sessionID: sessionID,
+            HStack(spacing: 0) {
+                sessionPaneContent(
+                    session: session,
+                    transcriptRows: transcriptRows,
+                    questions: questions,
                     permissions: permissions,
-                    isFocused: isFocused,
-                    focusSession: {
-                        appState.focusSession(sessionID)
-                    },
-                    focusPermissionPrompt: {
-                        appState.focusSession(sessionID, focusPrompt: true)
-                    },
-                    answerPermission: { request, reply in
-                        appState.answerPermission(request, reply: reply)
-                    },
-                    sendMessage: { draft in
-                        appState.sendMessage(sessionID: sessionID, text: draft)
-                    },
-                    commandSuggestionProvider: { draft, cursorLocation in
-                        appState.slashCommandSuggestions(for: draft, sessionID: sessionID, cursorLocation: cursorLocation)
-                    },
-                    applySlashCommandSuggestion: { option, draft in
-                        appState.applyingSlashCommandSuggestion(option, to: draft, sessionID: sessionID)
-                    },
-                    modelOptionsProvider: {
-                        appState.modelOptions(for: sessionID)
-                    },
-                    agentOptionsProvider: {
-                        appState.agentOptions(for: sessionID)
-                    },
-                    selectedModelOptionProvider: {
-                        appState.selectedModelOption(for: sessionID)
-                    },
-                    selectedAgentKey: Binding(
-                        get: {
-                            let agentOptions = appState.agentOptions(for: sessionID)
-                            return appState.selectedAgentOption(for: sessionID)?.id ?? agentOptions.first?.id ?? ""
-                        },
-                        set: { appState.setSelectedAgent($0, for: sessionID) }
-                    ),
-                    selectedModelKey: Binding(
-                        get: {
-                            let modelOptions = appState.modelOptions(for: sessionID)
-                            return appState.selectedModelOption(for: sessionID)?.id ?? modelOptions.first?.id ?? ""
-                        },
-                        set: { appState.setSelectedModel($0, for: sessionID, updateDefault: MacModifierKeyState.isOptionPressed()) }
-                    ),
-                    selectedThinkingLevel: Binding(
-                        get: {
-                            let selectedModelOption = appState.selectedModelOption(for: sessionID)
-                            let thinkingLevels = [OpenCodeAppModel.defaultThinkingLevel] + (selectedModelOption?.thinkingLevels ?? [])
-                            return appState.selectedThinkingLevel(for: sessionID) ?? thinkingLevels.first ?? ""
-                        },
-                        set: { appState.setSelectedThinkingLevel($0, for: sessionID) }
-                    ),
-                    composerFocusRequestID: appState.promptFocusRequest?.sessionID == sessionID ? appState.promptFocusRequest?.id : nil
+                    availableSessions: availableSessions,
+                    workspaceConnection: workspaceConnection,
+                    thinkingBannerTitle: thinkingBannerTitle
                 )
+
+                if showsDiff {
+                    Divider()
+
+                    SessionDiffDrawerView(
+                        sessionState: sessionState,
+                        onClose: {
+                            onToggleDiff?()
+                        }
+                    )
+                    .frame(width: SessionDiffDrawerMetrics.macDrawerWidth)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -477,6 +411,119 @@ struct SessionColumnView: View {
         .background(backgroundView)
         .overlay { overlayView }
         .contentShape(Rectangle())
+        .animation(.easeInOut(duration: 0.22), value: showsDiff)
+        .onChange(of: showsDiff) { _, newValue in
+            guard newValue else { return }
+            if case .idle = sessionState.diffLoadState {
+                appState.refreshDiff(for: sessionID)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func sessionPaneContent(
+        session: SessionDisplay?,
+        transcriptRows: [TranscriptMessageRow],
+        questions: [QuestionRequest],
+        permissions: [PermissionRequest],
+        availableSessions: [SessionDisplay],
+        workspaceConnection: WorkspaceConnection?,
+        thinkingBannerTitle: String?
+    ) -> some View {
+        VStack(spacing: 0) {
+            if chrome == .pane {
+                SessionHeaderView(
+                    sessionID: sessionID,
+                    session: session,
+                    indicator: session?.indicator ?? SessionIndicator.resolve(status: nil, hasPendingPermission: false),
+                    contextUsageText: session?.contextUsageText,
+                    allowsPaneDrag: chrome == .pane,
+                    showsDiff: showsDiff,
+                    onToggleDiff: onToggleDiff,
+                    onPaneDragChanged: onPaneDragChanged,
+                    onPaneDragEnded: onPaneDragEnded
+                )
+                Divider()
+            }
+            SessionTranscriptSection(
+                snapshot: SessionTranscriptSnapshot(
+                    transcriptRows: transcriptRows,
+                    questions: questions,
+                    thinkingBannerTitle: thinkingBannerTitle,
+                    availableSessions: availableSessions,
+                    latestTodoToolPartID: sessionState.latestTodoToolPartID,
+                    workspaceConnection: workspaceConnection
+                ),
+                sessionState: sessionState,
+                onFocusSession: { sessionID in
+                    appState.focusSession(sessionID)
+                },
+                onAnswerQuestion: { request, answers in
+                    appState.answerQuestion(request, answers: answers)
+                },
+                onRejectQuestion: { request in
+                    appState.rejectQuestion(request)
+                }
+            )
+            .equatable()
+            Divider()
+            SessionComposerSection(
+                draftState: draftState,
+                sessionID: sessionID,
+                permissions: permissions,
+                isFocused: isFocused,
+                focusSession: {
+                    appState.focusSession(sessionID)
+                },
+                focusPermissionPrompt: {
+                    appState.focusSession(sessionID, focusPrompt: true)
+                },
+                answerPermission: { request, reply in
+                    appState.answerPermission(request, reply: reply)
+                },
+                sendMessage: { draft in
+                    appState.sendMessage(sessionID: sessionID, text: draft)
+                },
+                commandSuggestionProvider: { draft, cursorLocation in
+                    appState.slashCommandSuggestions(for: draft, sessionID: sessionID, cursorLocation: cursorLocation)
+                },
+                applySlashCommandSuggestion: { option, draft in
+                    appState.applyingSlashCommandSuggestion(option, to: draft, sessionID: sessionID)
+                },
+                modelOptionsProvider: {
+                    appState.modelOptions(for: sessionID)
+                },
+                agentOptionsProvider: {
+                    appState.agentOptions(for: sessionID)
+                },
+                selectedModelOptionProvider: {
+                    appState.selectedModelOption(for: sessionID)
+                },
+                selectedAgentKey: Binding(
+                    get: {
+                        let agentOptions = appState.agentOptions(for: sessionID)
+                        return appState.selectedAgentOption(for: sessionID)?.id ?? agentOptions.first?.id ?? ""
+                    },
+                    set: { appState.setSelectedAgent($0, for: sessionID) }
+                ),
+                selectedModelKey: Binding(
+                    get: {
+                        let modelOptions = appState.modelOptions(for: sessionID)
+                        return appState.selectedModelOption(for: sessionID)?.id ?? modelOptions.first?.id ?? ""
+                    },
+                    set: { appState.setSelectedModel($0, for: sessionID, updateDefault: MacModifierKeyState.isOptionPressed()) }
+                ),
+                selectedThinkingLevel: Binding(
+                    get: {
+                        let selectedModelOption = appState.selectedModelOption(for: sessionID)
+                        let thinkingLevels = [OpenCodeAppModel.defaultThinkingLevel] + (selectedModelOption?.thinkingLevels ?? [])
+                        return appState.selectedThinkingLevel(for: sessionID) ?? thinkingLevels.first ?? ""
+                    },
+                    set: { appState.setSelectedThinkingLevel($0, for: sessionID) }
+                ),
+                composerFocusRequestID: appState.promptFocusRequest?.sessionID == sessionID ? appState.promptFocusRequest?.id : nil
+            )
+        }
     }
 
     private func deduplicatedPermissions(_ permissions: [PermissionRequest]) -> [PermissionRequest] {
@@ -658,6 +705,8 @@ private struct SessionHeaderView: View {
     let indicator: SessionIndicator
     let contextUsageText: String?
     var allowsPaneDrag = false
+    var showsDiff = false
+    var onToggleDiff: (() -> Void)? = nil
     var onPaneDragChanged: ((CGFloat) -> Void)? = nil
     var onPaneDragEnded: (() -> Void)? = nil
 
@@ -701,10 +750,28 @@ private struct SessionHeaderView: View {
                         .font(.caption)
                         .foregroundStyle(theme.secondaryText)
                 }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    appState.focusSession(sessionID)
+                }
 
                 Spacer(minLength: 10)
 
                 HStack(spacing: 8) {
+                    if let onToggleDiff {
+                        Button(action: onToggleDiff) {
+                            Label("Diff", systemImage: "doc.text.magnifyingglass")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(
+                                    Capsule(style: .continuous)
+                                        .fill(showsDiff ? theme.accentSubtleBackground : theme.mutedSurfaceBackground)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
                     Button {
                         if let workspaceConnection = appState.workspaceConnection {
                             openWindow(
@@ -1240,7 +1307,7 @@ private struct ThinkingStatusBanner: View {
 
     private func shimmeringTitle(_ title: String) -> some View {
         titleLabel(title)
-            .foregroundStyle(Color(nsColor: theme.secondaryTextColor))
+            .foregroundStyle(theme.secondaryText)
             .overlay {
                 TimelineView(.animation) { context in
                     GeometryReader { geometry in
@@ -1275,7 +1342,7 @@ private struct ThinkingStatusBanner: View {
             ZStack(alignment: .leading) {
                 if let outgoingTitle {
                     titleLabel(outgoingTitle)
-                        .foregroundStyle(Color(nsColor: theme.secondaryTextColor))
+                        .foregroundStyle(theme.secondaryText)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
@@ -1395,13 +1462,13 @@ private struct MessageCard: View {
             || messageState.info.error != nil
         let renderedMessageText = SessionTranscriptSupport.messageAttributedText(
             visibleText,
-            font: NSFont.systemFont(ofSize: 14),
-            color: theme.primaryTextColor
+            font: .system(size: 14),
+            color: theme.primaryText
         )
         let renderedReasoningText = SessionTranscriptSupport.messageAttributedText(
             reasoningText,
-            font: NSFont.systemFont(ofSize: 13),
-            color: theme.secondaryTextColor
+            font: .system(size: 13),
+            color: theme.secondaryText
         )
 
         VStack(alignment: .leading, spacing: 8) {
@@ -1413,16 +1480,14 @@ private struct MessageCard: View {
                 VStack(alignment: .leading, spacing: 10) {
                     if !visibleText.isEmpty {
                         SelectableMessageTextView(
-                            attributedText: renderedMessageText,
-                            linkColor: theme.accentColor
+                            attributedText: renderedMessageText
                         )
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
                     if showsThinking, !reasoningText.isEmpty {
                         SelectableMessageTextView(
-                            attributedText: renderedReasoningText,
-                            linkColor: theme.accentColor
+                            attributedText: renderedReasoningText
                         )
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
