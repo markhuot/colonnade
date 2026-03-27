@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import OSLog
 
 @MainActor
 private enum ViewRenderDebugRegistry {
@@ -177,6 +178,8 @@ private struct PaneShadowModifier: ViewModifier {
     }
 }
 
+private let paneFocusLogger = Logger(subsystem: "ai.opencode.app", category: "pane-focus")
+
 enum PaneFocusOutlineState {
     static func showsFocusOutline(
         chrome: SessionColumnChrome,
@@ -321,15 +324,23 @@ private final class PaneFocusContainerNSView<Content: View>: NSView {
 
     private func updateFocusState() {
         guard let window else {
+            paneFocusLogger.notice("updateFocusState: no window, setting focused to false")
             isFocusedBinding.wrappedValue = false
             return
         }
 
-        let isFocused = window.isKeyWindow && containsFirstResponder(window.firstResponder)
+        let responder = window.firstResponder
+        let isKeyWindow = window.isKeyWindow
+        let containsFirstResponder = containsFirstResponder(responder)
+        let isFocused = isKeyWindow && containsFirstResponder
+        
+        paneFocusLogger.notice("updateFocusState: isKeyWindow=\(isKeyWindow), firstResponder=\(String(describing: responder)), containsFirstResponder=\(containsFirstResponder), currentlyFocused=\(self.isFocusedBinding.wrappedValue)")
+        
         let didChangeFocus = isFocusedBinding.wrappedValue != isFocused
         isFocusedBinding.wrappedValue = isFocused
 
         if isFocused, didChangeFocus {
+            paneFocusLogger.notice("updateFocusState: calling onFocus")
             onFocus()
         }
     }
@@ -401,7 +412,9 @@ private final class FocusableContentNSView<Content: View>: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        paneFocusLogger.notice("FocusableContentNSView mouseDown: attempting to become firstResponder")
         window?.makeFirstResponder(self)
+        paneFocusLogger.notice("FocusableContentNSView mouseDown: firstResponder now = \(String(describing: self.window?.firstResponder))")
     }
 }
 
