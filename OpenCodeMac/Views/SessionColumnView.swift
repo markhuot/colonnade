@@ -348,6 +348,63 @@ private final class PaneFocusContainerNSView<Content: View>: NSView {
     }
 }
 
+private struct FocusableContent<Content: View>: NSViewRepresentable {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    func makeNSView(context: Context) -> FocusableContentNSView<Content> {
+        FocusableContentNSView(rootView: content)
+    }
+
+    func updateNSView(_ nsView: FocusableContentNSView<Content>, context: Context) {
+        nsView.update(rootView: content)
+    }
+}
+
+private final class FocusableContentNSView<Content: View>: NSView {
+    private let hostingView: NSHostingView<Content>
+
+    override var acceptsFirstResponder: Bool {
+        true
+    }
+
+    override var canBecomeKeyView: Bool {
+        true
+    }
+
+    init(rootView: Content) {
+        hostingView = NSHostingView(rootView: rootView)
+        super.init(frame: .zero)
+
+        translatesAutoresizingMaskIntoConstraints = false
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hostingView)
+
+        NSLayoutConstraint.activate([
+            hostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            hostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            hostingView.topAnchor.constraint(equalTo: topAnchor),
+            hostingView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func update(rootView: Content) {
+        hostingView.rootView = rootView
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+    }
+}
+
 struct SessionColumnView: View {
     static let paneCornerRadius: CGFloat = 24
 
@@ -432,17 +489,19 @@ struct SessionColumnView: View {
     ) -> some View {
         VStack(spacing: 0) {
             if chrome == .pane {
-                SessionHeaderView(
-                    sessionID: sessionID,
-                    session: session,
-                    indicator: session?.indicator ?? SessionIndicator.resolve(status: nil, hasPendingPermission: false),
-                    contextUsageText: session?.contextUsageText,
-                    allowsPaneDrag: chrome == .pane,
-                    showsDiff: showsDiff,
-                    onToggleDiff: onToggleDiff,
-                    onPaneDragChanged: onPaneDragChanged,
-                    onPaneDragEnded: onPaneDragEnded
-                )
+                FocusableContent {
+                    SessionHeaderView(
+                        sessionID: sessionID,
+                        session: session,
+                        indicator: session?.indicator ?? SessionIndicator.resolve(status: nil, hasPendingPermission: false),
+                        contextUsageText: session?.contextUsageText,
+                        allowsPaneDrag: chrome == .pane,
+                        showsDiff: showsDiff,
+                        onToggleDiff: onToggleDiff,
+                        onPaneDragChanged: onPaneDragChanged,
+                        onPaneDragEnded: onPaneDragEnded
+                    )
+                }
                 Divider()
             }
             SessionTranscriptSection(
